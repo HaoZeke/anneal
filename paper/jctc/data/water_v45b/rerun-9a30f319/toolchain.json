@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "package": "tblite",
+  "version": "0.7.0",
+  "source_commit": "fa8a4416e8fe093d0075bc10ac875494c2a449a9",
+  "metadata": "fpm.toml",
+  "metadata_sha256": "86458d34da55b0817f2a025b00ba599680d40bc899468afabd2ba3783c032100",
+  "metadata_url": "https://raw.githubusercontent.com/tblite/tblite/fa8a4416e8fe093d0075bc10ac875494c2a449a9/fpm.toml"
+}

@@ -2,7 +2,7 @@
 # Copyright (c) anneal developers
 """Gupta Au55, twelve seeds, the paper budget.
 
-The search sphere and the neighbour shell follow the opening quench
+The search sphere and the neighbor shell follow the opening quench
 when that quench is outside the reduced unit. A hit is a quenched
 energy within 0.001 of the Cambridge minimum. GMIN rows already stored
 in ``bench/au55-gupta`` are copied and not launched again.
@@ -25,6 +25,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
+    host_label,
     machine_columns,
     machine_fieldnames,
     read_built_gmin_provenance,
@@ -311,7 +312,7 @@ def run_panel(
         capture_output=True,
         text=True,
     ).stdout.strip()
-    host = os.uname().nodename
+    host = host_label(os.uname().nodename)
     machine = machine_columns()
     anneal = [
         {

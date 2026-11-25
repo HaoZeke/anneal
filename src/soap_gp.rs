@@ -9,8 +9,8 @@
 //! `crate::gpr`'s module docs.
 //!
 //! Its kernel compares pair `(i, j)` of one structure with pair `(i, j)` of
-//! another, so it is not invariant to relabelling the points. On 13 points a
-//! relabelling that changes nothing physical moved the posterior mean by 218
+//! another, so it is not invariant to relabeling the points. On 13 points a
+//! relabeling that changes nothing physical moved the posterior mean by 218
 //! standard deviations and raised the reported standard deviation from 1.42e-4
 //! to 9.74e-1. That is fixable, by canonicalising with
 //! `crate::shape::CanonicalOrder`, at 2.4 ms per structure.
@@ -628,7 +628,7 @@ mod tests {
     }
 
     #[test]
-    fn a_relabelling_cannot_move_this_kernel() {
+    fn a_relabeling_cannot_move_this_kernel() {
         // The property the whole module exists for, at the level this file can
         // check: the kernel reads the descriptor and nothing else, so two
         // structures with the same descriptor are the same point. That the

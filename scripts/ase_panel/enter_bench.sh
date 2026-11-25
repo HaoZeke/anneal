@@ -50,7 +50,7 @@ fi
 ROWS=${ASE_PANEL_ROWS:-$DEFAULT_ROWS}
 : "${ASE_PANEL_REVISION:?set ASE_PANEL_REVISION to the exact revision used to build the binaries}"
 REV=$ASE_PANEL_REVISION
-if [[ ! $REV =~ ^[0-9a-f]{40}$ ]]; then
+if ! python3 "$ROOT/scripts/revision_reach.py" full-sha "$REV"; then
   echo "ASE_PANEL_REVISION must be a full lowercase commit SHA" >&2
   exit 2
 fi

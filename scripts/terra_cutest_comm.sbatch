@@ -25,7 +25,7 @@ mkdir -p "$OUTDIR"
 cd "$ANNEAL"
 test -f "$MANIFEST"
 test -x "$VERIFY/bin/python"
-echo "host=$(hostname) job=${SLURM_JOB_ID:-} shard=${SLURM_ARRAY_TASK_ID:-} methods=$METHODS"
+echo "host=$(python3 "$ANNEAL/scripts/machine_provenance.py" host-label) job=${SLURM_JOB_ID:-} shard=${SLURM_ARRAY_TASK_ID:-} methods=$METHODS"
 echo "python=$VERIFY/bin/python"
 PY=$VERIFY/bin/python
 "$PY" experiments/scripts/sota_cutest.py \

@@ -3,7 +3,7 @@
 # Terra compute-node test and occupancy build of the per-replica brain tree.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "terra_build_brains.sh: run under srun, not on $(hostname)" >&2
+  echo "terra_build_brains.sh: run under srun, not directly" >&2
   exit 1
 fi
 ROOT=${LJ_ROOT:-$HOME/anneal-occ-brains}
@@ -21,7 +21,7 @@ if ! git diff --quiet HEAD --; then
   exit 2
 fi
 git rev-parse HEAD >SOURCE_COMMIT
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 echo "source=$(cat SOURCE_COMMIT)"
 echo "rustc=$(rustc --version)"
 # Occupancy contract, not crate CI. cloud_hop_compare SOAP on/off is

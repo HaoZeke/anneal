@@ -28,7 +28,7 @@ elja_enter_scratch() {
   fi
   local scratchlocation=/scratch/users
   if [[ ! -d $scratchlocation ]]; then
-    echo "elja_scratch: $scratchlocation is absent on $(hostname)" >&2
+    echo "elja_scratch: $scratchlocation is absent on this node" >&2
     exit 1
   fi
   if elja_on_home_filer "$scratchlocation"; then

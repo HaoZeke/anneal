@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
 
 import paired_stats
 import results_jcc
+import revision_reach
 
 ROOT = Path(__file__).resolve().parents[1]
 WATER_DATA = ROOT / "data" / "water_v45b"
@@ -169,7 +170,7 @@ def read_provenance(data: Path) -> dict[str, str]:
         if not line or line.startswith("#"):
             continue
         first, _, rest = line.partition(" ")
-        if len(first) == 64 and all(c in "0123456789abcdef" for c in first):
+        if revision_reach.FULL_PIN_DIGEST.fullmatch(first):
             keys[f"file:{rest.strip()}"] = first
         else:
             keys[first] = rest.strip()

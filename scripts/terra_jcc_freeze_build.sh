@@ -7,7 +7,7 @@
 # frozen method rather than the earlier LeanBurst stack.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "terra_jcc_freeze_build.sh: run under srun/sbatch, not on $(hostname)" >&2
+  echo "terra_jcc_freeze_build.sh: run under srun/sbatch, not directly" >&2
   exit 1
 fi
 ROOT=${JCC_ROOT:-$HOME/Git/Github/Rust/anneal}
@@ -16,7 +16,7 @@ export IRA_LIB_DIR=${IRA_LIB_DIR:-$HOME/ira/lib}
 export LD_LIBRARY_PATH="${IRA_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 cd "$ROOT"
 
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 echo "rustc=$(rustc --version)"
 echo "recommended():"
 sed -n '/pub fn recommended(n_points/,+6p' src/methods/cluster_hopping/config.rs

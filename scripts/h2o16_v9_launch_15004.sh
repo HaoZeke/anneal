@@ -16,8 +16,7 @@ mkdir -p "$OUT"
 {
   echo "wrapper: sudo unshare --uts sh -c 'hostname bench; exec <cmd>'"
   echo "timed_commands: anneal search, anneal xtb score, crest search, crest xtb score"
-  echo "uname_n $(uname -n)"
-  echo "proc_hostname $(tr -d '\n' < /proc/sys/kernel/hostname)"
+  echo "host_label $(python3 "$(dirname "$0")/machine_provenance.py" host-label)"
   echo "date_utc $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "nproc $(nproc)"
   echo "rustc $(rustc -V)"
@@ -44,8 +43,8 @@ mkdir -p "$OUT"
   echo "=== meminfo ==="
   cat /proc/meminfo
 } > "$OUT/host-before.txt"
-host=$(tr -d '\n' < /proc/sys/kernel/hostname)
-if [[ $host != bench || $(uname -n) != bench ]]; then
+host=$(python3 "$(dirname "$0")/machine_provenance.py" host-label)
+if [[ $host != bench ]]; then
   echo "refusing to search: hostname is not bench" >&2
   exit 1
 fi
@@ -60,8 +59,7 @@ python3 -c 'import sys; a,b,e=sys.argv[1:]; print("end_unix %s" % b); print("wal
   "$start_unix" "$end_unix" "$ec" >> "$OUT/time-driver.txt"
 {
   echo "=== end ==="
-  echo "uname_n $(uname -n)"
-  echo "proc_hostname $(tr -d '\n' < /proc/sys/kernel/hostname)"
+  echo "host_label $(python3 "$(dirname "$0")/machine_provenance.py" host-label)"
   echo "date_utc $(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "nproc $(nproc)"
   echo "rustc $(rustc -V)"

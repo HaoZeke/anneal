@@ -14,6 +14,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from machine_provenance import host_label  # noqa: E402
 
 ROW_FIELDS = [
     "session",
@@ -338,8 +340,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--plan-only", action="store_true")
     args = parser.parse_args(argv)
 
-    if socket.gethostname() != "bench":
-        raise SystemExit(f"hostname is {socket.gethostname()}, expected bench")
+    if host_label(socket.gethostname()) != "bench":
+        raise SystemExit(f"hostname is {host_label(socket.gethostname())}, expected bench")
 
     root = Path(__file__).resolve().parent.parent.parent
     paper = load_module("paper_0120_run_panel", root / "scripts/paper_0120/run_panel.py")
@@ -446,7 +448,7 @@ def main(argv: list[str]) -> int:
 
     write_csv(args.unsupported, UNSUPPORTED_FIELDS, unsupported)
     session = now_session()
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     specs_by_key = {(str(spec["panel"]), str(spec["system"])): spec for spec in supported}
     done: set[tuple[str, str, int, str]] = set()
     for row in existing_rows:

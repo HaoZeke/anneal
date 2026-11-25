@@ -36,7 +36,7 @@
 //! dimer and NEB drivers, a separate axis from the covariance.
 //!
 //! So the kernel compares pair `(i, j)` of one structure with pair `(i, j)` of
-//! another, and relabelling the points changes the distance. Inside a
+//! another, and relabeling the points changes the distance. Inside a
 //! basin-hopping trajectory that is usually harmless, because a structure and
 //! its own relaxed image carry the same labels. Between two independently
 //! generated structures it is not harmless at all, and it is the reason a
@@ -84,17 +84,17 @@
 //!
 //! # Permutation, measured
 //!
-//! Relabelling the points of a cluster changes nothing physical: same energy to
+//! Relabeling the points of a cluster changes nothing physical: same energy to
 //! 1e-12, same structure. Through this kernel at 13 points it changes a great
-//! deal. As labelled, the posterior mean sits 2.6e-4 from the truth with a
-//! standard deviation of 1.42e-4. Relabelled, it sits 3.1e-2 from the truth
+//! deal. As labeled, the posterior mean sits 2.6e-4 from the truth with a
+//! standard deviation of 1.42e-4. Relabeled, it sits 3.1e-2 from the truth
 //! with a standard deviation of 9.74e-1. The two predictions differ by 218
 //! standard deviations of the first, and the reported uncertainty rises by a
-//! factor of 6900: the model treats a relabelled copy of a structure it has
+//! factor of 6900: the model treats a relabeled copy of a structure it has
 //! effectively been shown as a structure it has never seen.
 //!
 //! Canonicalising with [`crate::shape::CanonicalOrder`] fixes it exactly. A
-//! distorted structure and a relabelled copy of it canonicalise to the same
+//! distorted structure and a relabeled copy of it canonicalise to the same
 //! coordinates at 2.9e-16 root-mean-square, at 38 points, and it costs 2.4 ms
 //! per structure warm. That is 750 gradients, which is real but is one part in
 //! 1300 of the variance dispatch it would sit next to. Permutation is a solved
@@ -1201,8 +1201,8 @@ mod tests {
     }
 
     #[test]
-    fn relabelling_a_structure_moves_the_posterior() {
-        // The blocking question for this kernel. Relabelling the points of a
+    fn relabeling_a_structure_moves_the_posterior() {
+        // The blocking question for this kernel. Relabeling the points of a
         // cluster changes nothing physical: same energy, same multiset of
         // distances, same structure. A model of the potential energy surface
         // that answers differently for the two is wrong about one of them, and
@@ -1235,12 +1235,12 @@ mod tests {
         let perm = derangement(n);
         let xp = relabel(&x, &perm);
 
-        // The relabelling really is physical identity.
+        // The relabeling really is physical identity.
         let (e_true, _) = lj(&x, n);
         let (e_perm, _) = lj(&xp, n);
         assert!(
             (e_true - e_perm).abs() < 1e-12,
-            "the relabelling changed the energy by {}",
+            "the relabeling changed the energy by {}",
             (e_true - e_perm).abs()
         );
 
@@ -1248,9 +1248,9 @@ mod tests {
         let (mp, _, vp) = gp.predict(&xp).expect("prediction failed");
         let gap = (m - mp).abs();
         println!(
-            "relabelling: true {e_true:.6}; as labelled {m:.6} sd {:.3e}; \
-             relabelled {mp:.6} sd {:.3e}; gap {gap:.4e} = {:.1} sd; \
-             error as labelled {:.3e}, relabelled {:.3e}",
+            "relabeling: true {e_true:.6}; as labeled {m:.6} sd {:.3e}; \
+             relabeled {mp:.6} sd {:.3e}; gap {gap:.4e} = {:.1} sd; \
+             error as labeled {:.3e}, relabeled {:.3e}",
             v.sqrt(),
             vp.sqrt(),
             gap / v.sqrt().max(1e-300),

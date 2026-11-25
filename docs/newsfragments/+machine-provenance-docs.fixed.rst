@@ -1,0 +1,1 @@
+The benchmark row provenance notes describe how ``machine_id`` and ``cpu_model`` are read on macOS (``ioreg`` and ``sysctl``), the order of the Linux sources, and the ``ANNEAL_MACHINE_ID`` and ``ANNEAL_CPU_MODEL`` hand-off.

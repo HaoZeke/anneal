@@ -1,0 +1,1 @@
+Every benchmark row writer now reads the ``ANNEAL_MACHINE_ID`` and ``ANNEAL_CPU_MODEL`` hand-off that the row provenance notes describe, through ``machine_columns()``. Only one of the two, or an identity that is not a salted SHA-256 digest, is refused. The unused ``environment()`` helper is gone.

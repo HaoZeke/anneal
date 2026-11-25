@@ -36,6 +36,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from paper_data import fetch_paper_data
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from machine_provenance import host_label  # noqa: E402
 
 SEEDS = range(6)
 ARMS = ("crest", "fair", "paper4000")
@@ -53,8 +55,8 @@ def fail(message: str) -> None:
 
 
 def require_bench(work: Path) -> None:
-    if socket.gethostname() != "bench":
-        fail(f"hostname is {socket.gethostname()}, want bench")
+    if host_label(socket.gethostname()) != "bench":
+        fail(f"hostname is {host_label(socket.gethostname())}, want bench")
     if not str(work).startswith("/work/") and work != Path("/work"):
         fail(f"work directory {work} is not under /work")
 
@@ -219,8 +221,41 @@ def write_csv(path: Path, rows: list[list[object]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["structure", "seed", "old_energy_Eh", "new_energy_Eh", "gap_Eh"])
+        writer.writerow(
+            [
+                "structure",
+                "seed",
+                "old_energy_Eh",
+                "new_energy_Eh",
+                "gap_Eh",
+                "code_revision",
+                "rgpot_revision",
+                "host",
+            ]
+        )
         writer.writerows(rows)
+
+
+def resolve_code_revision(repo_root: Path, override: str | None) -> str:
+    if override:
+        return override.strip()
+    return subprocess.check_output(["git", "-C", str(repo_root), "rev-parse", "HEAD"], text=True).strip()
+
+
+def resolve_rgpot_revision(logs: Path, override: str | None) -> str:
+    if override:
+        return override.strip()
+    versions = logs / "VERSIONS"
+    if versions.is_file():
+        for line in versions.read_text().splitlines():
+            if line.startswith("rgpot_revision="):
+                value = line.split("=", 1)[1].strip()
+                if value:
+                    return value
+    env_rev = os.environ.get("RGPOT_REVISION", "").strip()
+    if env_rev:
+        return env_rev
+    return "unrecorded"
 
 
 def main() -> None:
@@ -235,12 +270,17 @@ def main() -> None:
         type=Path,
         default=paper / "data" / "hexamer-xtb680-repolish.csv",
     )
+    parser.add_argument("--code-revision")
+    parser.add_argument("--rgpot-revision")
     args = parser.parse_args()
     require_bench(args.work)
     if not args.xtb.is_file():
         fail(f"missing xtb binary {args.xtb}")
     fetch_paper_data()
     logs = paper / "logs" / "water"
+    code_revision = resolve_code_revision(here.parents[3], args.code_revision)
+    rgpot_rev = resolve_rgpot_revision(logs, args.rgpot_revision)
+    host = host_label(socket.gethostname())
     numbers = logs / "NUMBERS.tsv"
     if not numbers.is_file():
         fail(f"missing {numbers}")
@@ -278,7 +318,16 @@ def main() -> None:
             else:
                 gap = new_energy - reference_energy
             rows.append(
-                [arm, seed, fmt(old[(seed, arm)]["energy"]), fmt(new_energy), fmt(gap)]
+                [
+                    arm,
+                    seed,
+                    fmt(old[(seed, arm)]["energy"]),
+                    fmt(new_energy),
+                    fmt(gap),
+                    code_revision,
+                    rgpot_rev,
+                    host,
+                ]
             )
     write_csv(args.csv, rows)
 

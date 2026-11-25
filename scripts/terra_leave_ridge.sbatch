@@ -18,7 +18,7 @@ ROOT=${LJ_ROOT:-$HOME/anneal-leave-ridge}
 cd "$ROOT"
 mkdir -p probe
 git rev-parse HEAD >SOURCE_COMMIT
-echo "{\"kind\":\"build\",\"head\":\"$(git rev-parse HEAD)\",\"host\":\"$(hostname)\"}"
+echo "{\"kind\":\"build\",\"head\":\"$(git rev-parse HEAD)\",\"host\":\"$(python3 "$ROOT/scripts/machine_provenance.py" host-label)\"}"
 cargo build --release --features featomic --example leave_packing_probe
 exec ./target/release/examples/leave_packing_probe \
   "${LEAVE_PROBE_N:-0}" \

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Project the Lennard-Jones landscape runs with sketch-map, as campaign_landscape.py did at 028d995.
+"""Project the Lennard-Jones landscape runs with sketch-map.
 
 The inputs are the dump selections of data/landscapes_7695255/ whose digests its
-figure provenance records, and the reference minima that script pinned, copied byte for
-byte from scripts/ of 028d995 into data/system_visuals/sketchmap/. The steps are those of
-the script of record, in its order and with its random stream: at most CAP minima of each
+figure provenance records, and the reference minima stored in
+data/system_visuals/sketchmap/. The steps follow those inputs, in this script's
+order and with its random stream: at most CAP minima of each
 arm, its deepest kept; the references and each arm's deepest minimum pinned as the first
 landmarks; the sorted smoothed coordination numbers of chemparseplot as the descriptor;
 the median distance of 400 rows drawn from that stream as sigma; and dimlandmark then

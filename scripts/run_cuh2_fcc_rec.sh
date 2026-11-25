@@ -15,7 +15,7 @@ esac
 export RUSTUP_TOOLCHAIN=$tool
 lib=${1:-engines/librgpot_cuh2.so}
 con=examples/fixtures/cuh2_fcc_slab.con
-outdir=paper/jctc/logs
+outdir=${CUH2_FCC_REC_OUTPUT:-/work/cuh2-fcc-rec}
 receipt=$outdir/cuh2-hardware-receipt.txt
 
 if [[ ! -s $lib ]]; then
@@ -36,9 +36,9 @@ capture() {
   printf 'script\n'
   printf 'scripts/run_cuh2_fcc_rec.sh\n'
   printf 'host\n'
-  hostname
+  python3 scripts/machine_provenance.py host-label
   printf 'boot_id\n'
-  cat /proc/sys/kernel/random/boot_id
+  python3 scripts/machine_provenance.py boot-label
   printf 'uptime\n'
   uptime
   printf 'cpuinfo_mhz\n'

@@ -21,6 +21,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
+from machine_provenance import BOOT_ID_PATH, boot_label, host_label, machine_columns  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 # Set before NumPy or Numba read the variables.
@@ -269,22 +270,16 @@ def git_lines() -> list[str]:
 
 
 def host_lines() -> list[str]:
-    model = "unknown"
-    cpuinfo = Path("/proc/cpuinfo")
-    if cpuinfo.is_file():
-        for line in cpuinfo.read_text().splitlines():
-            if line.startswith("model name"):
-                model = " ".join(line.split(":", 1)[1].split())
-                break
+    machine = machine_columns()
     cores = os.cpu_count()
     return [
-        f"host={socket.gethostname()}",
-        f"machine_id={read_first('/etc/machine-id')}",
-        f"boot_id={read_first('/proc/sys/kernel/random/boot_id')}",
+        f"host={host_label(socket.gethostname())}",
+        f"machine_id={machine['machine_id']}",
+        f"boot_id={boot_label() if BOOT_ID_PATH.is_file() else 'absent'}",
         f"platform={platform.platform()}",
         f"machine={platform.machine()}",
         f"processor_count={cores}",
-        f"model={model}",
+        f"model={machine['cpu_model']}",
         "thread_pins=" + ",".join(f"{key}={value}" for key, value in THREAD_PINS.items()),
     ]
 

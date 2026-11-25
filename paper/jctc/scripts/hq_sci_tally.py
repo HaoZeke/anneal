@@ -5,7 +5,7 @@
 A hexamer hit is a finite best within 0.01 eV of the lowest finite best.
 An inf best is recorded as best=None and is not a hit.
 A copper hit is a finite best below the reference plus its tolerance.
-The reference is -415.971529 eV.
+The reference is the target_eV column of bench/copper-slab/rows.csv.
 scripts/elja_jcc_molslab_ensemble.sh line 81 sets that target.
 scripts/elja_hq_sci_molslab_bank.sh line 121 sets it too.
 Commit a8f1092fc8d6937b34e34a18bc50394a559ca9f3 names it the start energy.
@@ -15,6 +15,7 @@ The copper block prefers cuh2_fcc_rec_N.out and falls back to .txt.
 """
 from __future__ import annotations
 
+import csv
 import math
 import re
 import sys
@@ -26,9 +27,28 @@ if str(ROOT / "scripts") not in sys.path:
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 HIT_ABOVE_EV = 0.01
-REFERENCE_EV = -415.971529
 REFERENCE_TOL_EV = DEFAULT_HIT_TOL
 BEST = re.compile(r"seed \d+: best (\S+) eV")
+COPPER_ROWS = ROOT / "bench" / "copper-slab" / "rows.csv"
+
+
+def copper_rows(path: Path = COPPER_ROWS) -> list[dict[str, str]]:
+    """The committed copper bests, target, gaps, and the command that wrote the logs."""
+    with path.open(newline="") as handle:
+        rows = list(csv.DictReader(line for line in handle if line.strip() and not line.startswith("#")))
+    if not rows:
+        raise SystemExit(f"{path}: no copper rows")
+    return rows
+
+
+def copper_target(path: Path = COPPER_ROWS) -> float:
+    targets = {row["target_eV"] for row in copper_rows(path)}
+    if len(targets) != 1:
+        raise SystemExit(f"{path}: target_eV is not unique")
+    return float(next(iter(targets)))
+
+
+REFERENCE_EV = copper_target()
 
 
 def best_token(path: Path) -> str:

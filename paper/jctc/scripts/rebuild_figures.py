@@ -23,7 +23,6 @@ STEPS = (
     ("fig_algorithm_stack.py", ("algorithm_stack.pdf",)),
     ("fig_rec_arms.py", ("rec_arms.pdf",)),
     ("fig_lj75_ecdf.py", ("lj75_ecdf.pdf",)),
-    ("fig_water_crest.py", ("water_crest.pdf",)),
     ("fig_landfold_maps.py", ("landfold_maps.pdf",)),
     ("fig_systems.py", ("systems.pdf",)),
     ("fig_si_structures.py", ("si_structures.pdf",)),

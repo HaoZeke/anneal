@@ -32,7 +32,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import machine_columns, read_built_gmin_provenance  # noqa: E402
+from machine_provenance import host_label, machine_columns, read_built_gmin_provenance  # noqa: E402
 from gmin_pin import read_built_revision  # noqa: E402
 
 # N=38 and N=55 are the LJ paper map. N=80 is not in it.
@@ -68,10 +68,20 @@ SC_ROWS = {
 # Doye and Wales's basin-hopping kT/eps for each row, New J. Chem. 22, 733 (1998).
 BASIN_HOPPING_TEMPERATURE = {"126": 30.0, "108": 5.0, "96": 10.0}
 # The STEP line of examples/h2h_gmin_lj.data is in sigma. A Lennard-Jones
-# nearest neighbour is 2**(1/6) sigma and a Sutton-Chen one is a/sqrt(2),
-# so the same displacement per neighbour distance is this many a per sigma.
+# nearest neighbor is 2**(1/6) sigma and a Sutton-Chen one is a/sqrt(2),
+# so the same displacement per neighbor distance is this many a per sigma.
 SC_LENGTH_PER_LJ = 2.0**-0.5 / 2.0 ** (1.0 / 6.0)
 LJ_STEP = 0.40
+
+
+def sc_step() -> float:
+    """GMIN STEP in units of a: the LJ step times the Sutton-Chen length per sigma.
+
+    LJ_STEP is the displacement in Lennard-Jones sigma. SC_LENGTH_PER_LJ is a
+    nearest-neighbor distance, a/sqrt(2), divided by the Lennard-Jones one,
+    2**(1/6) sigma.
+    """
+    return LJ_STEP * SC_LENGTH_PER_LJ
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
 ARMS = ("anneal", "gmin")
 SCHEDULE_SEED = 20261115
@@ -165,7 +175,7 @@ def data_text(system: str, steps: int) -> str:
         "CENTRE",
         f"TEMPERATURE {BASIN_HOPPING_TEMPERATURE[family]}",
         f"STEPS {steps} 1.0",
-        f"STEP {LJ_STEP * SC_LENGTH_PER_LJ:.6f} 0.51",
+        f"STEP {sc_step():.6f} 0.51",
         "NEWRESTART 40",
         "",
     ]
@@ -318,7 +328,7 @@ def summarise(rows: list[dict], head: str, revision: str) -> list[dict[str, str]
                     "anneal_head": head,
                     "gmin_revision": revision,
                     "code_revision": head if arm == "anneal" else revision,
-                    "host": os.uname().nodename,
+                    "host": host_label(os.uname().nodename),
                     **machine_columns(),
                 }
             )
@@ -372,7 +382,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--head-file", type=Path, required=True)
     parser.add_argument("--only", nargs=3, metavar=("SYSTEM", "SEED", "ARM"))
     args = parser.parse_args(argv)
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):
@@ -420,7 +430,7 @@ def main(argv: list[str]) -> int:
                     "outside_per_eval_s": f"{row['out_per']:.9f}",
                     "code_revision": head if row["arm"] == "anneal" else revision,
                     "gmin_build_key": "" if row["arm"] == "anneal" else gmin_build_key,
-                    "host": os.uname().nodename,
+                    "host": host_label(os.uname().nodename),
                     **machine_columns(),
                 }
             )

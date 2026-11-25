@@ -729,7 +729,7 @@ pub fn occupancy_book_holes(
 /// Single linkage at [`super::packing::PACKING_LINK`] over the DECAF cells,
 /// so isomers of one packing chain together and a packing that chains to
 /// nothing on file stands alone. The landfold Torgerson plane stays the
-/// figure and the reported floor; it is no longer what counts packings, since
+/// figure and the reported floor; it does not count packings, since
 /// a forced 2-means bipartition of an isomer cloud has only ever one answer.
 /// Leave continues while [`OccupancyBookMap::holes`].
 pub fn occupancy_sparsify_book(

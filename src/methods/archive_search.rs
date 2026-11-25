@@ -845,7 +845,7 @@ mod tests {
 
     /// A caller that raises the parent stop during a slice must get the
     /// archive back at once. The slice ledger is where a force-call cap
-    /// used to keep walking after the potential had stopped.
+    /// could keep walking after the potential had stopped.
     #[test]
     fn caller_stop_ends_the_archive_at_once() {
         use std::sync::Arc;

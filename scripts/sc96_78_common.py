@@ -10,8 +10,6 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
-import numpy as np
-
 ROOT = Path(__file__).resolve().parents[1]
 TABLE_URL = "https://www-wales.ch.cam.ac.uk/~wales/CCD/jon/structures/SC/9-6/table.9-6.html"
 TABLE_SHA256 = "4c528a7d92090ff0b192c73110c062aae1661e837389076218dc93b0f185c138"
@@ -52,6 +50,9 @@ def reference_energy(scratch: Path) -> float:
 
 
 def write_start(path: Path, n: int, seed: int) -> None:
+    # numpy is needed only to draw starts; the audit imports this module without it.
+    import numpy as np
+
     rng = np.random.Generator(np.random.PCG64(seed))
     radius = 1.8 * LENGTH * n ** (1.0 / 3.0)
     minimum = 0.55 * LENGTH

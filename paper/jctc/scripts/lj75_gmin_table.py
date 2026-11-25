@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Tally LJ75 against GMIN with core-orbit symmetrisation, one run per CSV row.
+"""Tally LJ75 against GMIN with core-orbit symmetrization, one run per CSV row.
 
 Reads rewrite_2026/data/lj75_gmin/: the recommended and derived hops of anneal
 on seeds 2000 to 2199, and GMIN on the OptBench starts 1 to 200, each row one
@@ -52,12 +52,14 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import NoReturn
 
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import results_jcc
+import revision_reach
 from paired_stats import Z95 as Z
 from target_tol import energy_hits
 
@@ -243,7 +245,7 @@ def _audit(data: Path, keys: dict[str, str], digests: dict[str, str], arms: list
 def load(data: Path = DATA) -> tuple[dict[str, str], tuple[Arm, ...]]:
     keys, digests = provenance(data)
     published = keys.get("anneal_published_commit", "")
-    if len(published) != 40 or set(published) - set("0123456789abcdef"):
+    if not revision_reach.is_full_sha(published):
         die("provenance.txt names no full commit of the published anneal snapshot")
     if keys.get("anneal_published_tree") != "identical to anneal_commit":
         die("provenance.txt does not hold the published snapshot to the tree of anneal_commit")
@@ -366,12 +368,12 @@ def main_table(keys: dict[str, str], arms: tuple[Arm, ...]) -> str:
     tolerance = rf"\({keys['tolerance']}\)"
     host = keys["audit_host"].split(", ")
     caption = (
-        r"LJ\(_{75}\) against GMIN with core-orbit symmetrisation~"
+        r"LJ\(_{75}\) against GMIN with core-orbit symmetrization~"
         r"\cite{oakleySymmetrisationSchemesGlobal2013}. Every run stops at the first minimum "
         rf"within {tolerance} of the Cambridge reference~"
         rf"\cite{{walesCambridgeClusterDatabase}} or at a cap of {cap(keys)} force calls, each code "
         rf"counting its own. anneal ran seeds {first} to {last} from random "
-        rf"starts, and GMIN the minimised OptBench starts {ARMS[2][3]} to "
+        rf"starts, and GMIN the minimized OptBench starts {ARMS[2][3]} to "
         rf"{ARMS[2][3] + RUNS - 1}. The interval is the Wilson score interval "
         r"\eqref{eq:wilson}. Call PAR-2 is \eqref{eq:par2} counted in force calls, a miss "
         r"costing twice the cap, and the wall time is the median of the wall\_seconds column "

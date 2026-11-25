@@ -17,7 +17,7 @@ budget check and the call count at the hit is the start's cost.
 
 Lennard-Jones and binary Lennard-Jones reach anneal as the atom positions.
 Rigid TIP4P reaches it as a rigid-body state through ``water_sites``: the
-centres of mass, then exponential-map rotations. That is GMIN's ``coords``
+centers of mass, then exponential-map rotations. That is GMIN's ``coords``
 for ``NTIP`` number for number, so an archive ``.aa`` start opens unchanged
 and GMIN's ``CHECKD`` energy of it is anneal's. ``optbench.tip4p`` rotates
 passively (its docstring cites ``tip.f90``, GMIN's older ``TIP`` keyword), so
@@ -37,10 +37,14 @@ import json
 import math
 import os
 import sys
-import tomllib
 from pathlib import Path
 
 import numpy as np
+
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
 
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:

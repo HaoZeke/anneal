@@ -2,20 +2,32 @@
 """Every paper and benchmark-table number checked by scripts/paper_audit.py
 matches its committed rows, and the audit notices a drifted cell."""
 
+import csv
+import hashlib
 import importlib.util
+import io
+import json
 import math
 import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "scripts"))
+import machine_provenance  # noqa: E402
+
 SPEC = importlib.util.spec_from_file_location("paper_audit", ROOT / "scripts" / "paper_audit.py")
 audit_mod = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(audit_mod)
+PAPER_CONSTANTS = audit_mod.load_script(
+    "paper_constants_test",
+    "paper/jctc/scripts/paper_constants.py",
+).values()
 # The suite checks origin record refs. main() leaves the fetch off unless
 # --fetch-records is passed; tests that call the functions set it here.
 audit_mod._FETCH_RECORDS = True
@@ -33,6 +45,7 @@ CHECKS = (
     audit_mod.sc96_78_howto,
     audit_mod.stale_claims,
     audit_mod.tip4p_panel,
+    audit_mod.reproduction_records,
     audit_mod.covalent_panels,
     audit_mod.covalent_gfn2,
     audit_mod.ase_gofee,
@@ -43,7 +56,10 @@ CHECKS = (
     audit_mod.manuscript_priors,
     audit_mod.panel_references,
     audit_mod.generated_tables,
+    audit_mod.sutton_chen,
     audit_mod.supporting_numbers,
+    audit_mod.crest_equal,
+    audit_mod.crest_equal_bench,
     audit_mod.outside_session,
     audit_mod.g3_session,
     audit_mod.manuscript_new,
@@ -51,12 +67,47 @@ CHECKS = (
     audit_mod.cover_letter,
     audit_mod.science_claims,
     audit_mod.cap_turn_campaign,
-    audit_mod.rerun_claims,
     audit_mod.rerun_check,
+    audit_mod.append_only_rows,
+    audit_mod.pending_text,
+    audit_mod.citation_metadata,
+    audit_mod.figure_source_scripts,
+    audit_mod.bibliography_keys,
+    audit_mod.conversion_literals,
+    audit_mod.own_references,
+    audit_mod.selection_tables,
+    audit_mod.gmin_panel_drivers,
+    audit_mod.prior_switches,
+    audit_mod.method_definitions,
+    audit_mod.au55_superseded,
+    audit_mod.tip4p_unscored,
+    audit_mod.tip4p_r2_rows,
+    audit_mod.rerun_claims,
     audit_mod.todo_check,
     audit_mod.revision_map,
     audit_mod.all_revision_provenance,
 )
+PANEL_COMMIT = "9837358a"
+ASE_COMMIT = "61fa67cf"
+
+
+def withhold(monkeypatch, *prefixes):
+    """Make a checkout that does not hold the commits that start with one of ``prefixes``."""
+    held = audit_mod.commit_held
+    monkeypatch.setattr(
+        audit_mod, "commit_held",
+        lambda rev: False if any((rev or "").startswith(p) for p in prefixes) else held(rev),
+    )
+
+
+def panel_tokens(system):
+    """The hits and wall of this work's rows of one panel system, as the audit prints them."""
+    audit = audit_mod.Audit()
+    panel, groups = audit_mod.gmin_panel_groups(audit)
+    rows = groups[(system, "anneal")]
+    hits = f"{audit_mod.hits_of(rows)} of {len(rows)}"
+    wall = panel.show_s(audit_mod.median([float(r["wall_s"]) for r in rows]))
+    return hits, wall
 
 
 @pytest.fixture(scope="module")
@@ -183,6 +234,112 @@ def test_untraced_numbers_are_still_quoted(audited):
 
 def test_script_exits_zero():
     assert audit_mod.run() == 0
+
+
+def test_paper_audit_has_no_drift(capsys):
+    assert [(path, why) for path, _fragment, why in audit_mod.UNTRACED] == [
+        ("bench/water-h2o20-goat/README.md", "the seed 16001 rows were not committed")]
+    assert audit_mod.run() == 0
+    drifted = [line for line in capsys.readouterr().err.splitlines() if line.startswith("DRIFT")]
+    assert drifted == []
+
+
+def test_panel_reproduce_commands_and_session_metadata(tmp_path):
+    reproduce = (ROOT / "paper/jctc/REPRODUCE.md").read_text()
+    commands = (
+        ("sutton-chen-n12", "sc_h2h_n12", 1, ""),
+        ("tip4p-gmin", "tip4p_h2h", 1, ""),
+        ("agox-gofee", "agox_gofee_h2h", 1, ""),
+        ("cuh2-fcc-rec", "cuh2_fcc_rec", 1, ""),
+    )
+    for _campaign, rule, cores, suffix in commands:
+        command = f"snakemake -s workflow/Snakefile {rule} --cores {cores} --force{suffix}"
+        assert reproduce.count(command) == 1
+        assert command in (ROOT / "workflow/Snakefile").read_text()
+    assert "crest_equal" not in reproduce
+    assert "water_crest_fair" not in reproduce
+
+    out = tmp_path / "sessions.jsonl"
+    command = ["snakemake", "-s", "workflow/Snakefile", "tip4p_h2h", "--cores", "1", "--force"]
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/session_metadata.py"),
+            "--output",
+            str(out),
+            "--campaign",
+            "tip4p-gmin",
+            "--root",
+            str(ROOT),
+            "--",
+            *command,
+        ],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 0, proc.stderr
+    row = json.loads(out.read_text())
+    assert row["schema"] == "anneal-session-v2"
+    assert set(row["compilers"]) == {"rustc", "cargo", "gfortran", "cc"}
+    assert row["python"]["version"].count(".") == 2
+    assert set(row["openmp"]) == {"libraries", "omp_num_threads", "settings"}
+    assert row["anneal_repro"] is None
+    assert row["campaign"] == "tip4p-gmin"
+    assert row["command"] == command
+    boot_id = Path("/proc/sys/kernel/random/boot_id")
+    raw = boot_id.read_text().strip() if boot_id.is_file() else None
+    assert row["boot_id"] == (machine_provenance.boot_label(raw) if raw else None)
+    assert raw is None or raw not in out.read_text()
+    assert row["cpu_affinity"] == available_cpus()
+    assert re.fullmatch(r"[0-9a-f]{40}", row["code_revision"])
+
+
+def available_cpus():
+    """The CPUs the session records, by the rule scripts/session_metadata.py applies."""
+    if hasattr(os, "sched_getaffinity"):
+        return sorted(os.sched_getaffinity(0))
+    return list(range(os.cpu_count() or 1))
+
+
+def session_metadata_module():
+    spec = importlib.util.spec_from_file_location("session_metadata_test", ROOT / "scripts" / "session_metadata.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_session_affinity_is_the_scheduler_affinity_where_the_os_has_one(monkeypatch):
+    module = session_metadata_module()
+    monkeypatch.setattr(os, "sched_getaffinity", lambda pid: {5, 2, 3}, raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 64)
+    assert module.cpu_affinity() == [2, 3, 5]
+
+
+def test_session_affinity_falls_back_to_the_cpu_count_without_a_scheduler_call(monkeypatch):
+    module = session_metadata_module()
+    monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 4)
+    assert module.cpu_affinity() == [0, 1, 2, 3]
+    monkeypatch.setattr(os, "cpu_count", lambda: None)
+    assert module.cpu_affinity() == [0]
+
+
+def test_the_session_record_takes_its_affinity_from_that_rule(monkeypatch):
+    module = session_metadata_module()
+    monkeypatch.delattr(os, "sched_getaffinity", raising=False)
+    monkeypatch.setattr(os, "cpu_count", lambda: 3)
+    row = module.record("campaign", ["cmd"], ROOT)
+    assert row["cpu_affinity"] == [0, 1, 2] and row["cpu_affinity_text"] == "0,1,2"
+
+
+def test_the_crest_equal_session_is_pinned_only_where_taskset_exists(monkeypatch):
+    runner = crest_equal_runner()
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/taskset")
+    assert runner.pin_prefix("3") == ["taskset", "-c", "3"]
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    assert runner.pin_prefix("3") == []
 
 
 def test_tex_prose_checks_ignore_comments():
@@ -341,7 +498,9 @@ def test_ase_rows_use_one_recorded_host():
     assert "single machine-id sha256 host" in {r[2] for r in audit.drifts()}
 
 
-def test_a_drifted_ase_table_cell_is_reported():
+def test_a_drifted_ase_table_cell_is_reported(monkeypatch):
+    """An ASE table row, or its caption revision, fails when the commit is not in this repository."""
+    withhold(monkeypatch, ASE_COMMIT)
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
     old = "& 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 &"
@@ -1223,6 +1382,23 @@ def test_the_printed_sutton_chen_gmin_rows_have_one_harness():
          "9cbec1a446352bc9ef064bd2b1a5767194655919")}
 
 
+def test_a_sutton_chen_p_value_against_the_old_gmin_rows_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows("bench/metal-cluster-h2h/sc-n12/pvalues.csv")
+    row = next(r for r in rows if r["system"] == "sc126-38")
+    row["fisher_p"] = "9.61483e-06"
+    audit_mod.sutton_chen_pvalues(audit)
+    assert [r[2] for r in audit.drifts()] == ["sc126-38 Fisher p"]
+
+
+def test_a_sutton_chen_p_value_row_without_its_superseded_row_is_reported():
+    audit = audit_mod.Audit()
+    results = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
+    results.remove(next(r for r in results if r["system"] == "sc96-80" and r["arm"] == "anneal"))
+    audit_mod.sutton_chen_pvalues(audit)
+    assert [r[2] for r in audit.drifts()] == ["sc96-80 names the results.csv row it supersedes, which stays"]
+
+
 def test_a_rerun_missing_from_the_sutton_chen_readme_is_reported():
     # The rerun summary holds one row per system and arm, and sc96-55 gmin is
     # already printed; sc96-99 is a system the rerun never ran.
@@ -1245,8 +1421,17 @@ def test_an_sc_n12_gmin_rerun_without_its_seed_rows_is_reported():
     row = dict([r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"][-1])
     summary.append({**row, "harness_revision": "0" * 40})
     audit_mod.head_to_head(audit)
-    assert [(r[1], r[2], r[3], r[4]) for r in audit.drifts()] == [
-        ("bench/metal-cluster-h2h/sc-n12/results.csv sc96-55 gmin 00000000", "per-seed rows", "12", "0")]
+    readme = "bench/metal-cluster-h2h/sc-n12/README.md"
+    assert sorted((r[1], r[2], r[3], r[4]) for r in audit.drifts()) == sorted([
+        ("bench/metal-cluster-h2h/sc-n12/results.csv sc96-55 gmin 00000000", "per-seed rows", "12", "0"),
+            ("bench/metal-cluster-h2h/sc-n12/pvalues.csv sc96-55", "per-seed rows", "12", "12 0"),
+        (f"{readme}:131 sc96-55 a50f4b02", "latest GMIN harness", "a50f4b02", "00000000"),
+        (f"{readme}:131 sc96-55 a50f4b02", "Calls ahead", "anneal, n.s.", "tie"),
+        (f"{readme}:131 sc96-55 a50f4b02", "Wall ahead", "GMIN", "tie"),
+        (readme, "table row sc96-55 gmin 00000000", "missing", "shown"),
+        (readme, "test row sc96-55", "a50f4b02", "00000000"),
+        (readme, "prose", "GMIN beats anneal on wall time on sc126-55 and sc108-80, at Mann-Whitney p < 0.05.", "present"),
+    ])
 
 
 def test_a_rerun_without_its_tests_is_reported():
@@ -1357,6 +1542,17 @@ def test_a_gmin_lead_must_be_stated_as_the_rows_give_it():
     assert [r[2] for r in audit.drifts()] == ["calls median"]
 
 
+def test_a_gmin_lead_in_the_earlier_harness_rows_must_be_stated_as_the_rows_give_it():
+    audit = audit_mod.Audit()
+    text = audit.text(SC_N12)
+    audit.text_cache[SC_N12] = text.replace(
+        "| 0.349 | tie | anneal, n.s. | GMIN |",
+        "| 0.349 | tie | anneal, n.s. | anneal |",
+    )
+    audit_mod.head_to_head(audit)
+    assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
+
+
 def test_a_drifted_readme_p_value_is_reported():
     audit = audit_mod.Audit()
     path = "bench/openconf-h2h/paired/README.md"
@@ -1435,7 +1631,8 @@ def test_every_alias_is_verified_and_clears_the_sc_n12_rows(tmp_path, monkeypatc
     audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda table: table)
     assert not audit.drifts()
     table = [line for line in (ROOT / audit_mod.ALIASES).read_text().splitlines() if line[:1] not in ("#", "l")]
-    assert {r[1] for r in audit.results} == {f"{audit_mod.ALIASES} {line[:8]}" for line in table}
+    listed_rows = {", ".join(SC_N12_ROWS)}
+    assert {r[1] for r in audit.results} == {f"{audit_mod.ALIASES} {line[:8]}" for line in table} | listed_rows
     assert gaps == {}
 
 
@@ -1453,6 +1650,108 @@ def test_an_alias_off_the_rows_commit_parent_must_be_its_ancestor(tmp_path, monk
                              (CONF_FIX4,))
     assert {"rows commit 93c14173 sits on a descendant of d9935407",
             "d9935407 differs from the rows commit's parent only in workflow/Snakefile"} <= {r[2] for r in audit.drifts()}
+
+
+def remote_tip(cwd=ROOT):
+    """The tip of a branch in the audit's own remote set, develop first and then main where the set has it.
+
+    A clone holds every branch of origin, and the audit counts a revision as
+    pushed only when a ref of audit_remote_refs() contains it; the first ref
+    in refs/remotes order, or the newest, is therefore not a tip the audit
+    knows."""
+    refs = audit_mod.audit_remote_refs()
+    preferred = [ref for ref in ("refs/remotes/origin/develop", "refs/remotes/origin/main") if ref in refs]
+    for ref in dict.fromkeys((*preferred, *refs)):
+        found = subprocess.run(["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+                               cwd=cwd, capture_output=True, text=True, check=False)
+        if found.returncode == 0:
+            return found.stdout.strip()
+    pytest.fail("no audited remote branch is present: fetch develop from origin "
+                "(git fetch origin '+refs/heads/*:refs/remotes/origin/*')")
+
+
+def remote_layout(path, *branches):
+    """A repository whose refs/remotes hold one empty-tree commit for each named origin branch.
+
+    A branch named later has the later commit date, so the last one is the newest ref."""
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.org",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.org"}
+
+    def run(*args, stdin=None):
+        return subprocess.run(["git", *args], cwd=path, input=stdin, capture_output=True, text=True, check=True,
+                              env=env).stdout.strip()
+
+    path.mkdir()
+    run("init", "-q")
+    tree = run("hash-object", "-t", "tree", "-w", "--stdin", stdin="")
+    tips = {}
+    for number, branch in enumerate(branches):
+        env["GIT_COMMITTER_DATE"] = env["GIT_AUTHOR_DATE"] = f"@{1_000_000 + 100 * number} +0000"
+        tips[branch] = run("commit-tree", tree, "-m", f"tip of {branch} {number}")
+        run("update-ref", f"refs/remotes/origin/{branch}", tips[branch])
+    return tips
+
+
+def test_the_remote_tip_is_an_audited_branch_whatever_sorts_first(tmp_path):
+    tips = remote_layout(tmp_path / "ci", "anneal-gmin-pin-followup3", "bench/crest-gaps", "main", "develop")
+    assert remote_tip(tmp_path / "ci") == tips["develop"]
+    assert remote_tip(tmp_path / "ci") != tips["anneal-gmin-pin-followup3"]
+    tips = remote_layout(tmp_path / "no-develop", "anneal-gmin-pin-followup3", "main")
+    assert remote_tip(tmp_path / "no-develop") == tips["main"]
+    tips = remote_layout(tmp_path / "audited-only", "anneal-gmin-pin-followup3", "fix/gmin-sc2", "bench/gmin-sc3")
+    assert remote_tip(tmp_path / "audited-only") == tips["bench/gmin-sc3"]
+
+
+def newest_remote(path):
+    return subprocess.run(["git", "for-each-ref", "--sort=-committerdate", "--count=1", "--format=%(refname)",
+                           "refs/remotes"], cwd=path, capture_output=True, text=True, check=True).stdout.strip()
+
+
+def test_the_remote_tip_is_never_chosen_for_being_the_newest_ref(tmp_path):
+    tips = remote_layout(tmp_path / "newest-main", "develop", "bench/crest-gaps", "zzz-unaudited", "main")
+    assert newest_remote(tmp_path / "newest-main") == "refs/remotes/origin/main"
+    assert remote_tip(tmp_path / "newest-main") == tips["develop"]
+    tips = remote_layout(tmp_path / "newest-foreign", "develop", "main", "zzz-unaudited")
+    assert newest_remote(tmp_path / "newest-foreign") == "refs/remotes/origin/zzz-unaudited"
+    assert remote_tip(tmp_path / "newest-foreign") == tips["develop"]
+
+
+def test_the_remote_tip_takes_main_only_while_the_audit_counts_it(tmp_path, monkeypatch):
+    tips = remote_layout(tmp_path / "set", "bench/crest-gaps", "main")
+    assert newest_remote(tmp_path / "set") == "refs/remotes/origin/main"
+    assert "refs/remotes/origin/main" in audit_mod.audit_remote_refs()
+    assert remote_tip(tmp_path / "set") == tips["main"]
+    monkeypatch.setattr(audit_mod, "AUDIT_OPTIONAL_REMOTES",
+                        tuple(b for b in audit_mod.AUDIT_OPTIONAL_REMOTES if b != "main"))
+    assert "refs/remotes/origin/main" not in audit_mod.audit_remote_refs()
+    assert remote_tip(tmp_path / "set") == tips["bench/crest-gaps"]
+    remote_layout(tmp_path / "only-main", "main")
+    with pytest.raises(pytest.fail.Exception, match="no audited remote branch is present"):
+        remote_tip(tmp_path / "only-main")
+
+
+def test_the_remote_tip_fails_clearly_when_no_audited_branch_is_present(tmp_path):
+    remote_layout(tmp_path / "foreign", "anneal-gmin-pin-followup3", "zzz")
+    with pytest.raises(pytest.fail.Exception, match="no audited remote branch is present"):
+        remote_tip(tmp_path / "foreign")
+    remote_layout(tmp_path / "bare")
+    with pytest.raises(pytest.fail.Exception, match="no audited remote branch is present"):
+        remote_tip(tmp_path / "bare")
+
+
+def synthetic_audit(*rows, revisions=("code_revision", "code_tree")):
+    audit = audit_mod.Audit()
+    audit.read["synthetic.csv"] = [dict(zip(revisions, row), host="bench") for row in rows]
+    return audit
+
+
+LOST = "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_a_recorded_tree_no_pushed_commit_has_resolves_nothing():
+    audit = synthetic_audit((LOST, "f" * 40))
+    assert audit_mod.provenance(audit) == {"synthetic.csv": f"revision {LOST[:8]} is not in this repository"}
+    assert [r[2] for r in audit.drifts()] == [f"unpushed revision {LOST[:8]}"]
 
 
 def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
@@ -1684,6 +1983,27 @@ def test_type7_quantiles():
         assert math.isclose(audit_mod.type7(values, p), float(np.quantile(values, p)), rel_tol=1e-12)
 
 
+@pytest.mark.parametrize("phrase", [
+    "The Zenodo record is pending.",
+    "DOI: [to be assigned by Zenodo on acceptance].",
+    "DOI: TBD.",
+    "% pending Zenodo upload",
+])
+@pytest.mark.parametrize("target", [
+    audit_mod.TEX,
+    audit_mod.SI,
+    audit_mod.COVER,
+    "paper/jctc/macros.tex",
+])
+def test_injected_pending_or_tbd_text_fails_the_audit(target, phrase):
+    audit = audit_mod.Audit()
+    audit.text_cache[target] = audit.text(target) + f"\n{phrase}\n"
+    audit_mod.pending_text(audit)
+    assert [(row[1], row[2]) for row in audit.drifts()] == [
+        (target, "no pending, to be assigned, or TBD remains in TeX")
+    ]
+
+
 def _audit_with_tags(tex):
     audit = audit_mod.Audit()
     for path in audit_mod.RERUN_FILES:
@@ -1800,9 +2120,1047 @@ def test_resolved_hit_tolerances_follow_the_expression():
 
 
 def test_the_british_spelling_of_labeled_is_caught():
-    for word in ("labelled", "labelling", "modelled", "travelled"):
+    doubled_label = ["label" + "l" + suffix for suffix in ("ed", "ing")]
+    for word in (*doubled_label, "modelled", "travelled"):
         assert audit_mod.BRITISH.search(word)
     assert not audit_mod.BRITISH.search("labeled")
+
+
+def test_water_header_keeps_the_committed_record_spelling():
+    source = (ROOT / "paper/jctc/scripts/water_h2h.py").read_text()
+    record = (ROOT / "paper/jctc/logs/water/NUMBERS.tsv").read_text()
+    assert "rmsd_A=labelled Kabsch" in source
+    assert "rmsd_A=labelled Kabsch" in record
+
+
+@pytest.mark.parametrize(("cluster", "revision"), [
+    ("au38", "77dece29d43ac3b33066c2887d602766ddbe61d2"),
+    ("au55", "77dece29d43ac3b33066c2887d602766ddbe61d2"),
+    ("cu19au19", "e1ae0658e730c8aa53f75b48ac7c009487422553"),
+    ("cu27au28", "e1ae0658e730c8aa53f75b48ac7c009487422553"),
+    ("cu6au32", "e1ae0658e730c8aa53f75b48ac7c009487422553"),
+])
+def test_each_darby_log_receipt_names_its_cluster_and_revision(cluster, revision):
+    text = (ROOT / f"bench/metal-cluster-h2h/darby-logs/{cluster}/README.md").read_text()
+    label = {
+        "au38": "Au38",
+        "au55": "Au55",
+        "cu19au19": "Cu19Au19",
+        "cu27au28": "Cu27Au28",
+        "cu6au32": "Cu6Au32",
+    }[cluster]
+    assert f"This directory contains the {label} anneal" in text
+    assert revision in text
+    assert "the parent of" not in text
+
+
+HISTORY_MUTATIONS = [
+    ("previously", "The value was previously larger."),
+    ("no longer", "The branch no longer stops early."),
+    ("used to", "The walk used to ignore the flag."),
+    ("used to stop", "Seed 2007 USED TO STOP at -263.04."),
+    ("earlier draft", "Softened sentences from the Earlier Draft."),
+    ("earlier version", "An earlier version reported a constant."),
+    ("v1.N release tag", "The sealed v1.28 tip."),
+    ("stay open for", "Two hits stay open for Papers."),
+    ("stays open", "The comparison stays open."),
+    ("withheld", "The hit count is withheld."),
+    ("removed from the article", "The hit count was removed from the article."),
+    ("unrecorded", "The revision is unrecorded."),
+    ("unrecoverable", "The revision is unrecoverable."),
+    ("cannot be recovered", "The revision cannot be recovered."),
+    ("not captured", "The host was not captured."),
+    ("Recorded limitations", "## Recorded limitations"),
+    ("Left for Papers", "## Left for Papers"),
+    ("the parent of", "Built from the parent of the table commit."),
+]
+
+
+@pytest.mark.parametrize("path", ["bench/tip4p-h2h/wall-r2.csv", "bench/tip4p-h2h/check-r2.md"])
+def test_generated_tip4p_summaries_are_append_only_records(path):
+    assert path in audit_mod.APPEND_ONLY_RECORDS
+
+
+@pytest.mark.parametrize("path", [
+    "bench/tip4p-water-rates/rates-a24ba760.csv",
+    "bench/tip4p-water-rates/rates.csv",
+])
+def test_a_water_rate_hit_flag_outside_its_printed_tolerance_is_rejected(path):
+    audit = audit_mod.Audit()
+    rows = list(csv.DictReader(audit.text(path).splitlines()))
+    rows[0]["hit"] = str(1 - int(rows[0]["hit"]))
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(rows[0]), lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    audit.text_cache[path] = buffer.getvalue()
+    audit_mod.tip4p_unscored(audit)
+    assert [row for row in audit.drifts() if row[1] == path]
+
+
+@pytest.mark.parametrize("output", [
+    "bench/tip4p-h2h/wall-r2.csv",
+    "paper/jctc/logs/cuh2-hardware-receipt.txt",
+])
+def test_a_reproduce_command_that_writes_a_tracked_record_is_rejected(output):
+    path = "paper/jctc/REPRODUCE.md"
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = (
+        audit.text(path)
+        + f"\n    python3 runner.py --rows-out {output}\n"
+    )
+    audit_mod.reproduction_records(audit)
+    assert [
+        row for row in audit.drifts()
+        if row[1] == path and "never write tracked records" in row[2]
+    ]
+
+
+def test_reproduce_rules_never_declare_tracked_record_outputs():
+    reproduce = (ROOT / "paper/jctc/REPRODUCE.md").read_text()
+    rules = set(re.findall(
+        r"snakemake -s workflow/Snakefile (\w+) ",
+        reproduce,
+    ))
+    snakefile = (ROOT / "workflow/Snakefile").read_text()
+    tracked = set(subprocess.run(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines())
+    records = {
+        path for path in tracked
+        if path.endswith((".csv", ".tsv", ".jsonl"))
+        or path.startswith("paper/jctc/logs/")
+    }
+    for rule in rules:
+        body = re.search(
+            rf"(?ms)^rule {re.escape(rule)}:\n(.*?)(?=^rule \w+:|\Z)",
+            snakefile,
+        )
+        assert body is not None
+        output = re.search(
+            r"(?ms)^    output:\s*\n(.*?)(?=^    \w+(?:\.\w+)?:|\Z)",
+            body.group(1),
+        )
+        declared = set(re.findall(
+            r"[\"']([^\"']+)[\"']",
+            output.group(1) if output else "",
+        ))
+        assert not declared & records, (
+            f"{rule} declares tracked records as outputs: "
+            f"{sorted(declared & records)}"
+        )
+
+
+def _stub_snakefile(text: str, stamp_root: Path) -> str:
+    text = text.replace('"/work/', f'"{stamp_root.as_posix()}/')
+    shell = (
+        '    shell:\n'
+        '        """\n'
+        "        set -euo pipefail\n"
+        '        if [ -n "{output}" ]; then\n'
+        "          for target in {output}; do\n"
+        '            mkdir -p "$(dirname "$target")"\n'
+        '            touch "$target"\n'
+        "          done\n"
+        "        fi\n"
+        '        """\n'
+    )
+    return re.sub(r'(?ms)^    shell:\n        """\n.*?"""\n', shell, text)
+
+
+def _concrete_rules(text: str) -> list[str]:
+    rules = []
+    for name, body in re.findall(r"(?ms)^rule (\w+):\n(.*?)(?=^rule \w+:|\Z)", text):
+        if name == "all":
+            continue
+        output = re.search(r"(?ms)^    output:\n(.*?)(?=^    \w|\Z)", body)
+        if output and "{" in output.group(1):
+            continue
+        rules.append(name)
+    return rules
+
+
+def _tracked_status() -> str:
+    return subprocess.check_output(
+        ["git", "status", "--porcelain=v1", "--untracked-files=no"],
+        cwd=ROOT,
+        text=True,
+    )
+
+
+def _stamp_env(stamp_root: Path) -> dict[str, str]:
+    env = os.environ.copy()
+    env["ANNEAL_STAMP_ROOT"] = str(stamp_root)
+    return env
+
+
+def test_stubbed_snakemake_force_leaves_tracked_files_unchanged(tmp_path):
+    pytest.importorskip("snakemake")
+    stamp_root = tmp_path / "stamps"
+    stamp_root.mkdir()
+    source = (ROOT / "workflow/Snakefile").read_text()
+    tracked = set(subprocess.check_output(["git", "ls-files"], cwd=ROOT, text=True).splitlines())
+    for name, body in re.findall(r"(?ms)^rule (\w+):\n(.*?)(?=^rule \w+:|\Z)", source):
+        output = re.search(r"(?ms)^    output:\n(.*?)(?=^    \w|\Z)", body)
+        declared = re.findall(r"""["']([^"']+)["']""", output.group(1) if output else "")
+        assert not set(declared) & tracked, f"{name} declares tracked outputs"
+    stub = tmp_path / "Snakefile"
+    stub.write_text(_stub_snakefile(source, stamp_root))
+    before = _tracked_status()
+    completed = subprocess.run(
+        [
+            sys.executable, "-m", "snakemake", "-s", str(stub),
+            *_concrete_rules(source), "--cores", "1", "--force", "-k", "--nocolor",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        env=_stamp_env(stamp_root),
+    )
+    assert completed.returncode == 0, completed.stderr[-4000:]
+    assert _tracked_status() == before
+
+
+def test_a_tracked_snakemake_output_is_deleted_on_force(tmp_path):
+    pytest.importorskip("snakemake")
+    stamp_root = tmp_path / "stamps"
+    stamp_root.mkdir()
+    target = ROOT / "bench/gmin-panel/summary.csv"
+    original = target.read_bytes()
+    source = (ROOT / "workflow/Snakefile").read_text().replace(
+        'touch(STAMP_ROOT + "/gmin_panel.stamp")',
+        '"bench/gmin-panel/summary.csv"',
+    )
+    stub = tmp_path / "Snakefile"
+    stub.write_text(_stub_snakefile(source, stamp_root))
+    try:
+        subprocess.run(
+            [
+                sys.executable, "-m", "snakemake", "-s", str(stub), "gmin_panel",
+                "--cores", "1", "--force", "--nocolor",
+            ],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=_stamp_env(stamp_root),
+        )
+        assert target.read_bytes() != original
+    finally:
+        target.write_bytes(original)
+
+
+def test_the_landfold_figure_records_its_redrawn_panels():
+    audit = audit_mod.Audit()
+    audit_mod.manuscript_new(audit)
+    rows = [row for row in audit.results if "landfold" in row[2]]
+    assert rows
+    assert all(row[0] == "OK" for row in rows)
+
+
+def pdf_length():
+    spec = importlib.util.spec_from_file_location("pdf_length", ROOT / "paper/jctc/scripts/pdf_length.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_rendered_abstract_is_counted_without_page_numbers():
+    length = pdf_length()
+    abstract = " ".join(["word"] * 150) + " on 9 of 13 at 0.317 and GFN2. " + "end " * 40
+    text = (f"Title\nAbstract\n{abstract}\n\n1\n\f2\n\nIntroduction\n" + "body " * 6000
+            + "12 of 12\n\n3\n\fAuthor contributions\nnot counted\n")
+    counts = length.measure(text)
+    assert counts == {"abstract_words": 150 + 8 + 40, "abstract_numerals": 4, "body_words": 6003}
+    assert not length.problems(counts)
+    assert length.problems(dict(counts, abstract_words=201, abstract_numerals=7, body_words=7001)) == [
+        "abstract has 201 words, more than 200", "abstract has 7 numerals, more than 6",
+        "body has 7001 words, outside 5000-7000"]
+
+
+def cross_labels():
+    spec = importlib.util.spec_from_file_location("cross_labels", ROOT / "paper/jctc/scripts/cross_labels.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_labels_are_numbered_as_achemso_numbers_them():
+    text = "\n".join((
+        "\\section{One}\\label{sec:one}",
+        "\\begin{equation}x\\label{eq:a}\\end{equation}",
+        "\\subsection{Two}\\label{sec:two}",
+        "% \\label{sec:commented}",
+        "\\begin{figure*}\\caption{x}\\label{fig:a}\\end{figure*}",
+        "\\section*{Notes}",
+        "\\begin{table}\\label{tab:a}\\end{table}\\begin{figure}\\label{fig:b}\\end{figure}",
+        "\\section{Three}\\begin{equation}y\\label{eq:b}\\end{equation}\\label{sec:three}",
+    ))
+    numbers = cross_labels().numbers(text, "S")
+    assert numbers == {"sec:one": "S1", "eq:a": "S1", "sec:two": "S1.1", "fig:a": "S1", "tab:a": "S1",
+                       "fig:b": "S2", "eq:b": "S2", "sec:three": "S2"}
+
+
+def test_the_crest_equal_panel_holds_in_the_committed_text():
+    audit = audit_mod.Audit()
+    audit_mod.crest_equal(audit)
+    assert not audit.drifts()
+
+
+def test_a_crest_run_outside_the_call_tolerance_is_reported():
+    audit = audit_mod.Audit()
+    rows = [dict(r) for r in audit.rows("bench/crest-equal/rows.csv")]
+    for row in rows:
+        if row["arm"] == "crest":
+            row["charged"] = str(int(row["charged"]) + 400)
+    audit.read["bench/crest-equal/rows.csv"] = rows
+    audit_mod.crest_equal(audit)
+    labels = {row[2] for row in audit.drifts()}
+    assert "CREST at 0.90 ps is at the calls of this setting: median within 5%" in labels
+
+
+def test_session_metadata_records_the_anneal_repro_checkout(tmp_path):
+    repro = tmp_path / "anneal_repro"
+    repro.mkdir()
+    subprocess.run(["git", "init", "-q", str(repro)], check=True)
+    (repro / "a.txt").write_text("a\n")
+    git = ["git", "-C", str(repro), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=/dev/null"]
+    subprocess.run([*git, "add", "a.txt"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "a"], check=True)
+    out = tmp_path / "sessions.jsonl"
+    env = dict(__import__("os").environ, OMP_NUM_THREADS="3")
+    proc = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/session_metadata.py"), "--output", str(out), "--campaign", "water-crest-fair-n192",
+         "--root", str(ROOT), "--anneal-repro", str(repro), "--", "snakemake", "water_crest_fair"],
+        cwd=ROOT, check=False, capture_output=True, text=True, env=env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    row = json.loads(out.read_text())
+    head = subprocess.run(["git", "-C", str(repro), "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    assert row["anneal_repro"]["revision"] == head
+    assert re.fullmatch(r"[0-9a-f]{40}", row["anneal_repro"]["tree"])
+    assert row["anneal_repro"]["dirty"] is False
+    assert row["openmp"]["omp_num_threads"] == "3"
+    assert row["openmp"]["settings"]["OMP_NUM_THREADS"] == "3"
+
+
+def checkout_for_dirty_tests(tmp_path):
+    repo = tmp_path / "checkout"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "a.txt").write_text("a\n")
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t", "-c", "core.hooksPath=/dev/null",
+           "-c", "commit.gpgsign=false"]
+    subprocess.run([*git, "add", "a.txt"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "a"], check=True)
+    return repo
+
+
+def test_session_metadata_records_whether_the_checkout_is_dirty(tmp_path):
+    module = session_metadata_module()
+    repo = checkout_for_dirty_tests(tmp_path)
+    assert module.git_dirty(repo) is False
+    assert module.record("c", ["true"], repo)["dirty"] is False
+    (repo / "a.txt").write_text("changed\n")
+    assert module.git_dirty(repo) is True
+    assert module.record("c", ["true"], repo)["dirty"] is True
+    (repo / "a.txt").write_text("a\n")
+    assert module.git_dirty(repo) is False
+    (repo / "new.txt").write_text("untracked\n")
+    assert module.git_dirty(repo) is True
+    assert module.repro_checkout(repo)["dirty"] is True
+
+
+def test_session_metadata_does_not_guess_when_git_cannot_say(tmp_path, monkeypatch):
+    module = session_metadata_module()
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path))
+    bare = tmp_path / "not-a-checkout"
+    bare.mkdir()
+    assert module.git_dirty(bare) is None
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("git")))
+    assert module.git_dirty(tmp_path) is None
+
+
+def test_the_session_record_of_this_checkout_matches_git_status():
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=True)
+    module = session_metadata_module()
+    assert module.record("c", ["true"], ROOT)["dirty"] == bool(status.stdout.strip())
+
+
+MAPS = """\
+7f0000000000-7f0000020000 r--p 00000000 08:01 11 /usr/lib/x86_64-linux-gnu/libc.so.6
+7f0000100000-7f0000120000 r-xp 00000000 08:01 12 /usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0
+7f0000200000-7f0000220000 r--p 00000000 08:01 12 /usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0
+7f0000300000-7f0000320000 r-xp 00000000 08:01 13 /opt/lib/libomp.so.5 (deleted)
+7f0000400000-7f0000420000 rw-p 00000000 00:00 0
+"""
+
+
+def test_the_openmp_runtime_is_read_from_the_mapped_libraries():
+    module = session_metadata_module()
+    found = module.loaded_openmp(MAPS)
+    assert sorted(found) == ["libgomp", "libomp"]
+    assert found["libgomp"] == "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    assert module.loaded_openmp("7f00-7f01 r-xp 0 08:01 1 /usr/lib/libc.so.6\n") == {}
+    assert module.openmp_stem("libiomp5.so") == "libiomp5"
+    assert module.openmp_stem("/usr/local/lib/libomp.dylib") == "libomp"
+    assert module.openmp_stem("libgompx.so.1") is None
+    assert module.openmp_stem("libm.so.6") is None
+
+
+def test_the_named_openmp_runtime_is_the_one_in_the_evidence(tmp_path, monkeypatch):
+    module = session_metadata_module()
+    maps = tmp_path / "maps"
+    maps.write_text(MAPS.replace("/opt/lib/libomp.so.5 (deleted)", "/usr/lib/libc.so.6"))
+    loaded = module.identify_openmp(["true"], maps)
+    assert loaded["library"] == "libgomp"
+    assert loaded["path"] == "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0"
+    assert loaded["source"] == "loaded in the recorder process"
+
+    maps.write_text("7f00-7f01 r-xp 0 08:01 1 /usr/lib/libc.so.6\n")
+    monkeypatch.setattr(module, "needed_libraries", lambda executable: ["libm.so.6", "libiomp5.so", "libc.so.6"])
+    named = module.identify_openmp(["./campaign"], maps)
+    assert named["library"] == "libiomp5"
+    assert named["path"] is None
+    assert named["source"] == "dynamic section of ./campaign"
+
+    monkeypatch.setattr(module, "needed_libraries", lambda executable: ["libgomp.so.1", "libomp.so.5"])
+    both = module.identify_openmp(["./campaign"], maps)
+    assert both["library"] == "unknown"
+    assert both["candidates"] == ["libgomp", "libomp"]
+
+
+def test_an_unidentifiable_openmp_runtime_is_unknown_even_where_libraries_are_installed(tmp_path, monkeypatch):
+    module = session_metadata_module()
+    maps = tmp_path / "maps"
+    maps.write_text("7f00-7f01 r-xp 0 08:01 1 /usr/lib/libc.so.6\n")
+    monkeypatch.setattr(module, "needed_libraries", lambda executable: None)
+    shown = module.identify_openmp(["snakemake", "x"], maps)
+    assert shown["library"] == "unknown" and shown["path"] is None
+    assert shown["candidates"] == []
+    absent = module.identify_openmp(None, tmp_path / "no-maps")
+    assert absent["library"] == "unknown"
+    monkeypatch.setattr(module, "needed_libraries", lambda executable: ["libm.so.6"])
+    assert module.identify_openmp(["./campaign"], maps)["library"] == "unknown"
+    monkeypatch.setattr(module.shutil, "which", lambda name: "/bin/" + name if name == "ldconfig" else None)
+    monkeypatch.setattr(module.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(
+        a[0], 0, stdout="\tlibgomp.so.1 (libc6,x86-64) => /usr/lib/libgomp.so.1\n", stderr=""))
+    assert module.openmp_runtime()["libraries"] == {"libgomp": str(Path("/usr/lib/libgomp.so.1").resolve())}
+    assert module.identify_openmp(["./campaign"], maps)["library"] == "unknown"
+
+
+def test_needed_libraries_come_from_the_dynamic_section_without_running_the_file(tmp_path, monkeypatch):
+    module = session_metadata_module()
+    tool = tmp_path / "bin"
+    tool.mkdir()
+    readelf = tool / "readelf"
+    readelf.write_text(
+        "#!/bin/sh\n"
+        'case "$2" in *campaign) ;; *) exit 1 ;; esac\n'
+        'echo " 0x0000000000000001 (NEEDED)             Shared library: [libgomp.so.1]"\n'
+        'echo " 0x0000000000000001 (NEEDED)             Shared library: [libc.so.6]"\n'
+    )
+    readelf.chmod(0o755)
+    campaign = tool / "campaign"
+    campaign.write_text("#!/bin/sh\ntouch ran\n")
+    campaign.chmod(0o755)
+    script = tool / "script"
+    script.write_text("#!/bin/sh\n")
+    script.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tool) + os.pathsep + "/usr/bin" + os.pathsep + "/bin")
+    assert module.needed_libraries(str(campaign)) == ["libgomp.so.1", "libc.so.6"]
+    assert module.needed_libraries(str(script)) is None
+    assert module.needed_libraries("absent-command") is None
+    assert not (tmp_path / "ran").exists() and not Path("ran").exists()
+
+
+def test_the_session_record_names_its_openmp_runtime_and_checkout_state(tmp_path):
+    out = tmp_path / "sessions.jsonl"
+    run = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/session_metadata.py"), "--output", str(out), "--campaign", "c",
+         "--root", str(ROOT), "--", "true"],
+        cwd=ROOT, capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr
+    row = json.loads(out.read_text())
+    assert isinstance(row["dirty"], bool)
+    assert set(row["openmp_in_use"]) >= {"library", "path", "source"}
+    assert row["openmp_in_use"]["library"] in {"libgomp", "libomp", "libiomp5", "unknown"}
+
+
+def test_a_missing_boot_id_is_recorded_as_null(tmp_path):
+    module = session_metadata_module()
+    assert module.boot_id_label(tmp_path / "boot_id") is None
+    (tmp_path / "boot_id").write_text("0123abcd-0000-4000-8000-000000000000\n")
+    assert module.boot_id_label(tmp_path / "boot_id") == machine_provenance.boot_label("0123abcd-0000-4000-8000-000000000000")
+
+
+def crest_equal_runner():
+    spec = importlib.util.spec_from_file_location("crest_equal_run_panel", ROOT / "scripts/crest_equal/run_panel.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_crest_equal_runner_records_its_session_before_any_run(tmp_path):
+    runner = crest_equal_runner()
+    core = str(min(available_cpus()))
+    out = tmp_path / "sessions.jsonl"
+    runner.record_session(out, core, ["scripts/crest_equal/run_panel.py", "--seed", "2000"])
+    row = json.loads(out.read_text())
+    assert row["schema"] == "anneal-session-v2"
+    assert row["campaign"] == "crest-equal-h2o6"
+    assert row["command"] == ["scripts/crest_equal/run_panel.py", "--seed", "2000"]
+    assert row["cpu_affinity"] == ([int(core)] if shutil.which("taskset") else available_cpus())
+    assert set(row["compilers"]) == {"rustc", "cargo", "gfortran", "cc"}
+
+
+def test_the_crest_equal_runner_refuses_a_campaign_without_a_session_file(tmp_path, monkeypatch):
+    runner = crest_equal_runner()
+    binaries = [arg for name in ("anneal", "driver", "crest", "xtb", "engine") for arg in (f"--{name}", str(tmp_path / name))]
+    monkeypatch.setattr("sys.argv", ["run_panel.py", *binaries, "--rows", str(tmp_path / "rows.csv")])
+    with pytest.raises(SystemExit, match="--sessions is required"):
+        runner.main()
+    assert not (tmp_path / "rows.csv").exists()
+
+
+def test_the_crest_equal_entry_passes_the_session_file():
+    text = (ROOT / "scripts/crest_equal/enter_bench.sh").read_text()
+    assert '--sessions "$ROOT/bench/crest-equal/sessions.jsonl"' in text
+
+
+def ablation_campaign():
+    spec = importlib.util.spec_from_file_location("depth_ablation_campaign",
+                                                  ROOT / "scripts/depth_posterior_ablation/campaign.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_held_out_rule_writes_rows_in_the_committed_schema(tmp_path):
+    campaign = ablation_campaign()
+    committed = (ROOT / "results/size-tiered-selection.csv").read_text().splitlines()
+    provenance = (ROOT / "results/size-tiered-selection-provenance.csv").read_text().splitlines()
+    assert committed[0] == campaign.HELD_OUT_HEADER
+    assert provenance[0] == campaign.PROVENANCE_HEADER
+    assert len(committed) == len(provenance)
+    for line, provenance_line in zip(committed[1:], provenance[1:]):
+        arm, n, seed, hit, calls, best, gap, charged, wall = line.split(",")
+        p_arm, p_n, p_seed, revision, host = provenance_line.split(",")
+        assert (arm, n, seed) == (p_arm, p_n, p_seed)
+        if arm == "tiered":
+            continue
+        row = {"arm": arm, "seed": seed, "hit": hit, "force_calls_to_hit": calls if hit == "1" else "",
+               "budget": str(campaign.PAPER_BUDGETS[int(n)]), "best": best, "charged": charged, "wall_s": wall}
+        assert campaign.held_out_line(row, int(n)) == line
+        assert campaign.provenance_line(row, int(n), revision, host) == provenance_line
+    jobs = campaign.held_out_schedule()
+    assert sorted(jobs) == sorted((size, seed, arm) for size in (75, 98, 104) for seed in range(7000, 7006)
+                                  for arm in ("posterior", "uniform"))
+    provenance_file = tmp_path / "provenance.csv"
+    provenance_file.write_text("\n".join(provenance) + "\nposterior,75,7000,abc,bench\n")
+    assert campaign.held_out_done(provenance_file, "abc") == {(75, 7000, "posterior")}
+    assert campaign.held_out_done(provenance_file, "unknown") == {(int(f[1]), int(f[2]), f[0])
+                                                                 for f in (line.split(",") for line in provenance[1:])}
+
+
+def test_held_out_renames_the_results_before_the_sidecar(tmp_path, monkeypatch):
+    campaign = ablation_campaign()
+    results = tmp_path / "size-tiered-selection.csv"
+    provenance = tmp_path / "size-tiered-selection-provenance.csv"
+    results.write_text(campaign.HELD_OUT_HEADER + "\n")
+    provenance.write_text(campaign.PROVENANCE_HEADER + "\n")
+    monkeypatch.setattr(campaign, "held_out_schedule", lambda: [(75, 7000, "posterior")])
+    monkeypatch.setattr(campaign.socket, "gethostname", lambda: "bench")
+
+    def fake_run_job(binary, log_dir, order, size, seed, arm):
+        return {
+            "arm": arm,
+            "seed": str(seed),
+            "hit": "1",
+            "force_calls_to_hit": "10",
+            "budget": str(campaign.PAPER_BUDGETS[size]),
+            "best": "-397.49233098",
+            "charged": "10",
+            "wall_s": "1.0",
+        }
+
+    monkeypatch.setattr(campaign, "run_job", fake_run_job)
+    seen = []
+    real_replace = os.replace
+
+    def spy_replace(src, dst):
+        real_replace(src, dst)
+        seen.append(Path(dst).name)
+
+    monkeypatch.setattr(campaign.os, "replace", spy_replace)
+    campaign.run_held_out(tmp_path / "depth_ablation", tmp_path / "logs", results, provenance, "abc")
+    assert seen == ["size-tiered-selection.csv", "size-tiered-selection-provenance.csv"]
+    assert results.read_text().splitlines() == [
+        campaign.HELD_OUT_HEADER,
+        "posterior,75,7000,1,10,-397.49233098,0.00000002,10,1.0",
+    ]
+    assert provenance.read_text().splitlines() == [
+        campaign.PROVENANCE_HEADER,
+        "posterior,75,7000,abc,bench",
+    ]
+    names = sorted(path.name for path in tmp_path.iterdir() if path.is_file())
+    assert names == sorted([results.name, provenance.name])
+
+
+def test_held_out_leaves_both_files_when_the_results_rename_fails(tmp_path, monkeypatch):
+    campaign = ablation_campaign()
+    results = tmp_path / "size-tiered-selection.csv"
+    provenance = tmp_path / "size-tiered-selection-provenance.csv"
+    results.write_text(campaign.HELD_OUT_HEADER + "\n")
+    provenance.write_text(campaign.PROVENANCE_HEADER + "\n")
+    before_results = results.read_bytes()
+    before_provenance = provenance.read_bytes()
+    monkeypatch.setattr(campaign, "held_out_schedule", lambda: [(75, 7000, "posterior")])
+    monkeypatch.setattr(campaign.socket, "gethostname", lambda: "bench")
+    monkeypatch.setattr(
+        campaign,
+        "run_job",
+        lambda binary, log_dir, order, size, seed, arm: {
+            "arm": arm,
+            "seed": str(seed),
+            "hit": "0",
+            "force_calls_to_hit": "",
+            "budget": str(campaign.PAPER_BUDGETS[size]),
+            "best": "-1.0",
+            "charged": str(campaign.PAPER_BUDGETS[size]),
+            "wall_s": "1.0",
+        },
+    )
+
+    replace_calls = 0
+    attempted = []
+    real_replace = os.replace
+
+    def failing_replace(src, dst):
+        nonlocal replace_calls
+        replace_calls += 1
+        attempted.append(Path(dst))
+        if replace_calls == 1:
+            raise OSError("disk full")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(campaign.os, "replace", failing_replace)
+    with pytest.raises(OSError, match="disk full"):
+        campaign.run_held_out(tmp_path / "depth_ablation", tmp_path / "logs", results, provenance, "abc")
+    assert attempted == [results]
+    assert results.read_bytes() == before_results
+    assert provenance.read_bytes() == before_provenance
+    assert sorted(path.name for path in tmp_path.iterdir()) == sorted([results.name, provenance.name])
+
+
+def test_held_out_redoes_run_when_the_second_rename_fails(tmp_path, monkeypatch):
+    campaign = ablation_campaign()
+    results = tmp_path / "size-tiered-selection.csv"
+    provenance = tmp_path / "size-tiered-selection-provenance.csv"
+    results.write_text(campaign.HELD_OUT_HEADER + "\n")
+    provenance.write_text(campaign.PROVENANCE_HEADER + "\n")
+    monkeypatch.setattr(campaign, "held_out_schedule", lambda: [(75, 7000, "posterior")])
+    monkeypatch.setattr(campaign.socket, "gethostname", lambda: "bench")
+    calls = []
+
+    def fake_run_job(binary, log_dir, order, size, seed, arm):
+        calls.append((size, seed, arm))
+        return {
+            "arm": arm,
+            "seed": str(seed),
+            "hit": "1",
+            "force_calls_to_hit": "10",
+            "budget": str(campaign.PAPER_BUDGETS[size]),
+            "best": "-397.49233098",
+            "charged": "10",
+            "wall_s": "1.0",
+        }
+
+    monkeypatch.setattr(campaign, "run_job", fake_run_job)
+    real_replace = os.replace
+    replace_calls = 0
+
+    def failing_second_replace(src, dst):
+        nonlocal replace_calls
+        replace_calls += 1
+        if replace_calls == 2:
+            raise OSError("disk full")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(campaign.os, "replace", failing_second_replace)
+    with pytest.raises(OSError, match="disk full"):
+        campaign.run_held_out(tmp_path / "depth_ablation", tmp_path / "logs", results, provenance, "abc")
+    assert campaign.held_out_done(provenance, "abc") == set()
+    assert sorted(path.name for path in tmp_path.iterdir()) == sorted([results.name, provenance.name])
+
+    monkeypatch.setattr(campaign.os, "replace", real_replace)
+    campaign.run_held_out(tmp_path / "depth_ablation", tmp_path / "logs", results, provenance, "abc")
+    assert len(calls) == 2
+    assert campaign.held_out_done(provenance, "abc") == {(75, 7000, "posterior")}
+    assert results.read_text().splitlines() == [
+        campaign.HELD_OUT_HEADER,
+        "posterior,75,7000,1,10,-397.49233098,0.00000002,10,1.0",
+        "posterior,75,7000,1,10,-397.49233098,0.00000002,10,1.0",
+    ]
+    assert provenance.read_text().splitlines() == [
+        campaign.PROVENANCE_HEADER,
+        "posterior,75,7000,abc,bench",
+    ]
+
+
+def test_disagreeing_hf_fetcher_revisions_fail_the_audit():
+    audit = audit_mod.Audit()
+    fetcher = "paper/jctc/scripts/fetch_bench_data.py"
+    audit.text_cache[fetcher] = audit.text(fetcher).replace(
+        audit_mod.pinned_hf_revision(audit, fetcher),
+        "0" * 40,
+        1,
+    )
+    audit_mod.reproduction_records(audit)
+    assert any(row[1] == fetcher and "same dataset revision" in row[2]
+               for row in audit.drifts())
+
+
+@pytest.mark.parametrize("target", [
+    "bench/covalent-h2h/gfn2/rows.csv",
+    "bench/crest-equal/rows.csv",
+    "bench/gmin-panel/rows.csv",
+    "paper/jctc/FIGURE-SOURCE.tsv",
+    "paper/jctc/FIGURE-SOURCE-updates.tsv",
+    "results/size-tiered-selection.csv",
+    "bench/generic-alloy/g3-relabel.csv",
+    "data/hf-files.csv",
+    "data/hf-files-updates.csv",
+])
+def test_rewriting_or_truncating_a_record_line_fails_the_audit(target):
+    base_text = (ROOT / target).read_text()
+    lines = base_text.splitlines(keepends=True)
+
+    appended = audit_mod.Audit()
+    appended.text_cache[target] = base_text + lines[-1]
+    audit_mod.append_only_rows(appended)
+    assert not [r for r in appended.drifts() if r[1] == target]
+
+    header_rewritten = audit_mod.Audit()
+    header_rewritten.text_cache[target] = lines[0].rstrip("\n") + ",extra_col\n" + "".join(lines[1:])
+    audit_mod.append_only_rows(header_rewritten)
+    assert any(r[1] == target and "line 1 rewritten" in r[4] for r in header_rewritten.drifts())
+
+    row_rewritten = audit_mod.Audit()
+    row_rewritten.text_cache[target] = lines[0] + lines[1].rstrip("\n") + ",x\n" + "".join(lines[2:])
+    audit_mod.append_only_rows(row_rewritten)
+    assert any(r[1] == target and "line 2 rewritten" in r[4] for r in row_rewritten.drifts())
+
+    truncated = audit_mod.Audit()
+    truncated.text_cache[target] = lines[0]
+    audit_mod.append_only_rows(truncated)
+    assert any(r[1] == target and "truncated" in r[4] for r in truncated.drifts())
+
+
+def test_a_removed_row_of_a_record_absent_at_head_fails_the_audit(monkeypatch):
+    real_git = audit_mod.git
+
+    def history_names_a_deleted_record(*args, **kwargs):
+        result = real_git(*args, **kwargs)
+        if args[:2] == ("log", "--name-only"):
+            return subprocess.CompletedProcess(
+                result.args, 0, result.stdout + "bench/deleted-campaign.csv\n", ""
+            )
+        if args[:2] == ("log", "-p") and "bench/deleted-campaign.csv" in args:
+            return subprocess.CompletedProcess(
+                result.args, 0, result.stdout + "-old record\n", ""
+            )
+        return result
+
+    monkeypatch.setattr(audit_mod, "git", history_names_a_deleted_record)
+    audit = audit_mod.Audit()
+    audit_mod.append_only_rows(audit)
+    assert any(row[1] == "record-file history" and row[4] == "1 removed lines"
+               for row in audit.drifts())
+
+
+def test_removing_a_record_line_in_an_intermediate_commit_fails_the_audit(monkeypatch):
+    real_git = audit_mod.git
+
+    def history_with_removal(*args, **kwargs):
+        result = real_git(*args, **kwargs)
+        if args[:2] == ("log", "-p"):
+            return subprocess.CompletedProcess(result.args, 0, "--- a/bench/h2h.json\n-old record\n", "")
+        return result
+
+    monkeypatch.setattr(audit_mod, "git", history_with_removal)
+    audit = audit_mod.Audit()
+    audit_mod.append_only_rows(audit)
+    assert any(row[1] == "record-file history" and "1 removed lines" in row[4]
+               for row in audit.drifts())
+
+
+def test_gfn2_rgpot_sidecar_drift_is_reported():
+    audit = audit_mod.Audit()
+    sidecar = audit_mod.GFN2_RGPOT_SIDECAR
+    audit.text_cache[sidecar] = audit.text(sidecar).replace(
+        PAPER_CONSTANTS["RgpotRevision"],
+        "0" * 40,
+        1,
+    )
+    audit_mod.covalent_gfn2(audit)
+    assert any(row[1] == sidecar for row in audit.drifts())
+
+
+def test_tblite_receipt_reads_package_metadata(tmp_path):
+    metadata = tmp_path / "fpm.toml"
+    metadata.write_text('name = "tblite"\nversion = "0.7.0"\n')
+    output = tmp_path / "toolchain.json"
+    subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "paper/jctc/scripts/tblite_receipt.py"),
+            "--metadata",
+            str(metadata),
+            "--output",
+            str(output),
+        ],
+        check=True,
+    )
+    receipt = json.loads(output.read_text())
+    assert receipt["package"] == "tblite"
+    assert receipt["version"] == "0.7.0"
+    assert receipt["metadata"] == "fpm.toml"
+    assert receipt["metadata_sha256"] == hashlib.sha256(
+        metadata.read_bytes()
+    ).hexdigest()
+
+
+def test_tblite_receipt_falls_back_to_tomli_without_tomllib(tmp_path):
+    """Python 3.10 has no tomllib: the receipt reads the metadata through tomli there."""
+    metadata = tmp_path / "fpm.toml"
+    metadata.write_text('name = "tblite"\nversion = "0.7.0"\n')
+    code = (
+        "import importlib.abc, importlib.util, sys, types\n"
+        "try:\n"
+        "    import tomllib as parser\n"
+        "except ImportError:\n"
+        "    import tomli as parser\n"
+        "tomli = types.ModuleType('tomli')\n"
+        "tomli.loads = parser.loads\n"
+        "tomli.loaded_as = 'tomli'\n"
+        "sys.modules['tomli'] = tomli\n"
+        "sys.modules.pop('tomllib', None)\n"
+        "class NoTomllib(importlib.abc.MetaPathFinder):\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name == 'tomllib':\n"
+        "            raise ImportError('tomllib is not part of this Python')\n"
+        "sys.meta_path.insert(0, NoTomllib())\n"
+        "spec = importlib.util.spec_from_file_location('tblite_receipt', sys.argv[1])\n"
+        "module = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(module)\n"
+        "assert module.tomllib.loaded_as == 'tomli'\n"
+        "print(module.receipt(open(sys.argv[2], 'rb').read())['version'])\n"
+    )
+    run = subprocess.run([sys.executable, "-c", code, str(ROOT / "paper/jctc/scripts/tblite_receipt.py"), str(metadata)], capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr[-2000:]
+    assert run.stdout.strip() == "0.7.0"
+
+
+def test_the_test_dependencies_declare_tomli_for_python_310():
+    marker = "tomli>=2; python_version < '3.11'"
+    assert marker in (ROOT / "pyproject.toml").read_text()
+    assert marker in (ROOT / ".github/workflows/ci.yml").read_text()
+
+
+@pytest.mark.parametrize("path", ["CITATION.cff", ".zenodo.json"])
+def test_a_swapped_citation_affiliation_order_is_rejected(path):
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path).replace("SURF B.V.; TurtleTech ehf", "TurtleTech ehf; SURF B.V.")
+    audit_mod.citation_metadata(audit)
+    assert [row for row in audit.drifts() if row[1] == path]
+
+
+def _unreachable_number(audit):
+    return [
+        row for row in audit.drifts()
+        if row[2] == "a printed number traces to a commit this repository holds"
+    ]
+
+
+def test_withholding_narration_in_manuscript_or_si_fails():
+    for doc in (audit_mod.TEX, audit_mod.SI):
+        audit = audit_mod.Audit()
+        audit.text_cache[doc] = audit.text(doc) + "\nThese hit counts are not quoted.\n"
+        audit_mod.sutton_chen(audit)
+        assert any(row[1] == doc and "withholding narration" in row[2] for row in audit.drifts())
+
+
+def test_a_cite_key_missing_from_every_loaded_bibliography_fails():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX) + "\n\\cite{noSuchKey2026}\n"
+    audit_mod.bibliography_keys(audit)
+    assert [row for row in audit.drifts() if "noSuchKey2026" in row[4]]
+
+
+def test_a_cite_key_of_the_second_loaded_bibliography_resolves():
+    audit = audit_mod.Audit()
+    audit_mod.bibliography_keys(audit)
+    assert not audit.drifts()
+
+
+def test_a_changed_figure_source_fails_its_receipt(tmp_path):
+    (tmp_path / "paper/jctc").mkdir(parents=True)
+    (tmp_path / "paper/jctc/fig.py").write_text("print(1)\n")
+    (tmp_path / "paper/jctc/FIGURE-SOURCE.tsv").write_text(
+        "path\tsource_sha256\tkind\npaper/jctc/fig.py\t" + "0" * 64 + "\tscript\n")
+    audit = audit_mod.Audit()
+    audit_mod.figure_source_scripts(audit, tmp_path)
+    assert [row for row in audit.drifts() if "paper/jctc/fig.py" in row[2]]
+
+
+def test_an_update_row_replaces_the_receipt_hash_of_a_figure_source(tmp_path):
+    source = "print(1)\n"
+    digest = audit_mod.hashlib.sha256(source.encode()).hexdigest()
+    (tmp_path / "paper/jctc").mkdir(parents=True)
+    (tmp_path / "paper/jctc/fig.py").write_text(source)
+    (tmp_path / "paper/jctc/FIGURE-SOURCE.tsv").write_text(
+        "path\tsource_sha256\tkind\npaper/jctc/fig.py\t" + "0" * 64 + "\tscript\n")
+    (tmp_path / "paper/jctc/FIGURE-SOURCE-updates.tsv").write_text(
+        "path\tsource_sha256\tkind\tstatus\tupdate_reason\n"
+        f"paper/jctc/fig.py\t{digest}\tscript\tactive\tnew source\n")
+    audit = audit_mod.Audit()
+    audit_mod.figure_source_scripts(audit, tmp_path)
+    assert not audit.drifts()
+
+
+def test_a_typed_hartree_literal_in_source_fails():
+    audit = audit_mod.Audit()
+    path = "scripts/paired_stats.py"
+    audit.text_cache[path] = audit.text(path) + "\nHARTREE = 27.2114\n"
+    audit_mod.conversion_literals(audit)
+    assert [row for row in audit.drifts() if row[1] == path]
+
+
+def test_a_selection_table_cell_that_differs_from_its_rows_fails():
+    audit = audit_mod.Audit()
+    path = "bench/depth-posterior-ablation/README.md"
+    text = audit.text(path)
+    row = next(line for line in text.splitlines() if line.startswith("| LJ"))
+    cells = row.split("|")
+    cells[3] = " 999/999 "
+    audit.text_cache[path] = text.replace(row, "|".join(cells))
+    audit_mod.selection_tables(audit)
+    assert [r for r in audit.drifts() if r[1].startswith(path)]
+
+
+def test_a_superseded_list_that_loses_a_row_fails():
+    audit = audit_mod.Audit()
+    rows = audit.rows("bench/ase-au55/superseded.csv")
+    audit.read["bench/ase-au55/superseded.csv"] = rows[1:]
+    audit_mod.au55_superseded(audit)
+    assert audit.drifts()
+
+
+def test_a_retired_switch_that_config_stops_rejecting_fails():
+    audit = audit_mod.Audit()
+    path = "src/methods/cluster_hopping/config.rs"
+    audit.text_cache[path] = audit.text(path).replace('"prior_core"', '"prior_x"')
+    audit_mod.prior_switches(audit)
+    assert [row for row in audit.drifts() if "prior_core" in row[2]]
+
+
+NUMPY_BLOCK = """
+import importlib.abc, importlib.util, sys
+
+class NoNumpy(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in ("numpy", "scipy", "matplotlib"):
+            raise ImportError(f"{name} is not installed")
+
+sys.meta_path.insert(0, NoNumpy())
+spec = importlib.util.spec_from_file_location("paper_audit", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+audit = module.Audit()
+module.sutton_chen(audit)
+assert not audit.drifts(), audit.drifts()
+assert not any(name.split(".")[0] == "numpy" for name in sys.modules)
+"""
+
+
+def test_the_sutton_chen_check_runs_without_numpy():
+    run = subprocess.run([sys.executable, "-c", NUMPY_BLOCK, str(ROOT / "scripts" / "paper_audit.py")],
+                         cwd=ROOT, capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr[-2000:]
+
+
+FULL_AUDIT_WITHOUT_NUMPY = """
+import importlib.abc, runpy, sys
+
+BLOCKED = ("numpy", "scipy", "matplotlib")
+attempts = []
+
+class NoNumpy(importlib.abc.MetaPathFinder):
+    def find_spec(self, name, path=None, target=None):
+        if name.split(".")[0] in BLOCKED:
+            attempts.append(name)
+            raise ImportError(f"{name} is not installed")
+
+for name in list(sys.modules):
+    if name.split(".")[0] in BLOCKED:
+        del sys.modules[name]
+sys.meta_path.insert(0, NoNumpy())
+script = sys.argv[1]
+sys.argv = [script, *sys.argv[2:]]
+status = 0
+try:
+    runpy.run_path(script, run_name="__main__")
+except SystemExit as stop:
+    status = stop.code if isinstance(stop.code, int) else 1
+loaded = sorted(name for name in sys.modules if name.split(".")[0] in BLOCKED)
+print("blocked imports tried:", attempts, "loaded:", loaded)
+sys.exit(status or (3 if attempts or loaded else 0))
+"""
+
+
+def full_audit_without_numpy(script, *args):
+    return subprocess.run([sys.executable, "-c", FULL_AUDIT_WITHOUT_NUMPY, str(script), *args],
+                          cwd=ROOT, capture_output=True, text=True, check=False)
+
+
+def test_the_audit_runs_without_numpy():
+    run = full_audit_without_numpy(ROOT / "scripts" / "paper_audit.py", "--fetch-records")
+    assert run.returncode == 0, (run.stdout[-1500:], run.stderr[-1500:])
+    assert "blocked imports tried: [] loaded: []" in run.stdout
+    assert " 0 drifted" in run.stdout
+
+
+def test_the_numpy_free_audit_run_fails_when_a_path_imports_numpy(tmp_path):
+    caught = tmp_path / "caught.py"
+    caught.write_text("import numpy\n")
+    run = full_audit_without_numpy(caught)
+    assert run.returncode != 0
+    assert "ImportError" in run.stderr or "numpy" in run.stderr
+
+    swallowed = tmp_path / "swallowed.py"
+    swallowed.write_text("try:\n    import numpy\nexcept ImportError:\n    pass\n")
+    run = full_audit_without_numpy(swallowed)
+    assert run.returncode == 3
+    assert "blocked imports tried: ['numpy']" in run.stdout
+
+    lazy = tmp_path / "lazy.py"
+    lazy.write_text("def helper():\n    import numpy\nhelper()\n")
+    assert full_audit_without_numpy(lazy).returncode != 0
+
+
+def test_the_sutton_chen_helpers_import_without_numpy():
+    code = NUMPY_BLOCK.split("spec = ")[0] + (
+        "sys.path.insert(0, sys.argv[1])\n"
+        "import sc96_78_common, sc96_78_hits\n"
+        "assert 'numpy' not in sys.modules\n")
+    run = subprocess.run([sys.executable, "-c", code, str(ROOT / "scripts")],
+                         cwd=ROOT, capture_output=True, text=True, check=False)
+    assert run.returncode == 0, run.stderr[-2000:]
 
 
 IPI_FORM = "https://github.com/afiorent/i-pi.git@4e86f5fdc1583ef21f105fc2bed96a279b2430c1"
@@ -1820,12 +3178,12 @@ def test_the_develop_revision_is_an_ancestor():
 
 
 def test_a_qualified_external_revision_is_a_repo_url_and_a_full_sha():
-    assert audit_mod.external_form(IPI_FORM) is True
-    assert audit_mod.external_form("https://github.com/afiorent/i-pi.git@4e86f5fd") is False
-    assert audit_mod.external_form("4e86f5fd") is None
+    assert audit_mod.qualified_external_form(IPI_FORM) is True
+    assert audit_mod.qualified_external_form("https://github.com/afiorent/i-pi.git@4e86f5fd") is False
+    assert audit_mod.qualified_external_form("4e86f5fd") is None
     assert not audit_mod.harness_reachable("4e86f5fd")
     assert audit_mod.harness_reachable(IPI_FORM)
-    assert audit_mod.external_pin("aac1548a")
+    assert audit_mod.external_pin("aac1548a", abbreviated=True)
     assert audit_mod.harness_reachable("aac1548a")
 
 
@@ -1838,7 +3196,7 @@ IPI_PIN = IPI_FORM.split("@")[1]
     "https://github.com/someone/i-pi.git@" + IPI_PIN,
 ])
 def test_an_unpinned_external_revision_is_rejected(form):
-    assert audit_mod.external_form(form) is False
+    assert audit_mod.qualified_external_form(form) is False
     assert not audit_mod.harness_reachable(form)
     audit = audit_mod.Audit()
     path = "bench/pimc-lj38/README.md"
@@ -1849,7 +3207,7 @@ def test_an_unpinned_external_revision_is_rejected(form):
 
 def test_a_41_digit_external_revision_is_rejected():
     long = IPI_FORM + "0"
-    assert audit_mod.external_form(long) is False
+    assert audit_mod.qualified_external_form(long) is False
     audit = audit_mod.Audit()
     path = "bench/pimc-lj38/README.md"
     audit.text_cache[path] = audit.text(path).replace(IPI_FORM, long)
@@ -2313,6 +3671,8 @@ def test_an_unreachable_printed_revision_is_reported():
     audit.text_cache[path] = text.replace("| sc126-38 | anneal | 61fa67cf |", "| sc126-38 | anneal | e3ed7dad |")
     audit_mod.printed_harnesses(audit)
     assert any(row[4].startswith("e3ed7dad") for row in audit.drifts())
+
+
 def test_a_todo_marker_in_the_si_is_reported():
     audit = audit_mod.Audit()
     si = audit.text(audit_mod.SI)
@@ -2766,6 +4126,36 @@ def test_a_flag_off_hash_that_differs_from_base_is_reported():
         off[0]["best_bits"] = bits[:-1] + ("0" if bits[-1] != "0" else "1")
 
     assert "hash" in _flag_off_drift(mutate)
+
+
+def test_an_append_only_check_still_names_a_rewritten_line_and_spares_only_an_upstream_removal():
+    old = ["a\n", "b\n", "c\n"]
+    assert audit_mod._first_rewritten_line(old, [*old, "d\n"], set()) is None
+    assert audit_mod._first_rewritten_line(old, ["a\n", "B\n", "c\n"], set()) == 2
+    assert audit_mod._first_rewritten_line(old, ["a\n", "c\n"], set()) == 2
+    assert audit_mod._first_rewritten_line(old, ["a\n", "c\n"], {"b\n"}) is None
+    assert audit_mod._first_rewritten_line(old, ["a\n", "c\n"], {"c\n"}) == 2
+    assert audit_mod._first_rewritten_line(old, ["x\n", "b\n", "c\n"], {"a\n"}) == 2
+
+
+def test_only_the_lines_a_base_branch_deleted_after_the_fork_are_spared(monkeypatch):
+    import types
+
+    shows = {"fork:rows.csv": "a\nb\nc\n", "base:rows.csv": "a\nc\nz\n"}
+
+    def fake(*args, **kwargs):
+        if args[0] == "merge-base":
+            return types.SimpleNamespace(returncode=0, stdout="fork\n")
+        if args[0] == "show":
+            key = args[1]
+            return types.SimpleNamespace(returncode=0 if key in shows else 1, stdout=shows.get(key, ""))
+        raise AssertionError(args)
+
+    monkeypatch.setattr(audit_mod, "git", fake)
+    assert audit_mod._upstream_removed_lines("ref", "base", "rows.csv") == {"b\n"}
+    assert audit_mod._upstream_removed_lines("base", "base", "rows.csv") == set()
+    assert audit_mod._upstream_removed_lines("ref", None, "rows.csv") == set()
+
 
 def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_path):
     """The remote closure is the named branches and the optional tips, no more.

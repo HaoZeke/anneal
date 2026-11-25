@@ -604,8 +604,8 @@ mod featomic_cv {
     ///
     /// Two measurements, both in [`crate::gpr`].
     ///
-    /// The inverse-distance kernel there is not invariant to relabelling the
-    /// points. On 13 points a relabelling that changes nothing physical moved
+    /// The inverse-distance kernel there is not invariant to relabeling the
+    /// points. On 13 points a relabeling that changes nothing physical moved
     /// the posterior mean by 218 standard deviations and raised the reported
     /// standard deviation from 1.42e-4 to 9.74e-1. SOAP is invariant to
     /// permutation, rotation and translation by construction, so the question
@@ -797,13 +797,12 @@ mod featomic_cv {
     ///
     /// The axis is refitted on every structure until `warmup` is reached, and
     /// frozen after. It is not held at zero until then, and the difference is
-    /// not cosmetic. An earlier version reported a constant coordinate for the
-    /// first 200 structures, which is one bin, and a well-tempered bias
-    /// deposited into one bin is a bias on nothing. Measured at LJ38 over 24
-    /// seeds, that version solved 10 of 24 against 14 of 24 for its own
-    /// unbiased control: the cold start did not merely waste the warm-up, it
-    /// left a hill in the middle of the coordinate that the run then had to
-    /// climb out of.
+    /// not cosmetic. A constant coordinate over the first 200 structures is
+    /// one bin, and a well-tempered bias deposited into one bin is a bias on
+    /// nothing. Measured at LJ38 over 24 seeds, the constant-coordinate
+    /// warm-up solved 10 of 24 against 14 of 24 for its own unbiased control:
+    /// the cold start does not merely waste the warm-up, it leaves a hill in
+    /// the middle of the coordinate that the run then has to climb out of.
     ///
     /// Two details make refitting safe. The power iteration is warm started
     /// from the axis already held, so a refit moves the coordinate as little as
@@ -1131,7 +1130,7 @@ mod tests {
     }
 
     #[test]
-    fn the_coordination_estimate_ignores_labelling_and_orientation() {
+    fn the_coordination_estimate_ignores_labeling_and_orientation() {
         let cv = CoordinationKde::for_lj(13, 1.0);
         let x = Array1::from(icosahedron());
         let base = cv.describe(x.view());
@@ -1226,7 +1225,7 @@ mod featomic_tests {
     }
 
     #[test]
-    fn the_bond_order_coordinate_ignores_labelling_and_orientation() {
+    fn the_bond_order_coordinate_ignores_labeling_and_orientation() {
         // Rotation invariance holds to 1e-9, which is spherical-harmonic
         // round-off, not a tolerance chosen to pass. Permutation invariance is
         // exact up to summation order.

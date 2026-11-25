@@ -23,7 +23,6 @@ STEPS = (
     ("fig_rec_arms.py", ("figs/rec_arms.pdf",)),
     ("fig_lj75_ecdf.py", ("figs/lj75_ecdf.pdf",)),
     ("fig_summary_rates.py", ("figs/summary_rates.pdf",)),
-    ("fig_water_crest.py", ("figs/water_crest.pdf",)),
     ("fig_landfold_maps.py", ("figs/landfold_maps.pdf",)),
     ("fig_systems.py", ("figs/systems.pdf",)),
     ("fig_si_structures.py", ("figs/si_structures.pdf",)),
@@ -35,10 +34,23 @@ STEPS = (
 )
 
 
-def main() -> int:
-    FIGS.mkdir(parents=True, exist_ok=True)
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    out = Path(argv[0]) if argv else FIGS
+    if out.exists() and any(out.iterdir()):
+        raise SystemExit(f"refusing to overwrite {out}")
+    out.mkdir(parents=True, exist_ok=True)
     for script, args in STEPS:
-        command = [sys.executable, str(Path("scripts") / script), *args]
+        rewritten = []
+        for arg in args:
+            path = Path(arg)
+            if path.parts and path.parts[0] == "figs":
+                rewritten.append(str(out.joinpath(*path.parts[1:])))
+            elif arg == "figs":
+                rewritten.append(str(out))
+            else:
+                rewritten.append(arg)
+        command = [sys.executable, str(Path("scripts") / script), *rewritten]
         print("RUN", " ".join(command[1:]), flush=True)
         completed = subprocess.run(command, cwd=ROOT, check=False)
         if completed.returncode != 0:
@@ -49,4 +61,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

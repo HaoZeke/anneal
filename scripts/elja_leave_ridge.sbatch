@@ -32,7 +32,7 @@ if [[ ! -d .pixi/envs/cluster ]]; then
   echo "missing .pixi/envs/cluster; pixi install -e cluster on the login image" >&2
   exit 1
 fi
-echo "{\"kind\":\"build\",\"head\":\"$(git rev-parse HEAD)\",\"host\":\"$(hostname)\",\"job\":\"${SLURM_JOB_ID:-}\"}"
+echo "{\"kind\":\"build\",\"head\":\"$(git rev-parse HEAD)\",\"host\":\"$(python3 "$ROOT/scripts/machine_provenance.py" host-label)\",\"job\":\"${SLURM_JOB_ID:-}\"}"
 "$PIXI" run -e cluster cargo test --offline --release --test occupancy_leave_contract leave_quench_keeps_the_walk
 "$PIXI" run -e cluster cargo build --offline --release --features featomic --example leave_packing_probe
 exec "$PIXI" run -e cluster -- "$CARGO_TARGET_DIR/release/examples/leave_packing_probe" \

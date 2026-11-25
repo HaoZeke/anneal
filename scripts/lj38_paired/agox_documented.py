@@ -14,10 +14,6 @@ import sys
 import time
 from pathlib import Path
 
-if os.uname().nodename != "bench":
-    print("uts hostname is not bench", file=sys.stderr)
-    sys.exit(2)
-
 os.environ.update(
     {
         "OMP_NUM_THREADS": "1",
@@ -45,6 +41,11 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
+
+if host_label(os.uname().nodename) != "bench":
+    print("uts hostname is not bench", file=sys.stderr)
+    sys.exit(2)
 
 BUDGET = 400_000
 REFERENCE = -173.928427

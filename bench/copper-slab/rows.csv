@@ -1,0 +1,9 @@
+seed,best_eV,target_eV,gap_eV,command
+0,-415.971489,-415.971529,0.000040,scripts/run_cuh2_fcc_rec.sh
+1,-415.971442,-415.971529,0.000087,scripts/run_cuh2_fcc_rec.sh
+2,-415.971490,-415.971529,0.000039,scripts/run_cuh2_fcc_rec.sh
+3,-415.971521,-415.971529,0.000008,scripts/run_cuh2_fcc_rec.sh
+4,-415.971469,-415.971529,0.000060,scripts/run_cuh2_fcc_rec.sh
+5,-415.971467,-415.971529,0.000062,scripts/run_cuh2_fcc_rec.sh
+6,-415.971464,-415.971529,0.000065,scripts/run_cuh2_fcc_rec.sh
+7,-415.971161,-415.971529,0.000368,scripts/run_cuh2_fcc_rec.sh

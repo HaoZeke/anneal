@@ -161,7 +161,7 @@ sha256sum "$RGPOT/pixi.lock" | awk '{print $1}' >RGPOT_PIXI_LOCK_SHA256
   printf 'rgpot_source_commit=%s\n' "$RGPOT_COMMIT"
   printf 'rgpot_pixi_lock_sha256=%s\n' "$(cat RGPOT_PIXI_LOCK_SHA256)"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
-  printf 'host=%s\n' "$(hostname)"
+  printf 'host=%s\n' "$(python3 "$ROOT/scripts/machine_provenance.py" host-label)"
   printf 'pixi=%s\n' "$("$PIXI" --version)"
 } >MOLSLAB_BUILD_PROVENANCE
 sha256sum \
