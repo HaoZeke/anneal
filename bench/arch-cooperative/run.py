@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 import os
@@ -17,10 +18,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ROWS = ROOT / "bench/arch-cooperative/lj75/rows.csv"
-BASE = "3ccb2ad4fb930270f0fe95568ff09a5d0127d81b"
 TARGET = -397.492331
 TOLERANCE = 1.0e-4
 REPLICAS = 4
+FEATURES = "bank-rpc ira"
+IRA_SHA256 = "17d08d412418128ff5a345501b2e671c03694913ee5c1d5e6b7de8014babbd90"
 KIND_NAMES = (
     "local_proposal",
     "remote_proposal",
@@ -37,6 +39,12 @@ KIND_NAMES = (
 FIELDS = (
     "system",
     "arm",
+    "binary",
+    "binary_sha256",
+    "catalog_binary_sha256",
+    "features",
+    "shape_keyed",
+    "libira_sha256",
     "seed",
     "chains",
     "workers",
@@ -80,6 +88,20 @@ def cargo_target_directory() -> Path:
         text=True,
     )
     return Path(json.loads(output.stdout)["target_directory"])
+
+
+def revision() -> str:
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+    ).strip()
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def expanded_seed(seed: int, replica: int) -> int:
@@ -237,6 +259,14 @@ def run_seed(seed: int) -> dict[str, object]:
     for executable in (binary, server_binary):
         if not executable.is_file():
             raise RuntimeError(f"missing release executable {executable.name}")
+    ira_dir = os.environ.get("IRA_LIB_DIR")
+    if not ira_dir:
+        raise RuntimeError("IRA_LIB_DIR is required")
+    observed_ira_sha256 = sha256(Path(ira_dir) / "libira.so")
+    if observed_ira_sha256 != IRA_SHA256:
+        raise RuntimeError(
+            f"libira.so digest {observed_ira_sha256} does not match protocol"
+        )
 
     with tempfile.TemporaryDirectory(prefix=f"arch-coop-{seed}-") as directory:
         work = Path(directory)
@@ -316,7 +346,7 @@ def run_seed(seed: int) -> dict[str, object]:
                                 "75",
                                 str(per_replica),
                                 "1",
-                                "communicating",
+                                "communicating,shape",
                             ],
                         ),
                         stdout=stdout,
@@ -359,6 +389,14 @@ def run_seed(seed: int) -> dict[str, object]:
             raise RuntimeError(f"timed sample was only {wall:.6f} seconds")
 
         ledgers = [parse_ledger(work / f"worker-{replica}.out") for replica in range(REPLICAS)]
+        resolved_configs = [
+            json.loads((work / f"resolved-{replica}.json").read_text())
+            for replica in range(REPLICAS)
+        ]
+        if not all(config.get("shape_keyed") is True for config in resolved_configs):
+            raise RuntimeError("resolved configuration did not enable shape_keyed")
+        if any(config != resolved_configs[0] for config in resolved_configs[1:]):
+            raise RuntimeError("replica configurations differ")
         best = min(parse_best(work / f"worker-{replica}.out") for replica in range(REPLICAS))
         coordinator_total, calls_to_hit = trace_totals(
             [work / f"trace-{replica}.jsonl" for replica in range(REPLICAS)]
@@ -366,6 +404,12 @@ def run_seed(seed: int) -> dict[str, object]:
         row: dict[str, object] = {
             "system": "lj75",
             "arm": "CooperativeRun",
+            "binary": "lj_cluster_search+catalog_server",
+            "binary_sha256": sha256(binary),
+            "catalog_binary_sha256": sha256(server_binary),
+            "features": FEATURES,
+            "shape_keyed": 1,
+            "libira_sha256": observed_ira_sha256,
             "seed": seed,
             "chains": REPLICAS,
             "workers": REPLICAS,
@@ -377,7 +421,7 @@ def run_seed(seed: int) -> dict[str, object]:
             "wall_s": f"{wall:.6f}",
             "cpu_s": f"{sum(parse_timing(work / f'worker-{replica}.time') for replica in range(REPLICAS)) + parse_timing(server_time):.6f}",
             "peak_rssanon_kib": peak_rss,
-            "revision": BASE,
+            "revision": revision(),
             "nproc": len(os.sched_getaffinity(0)),
             "cpu_model": cpu_model(),
         }

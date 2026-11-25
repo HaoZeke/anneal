@@ -14,7 +14,6 @@ REPORT = HERE / "lj75/REPORT.md"
 RESAMPLES = 10_000
 BOOTSTRAP_SEED = 20_261_123
 EXPECTED_SEEDS = 12
-SECOND_SEED_LOWER_BOUND_S = 1_826.0
 
 
 def percentile(values: list[float], probability: float) -> float:
@@ -73,14 +72,17 @@ def main() -> None:
     noun = "seed" if completed == 1 else "seeds"
     projection = ""
     if completed < EXPECTED_SEEDS:
-        projected_hours = (
-            (walls[0] + SECOND_SEED_LOWER_BOUND_S) / 2 * EXPECTED_SEEDS / 3600
+        projected_hours = statistics.mean(walls) * EXPECTED_SEEDS / 3600
+        done = ", ".join(row["seed"] for row in rows)
+        remaining = ", ".join(
+            str(seed)
+            for seed in range(2000, 2012)
+            if str(seed) not in {row["seed"] for row in rows}
         )
         projection = f"""
-Seed 2001 remained active after {SECOND_SEED_LOWER_BOUND_S:.0f} seconds.
-Together with seed 2000, that gives a full-panel lower-bound projection
-of {projected_hours:.2f} hours. The four-hour rule stopped the incomplete
-seed; seeds 2001 through 2011 remain unmeasured.
+The completed-seed mean projects the full panel at
+{projected_hours:.2f} hours. Completed seeds: {done}. Remaining seeds:
+{remaining}.
 """
     report = f"""# CooperativeRun LJ75 report
 
@@ -88,6 +90,10 @@ The arm completed {completed} {noun} and hit the target on
 {sum(int(value) for value in hits)} {noun}. Misses enter calls-to-hit as
 {budget + 1}. Intervals are percentile bootstrap 95% confidence
 intervals from {RESAMPLES} resamples with seed {BOOTSTRAP_SEED}.
+
+The earlier row is retained unchanged in `rows-bankrpc-only.csv`.
+Its configuration had `shape_keyed` disabled, so it is excluded from
+this report and is not a paper cell.
 
 | Measure | Estimate | 95% CI |
 | --- | ---: | ---: |
