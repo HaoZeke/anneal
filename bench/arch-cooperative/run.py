@@ -156,7 +156,8 @@ def await_endpoint(
 
 
 def parse_timing(path: Path) -> float:
-    user, system = path.read_text().strip().split(",")
+    line = path.read_text().strip().splitlines()[-1]
+    user, system = line.split(",")
     return float(user) + float(system)
 
 
