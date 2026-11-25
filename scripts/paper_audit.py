@@ -19,7 +19,7 @@ be listed in ``KNOWN_GAPS``. A revision that was rebuilt on push is read
 through its alias in ``ALIASES`` once the pushed equivalent is verified; one
 with no pushed equivalent is listed in ``UNPUSHED`` with the reason. A printed
 number may rest on a commit off HEAD only when that commit is on a record
-branch listed in ``RECORD_REFS`` that origin holds at the listed SHA and tree.
+ref listed in ``RECORD_REFS`` that origin holds at the listed SHA and tree.
 Printed numbers no committed row backs are listed in ``UNTRACED``; their text
 must still be where the list says. README rows on a commit nothing holds,
 whose numbers the paper does not print, are listed in ``UNVERIFIABLE`` with
@@ -98,18 +98,13 @@ AUDIT_REMOTE_BRANCHES = (
 # They join the remote closure when the ref is present. A missing one does
 # not make the clone unauditable: the branch may have been deleted after merge.
 AUDIT_OPTIONAL_REMOTES = (
-    "record/repro-pin",
     "bench/cov-floor2",
     "bench/ptcu-gupta",
     "fix/morse-gmin",
     "fix/sc-portfolio",
     "fix/sc-shelf-waypoint",
-    # Pushed record tips that are not in develop. f009acc9 is on the first,
-    # 0cc3814c on the second. A missing ref does not stop the audit.
-    "record/rerun-tuned-gmin-r2",
-    "record/g3-funnel",
 )
-# Push-only record branches whose commits printed numbers may rest on.
+# Audit record refs on origin whose commits printed numbers may rest on.
 RECORD_REFS = "bench/record-refs.csv"
 def unreachable_reasons() -> dict[str, str]:
     """Load the one reason shared by every map row for each identifier."""
@@ -1090,7 +1085,7 @@ def imported(audit: Audit, folder: str, name: str = "rows.csv", keys: tuple[str,
     local = git("hash-object", str(ROOT / path)).stdout.strip()
     audit.cell(path, "blob of the copy", blob, local)
     audit.cell(path, "blob at the record commit", blob, git("rev-parse", f"{fields['commit']}:{source}").stdout.strip())
-    on_branch = git("merge-base", "--is-ancestor", fields["commit"], f"refs/remotes/origin/{fields['branch']}").returncode == 0
+    on_branch = _commit_on_provenance_ref(fields["branch"], fields["commit"])
     audit.record(on_branch, path, "the record commit is on the record branch of origin", fields["branch"],
                  "on it" if on_branch else "not on it")
     return path
@@ -2254,8 +2249,7 @@ def outside_session(audit: Audit) -> None:
     audit.cell(path, "blob of the committed projection", fields["blob"],
                git("hash-object", str(ROOT / path)).stdout.strip())
     audit.cell(path, "selection from the record source", "arms develop,develop_prime", fields["selection"])
-    on_branch = git("merge-base", "--is-ancestor", fields["commit"],
-                    f"refs/remotes/origin/{fields['branch']}").returncode == 0
+    on_branch = _commit_on_provenance_ref(fields["branch"], fields["commit"])
     audit.record(on_branch, path, "the record commit is on the record branch of origin",
                  fields["branch"], "on it" if on_branch else "not on it")
     audit.cell(f"{OUTSIDE_DATA}/PROVENANCE", "tree of the record commit", fields["tree"],
@@ -4241,7 +4235,7 @@ class RevisionIndex:
         audited_refs = ["HEAD", *(ref for ref in remote_refs
                                    if git("show-ref", "--verify", "--quiet", ref).returncode == 0),
                         *git("for-each-ref", "--format=%(refname)", "refs/tags").stdout.split()]
-        # A verified record ref is a branch origin holds at the registered SHA and tree.
+        # A verified record ref is an audit ref origin holds at the registered SHA and tree.
         records = list(_verified_record_refs())
         audited_heads = git("rev-parse", *audited_refs).stdout.split() + records
         self.commit = {n: line.split()[0] for n, line in zip(asked, out)
@@ -4732,10 +4726,10 @@ def science_claims(audit: Audit) -> None:
     audit.said(SI, "A fingerprint bias during local optimization is reported on LJ\\(_{38}\\)\n"
                    "and LJ\\(_{75}\\).")
     trail = "666591a0"
-    audit.record(git("merge-base", "--is-ancestor", trail, SUBMITTED).returncode != 0, TEX,
+    trail_on_origin = _commit_on_provenance_ref("refs/audit/record/leave-lj75", trail)
+    audit.record(bool(commit_of(trail)) and git("merge-base", "--is-ancestor", trail, SUBMITTED).returncode != 0, TEX,
                  "the trail record is outside the history of the submitted revision", "outside", "checked")
-    audit.record(bool(git("branch", "-r", "--contains", trail).stdout.strip()), TEX, "the trail record is on origin",
-                 "present", "checked")
+    audit.record(trail_on_origin, TEX, "the trail record is on origin", "present", "checked")
     audit.said(TEX, "Among comparisons that report tests, every test is two-sided and exact, so\n"
                     "no continuity correction enters.")
     audit.said(TEX, "No adjustment for multiple comparisons is made: every reported \\(p\\) is\n"
@@ -5625,47 +5619,22 @@ def _verified_aliases() -> tuple[tuple[str, str], ...]:
 
 
 # Network reads of record refs are off unless main() is passed --fetch-records.
-# A record/<name> branch is fetched into one fixed ref. A refs/audit/record/<name>
-# ref is fetched by that name.
+# Each refs/audit/record/<name> ref is fetched by its full name.
 _FETCH_RECORDS = False
-_AUDIT_FETCH_REF = "refs/audit/record/fetched"
-_RECORD_REF_NAME = re.compile(r"record/[A-Za-z0-9][A-Za-z0-9._-]*")
 _AUDIT_RECORD_REF_NAME = re.compile(r"refs/audit/record/[A-Za-z0-9][A-Za-z0-9._-]*")
-
-
-def record_ref_name(ref: str) -> bool:
-    """True when ref is a single record/<name> git will accept as a branch.
-
-    A colon, a dash option, .., a trailing dot, or a .lock suffix is
-    rejected before it can reach a fetch refspec.
-    """
-    if _RECORD_REF_NAME.fullmatch(ref) is None:
-        return False
-    if ".." in ref or ref.endswith(".") or ref.endswith(".lock"):
-        return False
-    return git("check-ref-format", "--branch", ref).returncode == 0
 
 
 def audit_record_ref_name(ref: str) -> bool:
     """True when ref is the full name refs/audit/record/<name>.
 
-    The same rejects as a branch row: a colon, .., a trailing dot, or a
-    .lock suffix never reaches a fetch argument.
+    A colon, a dash option, .., a trailing dot, or a .lock suffix is
+    rejected before it can reach a fetch argument.
     """
     if _AUDIT_RECORD_REF_NAME.fullmatch(ref) is None:
         return False
     if ".." in ref or ref.endswith(".") or ref.endswith(".lock"):
         return False
     return git("check-ref-format", ref).returncode == 0
-
-
-@functools.cache
-def origin_record_heads() -> dict[str, str]:
-    """The record/* branches on origin, by name. Empty when origin cannot be reached, so every registry row fails."""
-    out = git("ls-remote", "origin", "refs/heads/record/*")
-    if out.returncode != 0:
-        return {}
-    return {ref.removeprefix("refs/heads/"): sha for sha, ref in (line.split("\t") for line in out.stdout.splitlines())}
 
 
 @functools.cache
@@ -5678,7 +5647,7 @@ def origin_audit_record_refs() -> dict[str, str]:
 
 
 def record_ref_status(path: str) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
-    """Each registered record ref with its checks: it is a record ref named by a full SHA, origin holds it at
+    """Each registered record ref with its checks: it is an audit record ref named by a full SHA, origin holds it at
     that SHA, git fetch origin brings it here, and its tree is the registered one."""
     return _record_ref_status(ROOT, path, _FETCH_RECORDS)
 
@@ -5691,31 +5660,21 @@ def _record_ref_status(root: Path, path: str, fetch_records: bool) -> tuple[tupl
         table = list(csv.DictReader(line for line in handle if not line.startswith("#")))
     if not table:
         return ()
-    heads = {}
-    if fetch_records:
-        heads.update(origin_record_heads())
-        heads.update(origin_audit_record_refs())
+    heads = origin_audit_record_refs() if fetch_records else {}
     out = []
     for row in table:
         ref, sha, tree = row["ref"].strip(), row["sha"].strip(), row["tree"].strip()
-        as_branch = record_ref_name(ref)
-        as_ref = audit_record_ref_name(ref)
-        named = (as_branch or as_ref) and bool(re.fullmatch(r"[0-9a-f]{40}", sha))
+        named = audit_record_ref_name(ref) and bool(re.fullmatch(r"[0-9a-f]{40}", sha))
         fetched = False
-        if named and fetch_records and as_ref:
+        if named and fetch_records:
             fetch = git("fetch", "--quiet", "--no-tags", "origin", ref)
             tip = git("rev-parse", "--verify", "--quiet", "FETCH_HEAD").stdout.strip()
-            fetched = fetch.returncode == 0 and tip == sha
-        elif named and fetch_records:
-            spec = f"+refs/heads/{ref}:{_AUDIT_FETCH_REF}"
-            fetch = git("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", "--", spec)
-            tip = git("rev-parse", "--verify", "--quiet", _AUDIT_FETCH_REF).stdout.strip()
             fetched = fetch.returncode == 0 and tip == sha
         present = git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0 if named else False
         actual = git("rev-parse", "--verify", "--quiet", f"{sha}^{{tree}}").stdout.strip() if present else ""
         out.append((ref, sha, (
             (f"{ref} is a record ref with a full SHA", named, f"{ref} {sha}",
-             "record/<name> or refs/audit/record/<name>, and 40 hex digits"),
+             "refs/audit/record/<name>, and 40 hex digits"),
             (f"{ref} is on origin at {sha[:8]}", heads.get(ref) == sha, heads.get(ref, "absent"), sha),
             (f"{ref} fetches", fetched, "fetched" if fetched else "fails", "fetched"),
             (f"{ref} has tree {tree[:8] or 'unrecorded'}", bool(tree) and actual == tree, actual or "absent",
@@ -5726,8 +5685,21 @@ def _record_ref_status(root: Path, path: str, fetch_records: bool) -> tuple[tupl
     return tuple(out)
 
 
+def _verified_record_ref_tips() -> dict[str, str]:
+    return {ref: sha for ref, sha, checks in record_ref_status(RECORD_REFS) if all(ok for _, ok, _, _ in checks)}
+
+
+def _commit_on_provenance_ref(branch: str, commit: str) -> bool:
+    """True when commit is an ancestor of the verified audit ref for a record ref, or of origin/<branch>."""
+    if branch.startswith(("record/", "refs/audit/record/")):
+        ref = branch if branch.startswith("refs/audit/record/") else f"refs/audit/{branch}"
+        tip = _verified_record_ref_tips().get(ref)
+        return bool(tip) and git("merge-base", "--is-ancestor", commit, tip).returncode == 0
+    return git("merge-base", "--is-ancestor", commit, f"refs/remotes/origin/{branch}").returncode == 0
+
+
 def _verified_record_refs() -> tuple[str, ...]:
-    return tuple(sha for _ref, sha, checks in record_ref_status(RECORD_REFS) if all(ok for _, ok, _, _ in checks))
+    return tuple(_verified_record_ref_tips().values())
 
 
 def record_ref_checks(audit: Audit) -> None:
@@ -6155,12 +6127,12 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--pre-submission", action="store_true",
                         help="fail while any [RERUN: item N] tag or [TODO: Gn] marker remains")
     parser.add_argument("--fetch-records", action="store_true",
-                        help="fetch record branches into refs/audit/record/fetched, and refs/audit/record/* by name")
+                        help="fetch refs/audit/record/* from origin by name")
     args = parser.parse_args(argv)
     global _FETCH_RECORDS
     _FETCH_RECORDS = args.fetch_records
     _record_ref_status.cache_clear()
-    origin_record_heads.cache_clear()
+    origin_audit_record_refs.cache_clear()
     return run(args.report, args.write_revision_map, args.pre_submission)
 
 

@@ -14,7 +14,7 @@ The GMIN data file is `scripts/metal_h2h/run_sc.py` `data_text`: the container
 left to GMIN, the Doye-Wales temperature, and the step 0.40 sigma in units of a.
 
 Earlier numbers whose revision is not reachable were removed. They remain on
-`origin/fix/sc-shelf-waypoint` and `origin/record/bench-sc-h2h-n12`.
+`origin/fix/sc-shelf-waypoint` and `refs/audit/record/bench-sc-h2h-n12`.
 
 | System | Arm | Code revision | Hits | Calls median | Fisher p | Mann-Whitney p calls |
 |---|---|---|---|---|---|---|

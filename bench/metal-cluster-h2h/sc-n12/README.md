@@ -10,7 +10,7 @@ Calls are type-7 medians.
 
 Wall medians and the earlier harness rows were removed because their
 revisions are not reachable. Those rows remain on
-`origin/fix/sc-shelf-waypoint` and `origin/record/bench-sc-h2h-n12`.
+`origin/fix/sc-shelf-waypoint` and `refs/audit/record/bench-sc-h2h-n12`.
 
 | System | Arm | Code revision | Hits | Calls median | Fisher p | Mann-Whitney p calls |
 |---|---|---|---|---|---|---|
