@@ -94,3 +94,33 @@ LJ38 false -171.4998424538606514 46 27 46 2500
 LJ98 false -531.6231658616923141 20 13 21 2500";
     assert_eq!(records.join("\n"), expected);
 }
+
+/// The seed-7 pin above ends worse with the completion on than off. That
+/// is one seed of a walk that diverges at the first completed basin; the
+/// mean over sixteen seeds at the same budget is what the completion is
+/// asked to keep.
+#[test]
+fn the_completion_does_not_lower_the_lj98_mean_over_sixteen_seeds() {
+    anneal_core::install_rgpot_kernels!();
+    let n = 98;
+    let mean = |completion: bool| {
+        let total: f64 = (0..16u64)
+            .map(|seed| {
+                let mut cfg = Config::recommended(n);
+                cfg.symmetry_completion_on_new = completion;
+                let pot = PairPotential::lennard_jones(n);
+                let mut ledger = Ledger::new(2500);
+                search(&pot, &cfg, &mut ledger, seed)
+                    .expect("finite")
+                    .0
+                    .best
+            })
+            .sum();
+        total / 16.0
+    };
+    let (on, off) = (mean(true), mean(false));
+    assert!(
+        on <= off,
+        "LJ98 mean best energy over seeds 0..16 is {on:.4} with the completion and {off:.4} without"
+    );
+}
