@@ -3073,3 +3073,26 @@ def test_require_lf_rejects_carriage_returns(tmp_path):
         crlf.write_bytes(body)
         with pytest.raises(SystemExit, match="contains CR"):
             mp.require_lf(crlf)
+
+
+def test_template_free_runner_refuses_carriage_returns(tmp_path, monkeypatch):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "template_free2_run_cells", ROOT / "bench" / "template-free2-r7" / "run_cells.py"
+    )
+    run_cells = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run_cells)
+    rows = tmp_path / "rows.csv"
+    rows.write_bytes((",".join(run_cells.FIELDS) + "\r\n").encode())
+
+    def no_run(*_args, **_kwargs):
+        raise AssertionError("a run started")
+
+    monkeypatch.setattr(run_cells.subprocess, "run", no_run)
+    monkeypatch.setattr(run_cells, "machine_digest", lambda: "f" * 64)
+    monkeypatch.setattr(
+        run_cells.sys, "argv", ["run_cells.py", str(rows), "lj38", "1:1", f"a={tmp_path}=abc"]
+    )
+    with pytest.raises(SystemExit, match="contains CR"):
+        run_cells.main()

@@ -3650,7 +3650,9 @@ def revision_row_tables() -> list[tuple[str, list[dict[str, str]]]]:
                 lines = [line for line in handle if line.strip() and not line.lstrip().startswith("#")]
             if not lines:
                 continue
-            rows = list(csv.DictReader(lines, delimiter=delimiter))
+            reader = csv.DictReader(lines, delimiter=delimiter)
+            rows = list(reader)
+            require_row_lf(absolute, reader.fieldnames)
             if rows and set(rows[0]).intersection(ALL_REVISION_COLUMNS):
                 tables.append((path, rows))
     return tables
@@ -4480,7 +4482,9 @@ def _csv_backed_flags(rel: str, text: str, header: list[str], rows: list[tuple[i
     flagged = []
     for csv_path, beside in _backing_csvs(rel, text, section):
         with csv_path.open(newline="") as handle:
-            data = list(csv.DictReader(line for line in handle if line.strip() and not line.startswith("#")))
+            reader = csv.DictReader(line for line in handle if line.strip() and not line.startswith("#"))
+            data = list(reader)
+        require_row_lf(csv_path, reader.fieldnames)
         if not data:
             continue
         fields = [name for name in _REVISION_FIELDS if name in data[0]]

@@ -12,7 +12,7 @@ import csv, hashlib, os, struct, subprocess, sys, tempfile, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from machine_provenance import machine_digest  # noqa: E402
+from machine_provenance import machine_digest, require_lf  # noqa: E402
 from target_tol import energy_hits  # noqa: E402
 
 REFERENCES = {
@@ -56,6 +56,7 @@ def main():
     logs.mkdir(parents=True, exist_ok=True)
     done = set()
     if rows_path.exists():
+        require_lf(rows_path)
         done = {(r["cell"], r["arm"], r["seed"]) for r in csv.DictReader(rows_path.open())}
     else:
         with rows_path.open("w", newline="") as f:
