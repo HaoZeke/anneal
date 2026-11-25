@@ -163,6 +163,7 @@ KNOWN_GAPS = {
     "bench/morse-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/fp-fingerprint/rows.csv": "revision and host unrecorded (no revision or host column)",
     "bench/tip4p-h2h/rows-h2h-r2.csv": "revision recorded; no host column",
+    "bench/gmin-tuned/rows-shard2.csv": "revision recorded; no host column; machine_id recorded; no cpu_model column",
     "bench/covalent-h2h/before/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/after/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/covalent-h2h/v2/seeds.csv": "revision and host unrecorded (no revision or host column)",
@@ -6640,6 +6641,37 @@ def crest_table(audit: Audit) -> None:
             audit.record(not found, path, f"the text does not say {gone}", "absent", "present" if found else "absent")
 
 
+def gmin_tuned(audit: Audit) -> None:
+    """The tuned GMIN sentence of the main text, from bench/gmin-tuned/rows-shard2.csv."""
+    path = "bench/gmin-tuned/rows-shard2.csv"
+    rows = audit.rows(path)
+    got = {(s, c): pick(rows, system=s, code=c) for s in ("lj98", "lj104") for c in ("anneal", "gmin")}
+    revisions = {r["code_revision"] for (s, c), g in got.items() if c == "anneal" for r in g}
+    audit.cell(path, "the anneal revision of the tuned session", "5eb79cdcb0a986984dc7b487e5a3cc93224246f9",
+               " ".join(sorted(revisions)))
+    ancestor_of(audit, path, "5eb79cdcb0a986984dc7b487e5a3cc93224246f9", SUBMITTED)
+    audit.cell(path, "one session", "1", float(len({r["session"] for r in rows})))
+    hit = {k: sum(r["hit"] == "1" for r in g) for k, g in got.items()}
+    audit.said(TEX, f"GMIN hits LJ\\(_{{98}}\\) on {hit[('lj98', 'gmin')]} of 12 seeds and LJ\\(_{{104}}\\) on "
+                    f"{hit[('lj104', 'gmin')]} of 12, against {hit[('lj98', 'anneal')]} and {hit[('lj104', 'anneal')]} "
+                    "for an ancestor of the submitted revision in the same session.")
+    check = [sum(r["hit"] == "1" for r in pick(rows, system="lj98aa", code=c)) for c in ("gmin_a", "gmin_b")]
+    audit.cell(path, "the two same-binary LJ98 GMIN arms", "1 1", " ".join(map(str, check)))
+    audit.said(SI, "Two more GMIN arms on LJ\\(_{98}\\), with the same binary and input, hit 1 of 12 seeds each.")
+
+
+def morse_m70_pair(audit: Audit) -> None:
+    """The M70 counts of the stored paired record that the SI states beside tab:si-morse-g1."""
+    path = "bench/morse-panel/seeds.csv"
+    rows = audit.rows(path)
+    hit = {(r, c): sum(x["hit"] == "1" for x in pick(rows, system=f"m70r{r}", code=c))
+           for r in (3, 6, 10, 14) for c in ("anneal", "gmin")}
+    audit.said(SI, f"at \\(\\rho=3\\) and 6 GMIN hits {hit[(3, 'gmin')]} and {hit[(6, 'gmin')]} of 12 seeds and this "
+                   f"code {hit[(3, 'anneal')]} and {hit[(6, 'anneal')]}, and at \\(\\rho=10\\) and 14 this code hits "
+                   f"{hit[(10, 'anneal')]} and {hit[(14, 'anneal')]} and GMIN none.")
+    audit.cell(path, "GMIN hits at rho 10 and 14", "0 0", f"{hit[(10, 'gmin')]} {hit[(14, 'gmin')]}")
+
+
 def manuscript_followups(audit: Audit) -> None:
     """The cluster-preset hits, the wall-cap reconciliation, the GMIN settings, and the M55 disclosures."""
     audit.said(SI, "The Lennard-Jones rows run the Wales-group LJ\\(_{38}\\) introduction file at every Lennard-Jones size,")
@@ -7758,7 +7790,8 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         science_claims, rigid_stall, presets_and_templates, no_anneal_restart,
         hexamer_provenance, template_era, outside_session, morse_g1, gmin_sources,
         g3_session, no_move_choice_claim,
-        reproduction_records, sutton_chen, crest_equal, crest_equal_bench, crest_table,
+        reproduction_records, sutton_chen, crest_equal, crest_equal_bench, crest_table, gmin_tuned,
+        morse_m70_pair,
         append_only_rows, tip4p_unscored, tip4p_r2_rows, pending_text, citation_metadata,
                   figure_source_scripts, bibliography_keys, conversion_literals,
                   own_references, build_receipts, selection_tables, gmin_panel_drivers, prior_switches,
