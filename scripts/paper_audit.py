@@ -94,6 +94,7 @@ AUDIT_OPTIONAL_REMOTES = (
     "record/repro-pin",
     "bench/cov-floor2",
     "bench/ptcu-gupta",
+    "fix/conf-miss4",
     "fix/morse-gmin",
     "fix/sc-portfolio",
     "fix/sc-shelf-waypoint",
