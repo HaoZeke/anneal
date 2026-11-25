@@ -458,6 +458,10 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     )
 
 
+def _missing_archive(exc):
+    return isinstance(exc, ValueError) and "graphkey" in str(exc)
+
+
 def test_cluster_search_maps_a_non_finite_start_to_value_error():
     def energy(_x):
         return float("nan")
@@ -468,59 +472,87 @@ def test_cluster_search_maps_a_non_finite_start_to_value_error():
     with pytest.raises(ValueError, match="no finite start"):
         cluster_search(energy, gradient, 4, 200, seed=0)
 
+    # A build without archive search refuses ras before the objective runs.
+    # With it, the same miss must be ValueError, not an abort.
+    try:
+        cluster_search(energy, gradient, 4, 200, seed=0, ras=True)
+    except ValueError as exc:
+        if _missing_archive(exc):
+            pytest.skip("archive search is not in this build")
+        assert "no finite start" in str(exc)
+    else:
+        raise AssertionError("archive search returned from an always-missing objective")
+
 
 def test_archive_search_keyboard_interrupt_is_not_a_panic():
     calls = {"n": 0}
 
-    def energy(x):
+    def energy(_x):
         calls["n"] += 1
-        if calls["n"] >= 8:
-            raise KeyboardInterrupt
-        return lj_energy(x)
+        raise KeyboardInterrupt
+
+    def gradient(x):
+        return lj_grad(x)
+
+    # Budget below the gradient probe, so the first energy call is the
+    # paired evaluation. An ending error there used to fail the charge
+    # check before the interrupt was re-raised.
+    try:
+        cluster_search(energy, gradient, 4, 3, seed=0, ras=True)
+    except KeyboardInterrupt:
+        assert calls["n"] == 1
+        return
+    except ValueError as exc:
+        if _missing_archive(exc):
+            pytest.skip("archive search is not in this build")
+        raise
+    raise AssertionError("archive search returned after a keyboard interrupt")
+
+
+def test_archive_search_callback_error_is_not_a_panic():
+    calls = {"n": 0}
+
+    def energy(_x):
+        calls["n"] += 1
+        raise SystemExit("callback failed")
 
     def gradient(x):
         return lj_grad(x)
 
     try:
-        cluster_search(energy, gradient, 4, 800, seed=0, ras=True)
-    except KeyboardInterrupt:
-        assert calls["n"] >= 8
+        cluster_search(energy, gradient, 4, 3, seed=0, ras=True)
+    except SystemExit as exc:
+        assert "callback failed" in str(exc)
+        assert calls["n"] == 1
         return
     except ValueError as exc:
-        assert "graphkey" in str(exc)
-        assert calls["n"] < 8
-        return
-    raise AssertionError("archive search returned after a keyboard interrupt")
+        if _missing_archive(exc):
+            pytest.skip("archive search is not in this build")
+        raise
+    raise AssertionError("archive search returned after an ending callback error")
 
 
-def test_archive_search_callback_error_is_not_a_panic():
-    import warnings
-
-    calls = {"n": 0}
-
-    def energy(x):
-        calls["n"] += 1
-        if calls["n"] == 8:
-            raise RuntimeError("callback failed")
-        return lj_energy(x)
+@pytest.mark.parametrize("budget", [200, 50_003])
+def test_archive_search_maps_a_non_finite_start_to_value_error(budget):
+    def energy(_x):
+        return float("nan")
 
     def gradient(x):
-        return lj_grad(x)
+        return np.zeros_like(np.asarray(x, dtype=np.float64))
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always", RuntimeWarning)
-        try:
-            out = cluster_search(energy, gradient, 4, 800, seed=0, ras=True)
-        except ValueError as exc:
-            assert "graphkey" in str(exc)
-            assert calls["n"] < 8
-            return
-        except RuntimeError as exc:
-            assert "callback failed" in str(exc)
-            return
-    assert np.isfinite(out["best_energy"])
-    assert calls["n"] > 8
-    assert any(issubclass(item.category, RuntimeWarning) for item in caught)
+    # 200 leaves the short walk. The gradient probe spends three charges
+    # before the archive walk, so 50003 leaves 50000 and takes the long walk.
+    # Both must raise ValueError when every opening quench is missing.
+    try:
+        cluster_search(energy, gradient, 4, budget, seed=0, ras=True)
+    except ValueError as exc:
+        if _missing_archive(exc):
+            pytest.skip("archive search is not in this build")
+        assert "no finite start" in str(exc)
+    else:
+        raise AssertionError(
+            f"archive search returned from an always-missing objective at budget {budget}"
+        )
 
 
 def test_cluster_search_ras_reports_nonzero_branch_counters():
