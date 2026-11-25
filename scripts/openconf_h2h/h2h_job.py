@@ -52,9 +52,12 @@ def oracle_calls_of(result: dict, harvest_calls: int) -> int:
     """Oracle evaluations for one anneal or develop run.
 
     A ledger ``spent`` of zero is present. A develop search has no
-    ledger, so the count is ``harvest_calls``: a together return is one
-    evaluation, the same unit as ``spent``. ``energy_calls + grad_calls``
-    is about twice that and is not the fallback.
+    ledger, so the count is ``harvest_calls``. A together return is one
+    evaluation. That matches ``spent`` when the run charges no lattice
+    pair rows. An atomic lattice run charges those rows on the ledger
+    and the harvest never sees them, so ``spent`` is larger by the
+    lattice counter. ``energy_calls + grad_calls`` is about twice a
+    together return and is not the fallback.
     """
     ledger = result.get("ledger") if isinstance(result.get("ledger"), dict) else None
     spent = None if ledger is None else ledger.get("spent")

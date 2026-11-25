@@ -29,7 +29,9 @@ and is not part of these rows.
   `89078345063859912c378bb5344b959b365331c6`. The guard examples were
   built from this tree and the guard rows cite it. This commit adds
   only `scripts/openconf_h2h/paired_stats.py` and
-  `pytest/test_paired_stats.py`; `1dccb7eb` later changes both. It does
+  `pytest/test_paired_stats.py`; `1dccb7eb` later changes both.
+  `2545c5754` renames the script to
+  `scripts/openconf_h2h/h2h_paired_stats.py`. `5c40c711` does
   not touch the paired runner: `scripts/openconf_h2h/run_bench.py` is
   the same blob, `61e041ae`, at this commit and at `259befae`, which is
   its ancestor, so `git diff 259befae 5c40c711` of that file is empty.

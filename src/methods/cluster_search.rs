@@ -26,8 +26,8 @@ use crate::methods::cluster_hopping::separate_contacts;
 use crate::methods::cluster_hopping::structure_is_sane;
 use crate::methods::cluster_hopping::{CallFloor, molecular_call_floor};
 use crate::methods::cluster_hopping::{
-    ChainCheckpoint, ChargeName, CheckpointAction, Config, Ledger, MoveLibrary, Outcome,
-    SearchError, optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
+    ChainCheckpoint, ChargeName, ChargeSplit, CheckpointAction, Config, Ledger, MoveLibrary,
+    Outcome, SearchError, optimize_with_energy_gradient, run_with_energy_gradient_at_checkpoints,
 };
 use crate::methods::minima_hopping::HistoryHook;
 use crate::methods::warm_lbfgs::WarmLbfgs;
@@ -1548,6 +1548,7 @@ fn finish_search<O>(
     mut outcome: Outcome,
     mut stats: RelaxStats,
     search_started: Instant,
+    entered: ChargeSplit,
 ) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
@@ -1562,18 +1563,22 @@ where
         polish_calls: ledger.spent().saturating_sub(spent),
     });
     ledger.assert_named_charges()?;
+    // `stats` counts this search. A handed-in ledger may already hold named
+    // charges, for example after `polish_answer`, so the counters are
+    // compared as the delta from entry.
+    let charges = ledger.charges();
     assert_eq!(
-        ledger.charges().screen,
+        charges.screen.saturating_sub(entered.screen),
         stats.screen_charged,
         "screen charges diverged from the relaxation counter"
     );
     assert_eq!(
-        ledger.charges().full,
+        charges.full.saturating_sub(entered.full),
         stats.full_charged,
         "full charges diverged from the relaxation counter"
     );
     assert_eq!(
-        ledger.charges().check,
+        charges.check.saturating_sub(entered.check),
         stats.check_charged,
         "check charges diverged from the relaxation counter"
     );
@@ -1595,6 +1600,7 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     ledger.assert_named_charges()?;
+    let entered = ledger.charges();
     let search_started = Instant::now();
     let mut stats = RelaxStats::default();
     let requested_reserve = molecular_answer_reserve(cfg, ledger);
@@ -1644,7 +1650,7 @@ where
     if hold.is_some() {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
     }
-    finish_search(objective, cfg, ledger, out, stats, search_started)
+    finish_search(objective, cfg, ledger, out, stats, search_started, entered)
 }
 
 /// [`search`] of a [`crate::potentials::PairPotential`], instantiated in this crate.
@@ -1682,6 +1688,7 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     ledger.assert_named_charges()?;
+    let entered = ledger.charges();
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
     let search_started = Instant::now();
@@ -1722,7 +1729,7 @@ where
     if hold.is_some() {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
     }
-    finish_search(objective, cfg, ledger, out, stats, search_started)
+    finish_search(objective, cfg, ledger, out, stats, search_started, entered)
 }
 
 /// Calls kept back from a molecular hop for the final polish.
@@ -1889,6 +1896,7 @@ where
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
     ledger.assert_named_charges()?;
+    let entered = ledger.charges();
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
     let search_started = Instant::now();
@@ -1919,7 +1927,7 @@ where
             checkpoint,
         )?
     };
-    finish_search(objective, cfg, ledger, out, stats, search_started)
+    finish_search(objective, cfg, ledger, out, stats, search_started, entered)
 }
 
 /// As [`search_from`], reporting every certified quench to `history`.
@@ -1930,7 +1938,8 @@ where
 /// stream, ledger and bias. Visits other chains made to a minimum this
 /// chain reaches are paid into its bias ([`Config::shared_deposits`]), or
 /// feed the escape controller under [`Config::minima_hopping`]. Without a
-/// history this is [`search_from`].
+/// history this is [`search_from`]. An unnamed charge already on the ledger,
+/// or one present when the run ends, is [`SearchError::UnnamedCharge`].
 pub fn search_from_with_history<O>(
     objective: &O,
     cfg: &Config,
@@ -1961,6 +1970,7 @@ where
             &mut rng,
         )?
     };
+    ledger.assert_named_charges()?;
     Ok((out, stats))
 }
 
@@ -2336,6 +2346,7 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
 {
     ledger.assert_named_charges()?;
+    let entered = ledger.charges();
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
     let search_started = Instant::now();
@@ -2636,7 +2647,7 @@ where
         rigid_path,
         ..Outcome::default()
     };
-    finish_search(objective, cfg, ledger, out, stats, search_started)
+    finish_search(objective, cfg, ledger, out, stats, search_started, entered)
 }
 
 #[cfg(any(feature = "bank-rpc", test))]
@@ -3597,6 +3608,121 @@ mod tests {
         );
     }
 
+    #[test]
+    fn finish_search_returns_an_unnamed_charge() {
+        let pot = PairPotential::lennard_jones(3);
+        let cfg = Config::for_cluster(3);
+        let mut ledger = Ledger::new(8);
+        assert!(ledger.charge(), "the pre-charge fits");
+        let entered = ledger.charges();
+        let err = finish_search(
+            &pot,
+            &cfg,
+            &mut ledger,
+            Outcome::default(),
+            RelaxStats {
+                full_charged: 4,
+                ..RelaxStats::default()
+            },
+            Instant::now(),
+            entered,
+        )
+        .expect_err("an unnamed charge is an error");
+        assert_eq!(err, SearchError::UnnamedCharge { count: 1 });
+        assert_eq!(ledger.spent(), 1, "finish did not charge more");
+    }
+
+    /// The unnamed-charge error is returned before the relaxation counters
+    /// are compared. A disagreement there used to abort instead.
+    #[test]
+    fn finish_search_returns_an_unnamed_charge_before_the_counter_check() {
+        let pot = PairPotential::lennard_jones(3);
+        let cfg = Config::for_cluster(3);
+        let mut ledger = Ledger::new(40);
+        assert!(ledger.with_charge_name(ChargeName::Full, |ledger| ledger.charge_many(12)));
+        assert!(ledger.charge(), "the unnamed charge fits");
+        let err = finish_search(
+            &pot,
+            &cfg,
+            &mut ledger,
+            Outcome::default(),
+            RelaxStats::default(),
+            Instant::now(),
+            ChargeSplit::default(),
+        )
+        .expect_err("unnamed charges are returned");
+        assert_eq!(err, SearchError::UnnamedCharge { count: 1 });
+    }
+
+    /// Twelve full charges were already on the ledger. This search added
+    /// twenty. The cumulative counters are 32 and 20; the delta is 20.
+    #[test]
+    fn finish_search_compares_charges_added_since_entry() {
+        let pot = PairPotential::lennard_jones(3);
+        let cfg = Config::for_cluster(3);
+        let mut ledger = Ledger::new(80);
+        assert!(ledger.with_charge_name(ChargeName::Full, |ledger| ledger.charge_many(12)));
+        assert!(ledger.with_charge_name(ChargeName::Screen, |ledger| ledger.charge_many(3)));
+        assert!(ledger.with_charge_name(ChargeName::Check, |ledger| ledger.charge_many(1)));
+        let entered = ledger.charges();
+        assert!(ledger.with_charge_name(ChargeName::Full, |ledger| ledger.charge_many(20)));
+        assert!(ledger.with_charge_name(ChargeName::Screen, |ledger| ledger.charge_many(4)));
+        assert!(ledger.with_charge_name(ChargeName::Check, |ledger| ledger.charge_many(2)));
+        let stats = RelaxStats {
+            full_charged: 20,
+            screen_charged: 4,
+            check_charged: 2,
+            ..RelaxStats::default()
+        };
+        let (_out, got) = finish_search(
+            &pot,
+            &cfg,
+            &mut ledger,
+            Outcome::default(),
+            stats,
+            Instant::now(),
+            entered,
+        )
+        .expect("prior named charges are not this search");
+        assert_eq!(got.full_charged, 20);
+        assert_eq!(ledger.charges().full, 32);
+        assert_eq!(ledger.charges().screen, 7);
+        assert_eq!(ledger.charges().check, 3);
+    }
+
+    #[test]
+    fn a_search_on_a_polished_ledger_does_not_abort() {
+        let pot = PairPotential::lennard_jones(6);
+        let mut cfg = Config::for_cluster(6);
+        cfg.relax_steps = 12;
+        cfg.screen_steps = 4;
+        cfg.energy_lattice = false;
+        let mut start = Array1::zeros(18);
+        for i in 0..6 {
+            start[3 * i] = 1.2 * i as f64;
+        }
+        let mut ledger = Ledger::new(250);
+        assert!(
+            polish_answer(&pot, &mut ledger, start.view(), 1.0e-2, 8).is_some(),
+            "the polish evaluated a point"
+        );
+        let prior = ledger.charges();
+        assert!(prior.full >= 1, "polish charges the full counter");
+        let (out, stats) = search(&pot, &cfg, &mut ledger, 2)
+            .expect("a ledger that already holds named charges is a valid search");
+        assert_eq!(
+            ledger.charges().full - prior.full,
+            stats.full_charged,
+            "full charges diverged left {} right {}",
+            ledger.charges().full,
+            stats.full_charged
+        );
+        assert_eq!(ledger.charges().screen - prior.screen, stats.screen_charged);
+        assert_eq!(ledger.charges().check - prior.check, stats.check_charged);
+        assert!(out.best.is_finite());
+        assert_eq!(ledger.charges().unnamed, 0);
+    }
+
     /// The returned structure has to be a minimum carrying the reported energy,
     /// and `verify` is what says so.
     #[test]
@@ -3972,6 +4098,24 @@ mod tests {
         assert_eq!(out.best.to_bits(), plain.best.to_bits());
         assert_eq!(out.hops, plain.hops);
         assert_eq!(ledger.spent(), plain_ledger.spent());
+        assert_eq!(ledger.charges().unnamed, 0);
+    }
+
+    #[test]
+    fn a_history_search_returns_an_error_when_the_ledger_holds_an_unnamed_charge() {
+        let pot = PairPotential::lennard_jones(3);
+        let cfg = Config::for_cluster(3);
+        let start = Array1::zeros(9);
+        let mut ledger = Ledger::new(20);
+        assert!(ledger.charge(), "the pre-charge fits");
+        let err = search_from_with_history(&pot, &cfg, &mut ledger, start.view(), 1, None)
+            .expect_err("unnamed charges are an error");
+        assert_eq!(err, SearchError::UnnamedCharge { count: 1 });
+        assert_eq!(
+            ledger.spent(),
+            1,
+            "the search returned before charging more"
+        );
     }
 
     #[test]

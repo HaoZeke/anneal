@@ -3250,10 +3250,20 @@ fn reconcile_python_charges(
         ledger.spent(),
         charges
     );
-    ledger
-        .assert_named_charges()
-        .map_err(|err| pyo3::exceptions::PyRuntimeError::new_err(err.to_string()))?;
+    ledger.assert_named_charges().map_err(search_failure)?;
     Ok(())
+}
+
+/// `NoFiniteStart` is a value the search cannot use. `UnnamedCharge` is a
+/// broken ledger, the same class of failure at the search return and here.
+fn search_failure(err: crate::methods::cluster_hopping::SearchError) -> PyErr {
+    use crate::methods::cluster_hopping::SearchError;
+    match err {
+        SearchError::NoFiniteStart { .. } => PyValueError::new_err(err.to_string()),
+        SearchError::UnnamedCharge { .. } => {
+            pyo3::exceptions::PyRuntimeError::new_err(err.to_string())
+        }
+    }
 }
 
 fn cluster_gradient_scale(
@@ -3469,7 +3479,6 @@ fn cluster_archive_search(
     ledger_split.set_item("overlap_rejected", stats.overlap_rejected)?;
     ledger_split.set_item("basins", out.floors)?;
     dict.set_item("ledger", ledger_split)?;
-    reconcile_python_charges(calls, ledger, probe_unbacked)?;
     Ok(dict.into())
 }
 
@@ -3478,12 +3487,11 @@ fn cluster_archive_search(
     _py: Python<'_>,
     _obj: &CallableDiffObjective,
     _cfg: &crate::methods::cluster_hopping::Config,
-    ledger: &mut crate::methods::cluster_hopping::Ledger,
-    calls: &PythonCallCounts,
+    _ledger: &mut crate::methods::cluster_hopping::Ledger,
+    _calls: &PythonCallCounts,
     _seed: u64,
-    probe_unbacked: usize,
+    _probe_unbacked: usize,
 ) -> PyResult<Py<PyDict>> {
-    reconcile_python_charges(calls, ledger, probe_unbacked)?;
     Err(PyValueError::new_err(
         "ras=True requires building with the graphkey feature",
     ))
@@ -4026,6 +4034,9 @@ fn cluster_search(
             seed,
             probe_unbacked,
         );
+        // The charge identity is an assert. Finish a KeyboardInterrupt or
+        // other ending callback error first, or that assert becomes the
+        // exception the caller sees.
         errors.finish(py)?;
         reconcile_python_charges(&potential_calls, &ledger, probe_unbacked)?;
         return out;
@@ -4055,7 +4066,7 @@ fn cluster_search(
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
     }
-    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    .map_err(search_failure)?;
     errors.finish(py)?;
     let best_block = out
         .best_state

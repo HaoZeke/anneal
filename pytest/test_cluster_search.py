@@ -458,6 +458,71 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     )
 
 
+def test_cluster_search_maps_a_non_finite_start_to_value_error():
+    def energy(_x):
+        return float("nan")
+
+    def gradient(x):
+        return np.zeros_like(np.asarray(x, dtype=np.float64))
+
+    with pytest.raises(ValueError, match="no finite start"):
+        cluster_search(energy, gradient, 4, 200, seed=0)
+
+
+def test_archive_search_keyboard_interrupt_is_not_a_panic():
+    calls = {"n": 0}
+
+    def energy(x):
+        calls["n"] += 1
+        if calls["n"] >= 8:
+            raise KeyboardInterrupt
+        return lj_energy(x)
+
+    def gradient(x):
+        return lj_grad(x)
+
+    try:
+        cluster_search(energy, gradient, 4, 800, seed=0, ras=True)
+    except KeyboardInterrupt:
+        assert calls["n"] >= 8
+        return
+    except ValueError as exc:
+        assert "graphkey" in str(exc)
+        assert calls["n"] < 8
+        return
+    raise AssertionError("archive search returned after a keyboard interrupt")
+
+
+def test_archive_search_callback_error_is_not_a_panic():
+    import warnings
+
+    calls = {"n": 0}
+
+    def energy(x):
+        calls["n"] += 1
+        if calls["n"] == 8:
+            raise RuntimeError("callback failed")
+        return lj_energy(x)
+
+    def gradient(x):
+        return lj_grad(x)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", RuntimeWarning)
+        try:
+            out = cluster_search(energy, gradient, 4, 800, seed=0, ras=True)
+        except ValueError as exc:
+            assert "graphkey" in str(exc)
+            assert calls["n"] < 8
+            return
+        except RuntimeError as exc:
+            assert "callback failed" in str(exc)
+            return
+    assert np.isfinite(out["best_energy"])
+    assert calls["n"] > 8
+    assert any(issubclass(item.category, RuntimeWarning) for item in caught)
+
+
 def test_cluster_search_ras_reports_nonzero_branch_counters():
     from anneal._core import cluster_search as core_cluster_search
 

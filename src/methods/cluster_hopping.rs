@@ -509,7 +509,11 @@ const IMPROVEMENT_CAP: usize = 512;
 
 /// A search stopped because no initial quench was finite, or because the
 /// ledger already held an unnamed charge.
+///
+/// A later release may add a reason, so a `match` outside this crate needs
+/// a wildcard arm.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum SearchError {
     /// The initial evaluation was non-finite on every attempt.
     #[error("no finite start after {attempts} attempts")]
