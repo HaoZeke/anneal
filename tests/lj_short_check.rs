@@ -18,8 +18,11 @@
 //! With `packing_deferral = 0` the candidates are offered before the first
 //! hop and both walks move to the pins below. Each candidate is screened
 //! against the walk's best, so the probe leaves more of the 2500 calls to
-//! the walk: LJ38 makes 15 hops where the unscreened probe left it 10, and
-//! LJ98 7 where it made 5, at the same best energies.
+//! the walk: LJ38 made 15 hops where the unscreened probe left it 10, and
+//! LJ98 7 where it made 5, at the same best energies. The refused
+//! candidates are then audited in full before the next hop, which takes
+//! those calls back: LJ38 makes 10 hops and LJ98 5, at the same best
+//! energies. With the audit never scheduled the walks are 15 and 7 again.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -62,8 +65,8 @@ fn lj38_and_lj98_short_searches_stay_put() {
     let cases = [
         case(38, 1, None, -170.711_308_119_462_44, (21, 14, 19)),
         case(98, 7, None, -520.107_879_491_539_2, (10, 9, 9)),
-        case(38, 1, Some(0), -173.928_426_584_850_03, (15, 16, 19)),
-        case(98, 7, Some(0), -531.883_176_996_307_8, (7, 9, 13)),
+        case(38, 1, Some(0), -173.928_426_584_850_03, (10, 20, 13)),
+        case(98, 7, Some(0), -531.883_176_996_307_8, (5, 11, 13)),
     ];
     anneal_core::install_rgpot_kernels!();
     let mut records = Vec::new();
@@ -114,7 +117,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
     let expected = "\
 LJ38 None -170.7113081194624442 21 14 19 2500
 LJ98 None -520.1078794915391654 10 9 9 2500
-LJ38 Some(0) -173.9284265848500297 15 16 19 2500
-LJ98 Some(0) -531.8831769963078386 7 9 13 2500";
+LJ38 Some(0) -173.9284265848500297 10 20 13 2500
+LJ98 Some(0) -531.8831769963078386 5 11 13 2500";
     assert_eq!(records.join("\n"), expected);
 }

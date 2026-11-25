@@ -9,11 +9,12 @@
 //! default walk is therefore develop's walk and charges 502.
 //!
 //! With `packing_deferral = 0` the probe runs before the first hop and
-//! spends 362 potential calls, 931 before each candidate was screened
-//! against the walk's best and 325 before refused candidates took the
-//! walk's audit escape. The 37 the escape adds are the full relaxation
-//! of audited refusals. The same hit is then charged at 502 + 362 = 864,
-//! and the ledger, the improvement row and `outcome.charged` all say so.
+//! spends 325 potential calls, 931 before each candidate was screened
+//! against the walk's best. The same hit was then charged at
+//! 502 + 325 = 827. The candidates the screen refuses are audited one
+//! deferral later, here before the next hop, and the hit is now charged
+//! at 1712; with the audit never scheduled it is 827 again. The ledger,
+//! the improvement row and `outcome.charged` all say so.
 //!
 //! Lennard-Jones 38, seed 2000, is a walk that runs past the offer. The
 //! probe runs once, reaches the target and its calls are on the ledger.
@@ -105,8 +106,8 @@ fn a_walk_hit_is_charged_for_every_potential_call_including_the_packing_probe() 
     let mut cfg = Config::recommended(26);
     cfg.packing_deferral = 0;
     let walk = walk(&cfg, 26, -108.315616);
-    assert_eq!(walk.at_hit, Some(864), "hit spend");
-    assert_eq!(walk.outcome.charged, 864, "charged calls");
+    assert_eq!(walk.at_hit, Some(1712), "hit spend");
+    assert_eq!(walk.outcome.charged, 1712, "charged calls");
     assert_eq!(walk.outcome.charged, walk.spent, "outcome and ledger agree");
     assert_eq!(
         walk.evaluations + SITE_SCAN_CHARGE,

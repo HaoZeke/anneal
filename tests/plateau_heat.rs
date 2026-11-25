@@ -108,7 +108,7 @@ fn metropolis_heat_follows_the_plateau() {
 
 /// Two code paths meet in this walk, and each pin has a different cause.
 ///
-/// Cold `0x7a432c4eea7a978a` is the branch's walk. The generic packing
+/// Cold `0x4a128bbc8df193e5` is the branch's walk. The generic packing
 /// probe changes it from develop's `0xfb5afaab4e40a443`; the observed-basis
 /// stall probe fires three times here. With every packing candidate
 /// relaxed in full the pin was `0x47c7cc96bba7b3ea`, and before the merge
@@ -117,12 +117,16 @@ fn metropolis_heat_follows_the_plateau() {
 /// infinite energy, which develop's check that a stall adoption is sane
 /// refuses.
 ///
-/// Before refused packing candidates took the walk's audit escape the
-/// cold pin was `0xc99470c0ab8b04d8` at both deferrals and the hot pin at
-/// hop 0 `0x555f876ee3bdc4dc`; with the audit switched off in a scratch
-/// build the test returns those values.
+/// The catalogue's refusals are audited one deferral after it, and both
+/// walks here run past that hop: the audit's calls move the cold and the
+/// hot walk, at both deferrals, to the same pair. Without the audit, in a
+/// scratch build that never schedules it, the test returns the pins of
+/// the screen before any audit: cold `0xc99470c0ab8b04d8` at both
+/// deferrals, hot `0x44038697bde16fb7` and at hop 0 `0x555f876ee3bdc4dc`.
+/// Those are the values the audit moved.
 ///
-/// Hot `0x44038697bde16fb7`. With every packing candidate relaxed in full
+/// Hot `0xefc29fb5a7f4f24e`. Before the audit it was `0x44038697bde16fb7`;
+/// with every packing candidate relaxed in full
 /// it was `0x1a623a8e37ad1d43`, the composition of the packing probe with
 /// develop's observed-basis probe, whose side calls come out of the heated
 /// walk's budget. Screening the candidates against the walk's best changes
@@ -133,19 +137,19 @@ fn lattice_exchange_follows_the_plateau() {
     let mut cfg = Config::recommended(ATOMS);
     cfg.restart_patience = 2_000;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x7a432c4eea7a978a, "preset walk");
+    assert_eq!(fingerprint(&cold), 0x4a128bbc8df193e5, "preset walk");
     assert_eq!(
         fingerprint(&hot),
-        0x44038697bde16fb7,
+        0xefc29fb5a7f4f24e,
         "heat * cfg.temperature"
     );
 
-    // Measured: moving the offer from hop 36 to before the first hop leaves
-    // the cold fingerprint where it is and moves the hot one.
+    // Measured: moving the offer and its audit from hops 36 and 72 to
+    // before the first hop leaves both fingerprints where they are.
     cfg.packing_deferral = 0;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
-    assert_eq!(fingerprint(&cold), 0x7a432c4eea7a978a, "probe at hop 0");
-    assert_eq!(fingerprint(&hot), 0x677e80e2449d85e0, "probe at hop 0");
+    assert_eq!(fingerprint(&cold), 0x4a128bbc8df193e5, "probe at hop 0");
+    assert_eq!(fingerprint(&hot), 0xefc29fb5a7f4f24e, "probe at hop 0");
 
     cfg.suppress_generic_packings = true;
     let (cold, hot) = pair(&cfg, 30_000, 2000);
@@ -180,8 +184,10 @@ fn a_new_lowest_returns_the_walk_to_the_preset() {
 /// `0x23f3b06070c576a8`, hot `0xc711fc71269b412d`), the same as with the
 /// probe suppressed. Develop `58d68347` moved the cold pin from
 /// `0x3f6e77c9980269b9`; the hot pin did not move. With `packing_deferral = 0` the probe runs before the
-/// first hop and the walk is the one the branch pinned until the offer was
-/// deferred (cold `0xdd5b3f896df84eb7`, hot `0x4f443a96ed586f29`). The
+/// first hop and audits its refusals before the next. Without that audit
+/// the walk is the one the branch pinned until the offer was deferred
+/// (cold `0xdd5b3f896df84eb7`, hot `0x4f443a96ed586f29`); a scratch build
+/// that never schedules the audit returns those values. The
 /// observed-basis probe does not fire in this walk, so develop's changes to
 /// it do not touch these.
 #[test]
@@ -209,12 +215,12 @@ fn a_same_iteration_record_returns_to_the_preset() {
     let (cold, hot) = pair(&cfg, 6_000, 10);
     assert_eq!(
         fingerprint(&cold),
-        0xdd5b3f896df84eb7,
+        0x07886c82760d45d9,
         "preset walk, probe at hop 0"
     );
     assert_eq!(
         fingerprint(&hot),
-        0x4f443a96ed586f29,
+        0x43e95a01c77c1a34,
         "same-iteration heat = 1.0, probe at hop 0"
     );
 

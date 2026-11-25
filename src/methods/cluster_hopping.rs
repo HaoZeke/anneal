@@ -5599,30 +5599,72 @@ where
 /// candidate above either is discarded after its full relaxation anyway.
 ///
 /// The credit is an upper decile, not a bound, so a refusal can be wrong.
-/// Refusals take the walk's audit escape: every `ScreenDescent::AUDIT`th
-/// is relaxed in full, and every full relaxation feeds the window. The
-/// screen holds a copy of the walk's descent, so the probe's refusals and
-/// drops follow the walk's count without moving the walk's own.
+/// A refusal defers the candidate rather than dropping it: its placement is
+/// kept, once per distinct placement, and [`audit_refused_packings`]
+/// relaxes every deferred candidate in full when the walk offers the
+/// catalogue again. The screen holds a copy of the walk's descent, and
+/// every full relaxation feeds that copy's window without moving the
+/// walk's own.
 #[derive(Debug, Clone)]
 struct PackingScreen {
     steps: usize,
     bar: f64,
     descent: ScreenDescent,
+    deferred: Vec<DeferredPacking>,
+    audited: usize,
+}
+
+/// A refused packing candidate: its placement, the steps its full
+/// relaxation was to take, the energy its screening pass reached, and how
+/// far that energy less the credit came above the bar that refused it.
+#[derive(Debug, Clone)]
+struct DeferredPacking {
+    point: Array1<f64>,
+    steps: usize,
+    partial: f64,
+    gap: f64,
 }
 
 impl PackingScreen {
+    fn new(steps: usize, bar: f64, descent: ScreenDescent) -> Self {
+        Self {
+            steps,
+            bar,
+            descent,
+            deferred: Vec::new(),
+            audited: 0,
+        }
+    }
+
     /// No screen: every candidate is relaxed in full, in one pass.
     #[cfg(test)]
     fn open() -> Self {
-        Self {
-            steps: 0,
-            bar: f64::INFINITY,
-            descent: ScreenDescent::default(),
-        }
+        Self::new(0, f64::INFINITY, ScreenDescent::default())
     }
 
     fn splits(&self, bar: f64, steps: usize) -> bool {
         bar.is_finite() && self.steps > 0 && self.steps < steps
+    }
+
+    /// Keeps a refused placement for its audit. An identical placement
+    /// already waiting is not kept twice.
+    fn defer(&mut self, point: ArrayView1<f64>, steps: usize, partial: f64, gap: f64) {
+        let same = |held: &DeferredPacking| {
+            held.point.len() == point.len()
+                && held
+                    .point
+                    .iter()
+                    .zip(point.iter())
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+        };
+        if !self.deferred.iter().any(same) {
+            self.deferred.push(DeferredPacking {
+                point: point.to_owned(),
+                steps,
+                partial,
+                gap,
+            });
+        }
     }
 }
 
@@ -5635,15 +5677,13 @@ fn beats(energy: f64, bar: f64) -> bool {
 
 /// Relax one packing candidate to `steps`, or stop after the screening pass.
 ///
-/// `None` is a candidate the screen refused. Its screening pass is charged
-/// like every other call, and so is the full relaxation of an audited
-/// refusal, which is kept only when it beats `held_bar`, the lower of the
-/// screen's bar and `held`. A pass that ends the budget or meets a caller
-/// stop returns its point, as an unscreened relaxation would. A finished
-/// candidate is relaxed again from its placement: continuing from the
-/// partial point restarts the relaxer's curvature memory, and on LJ75 that
-/// ended two of the eight candidates 9 and 10 epsilon above their one-pass
-/// minima.
+/// `None` is a candidate the screen refused and deferred to its audit. Its
+/// screening pass is charged like every other call. A pass that ends the
+/// budget or meets a caller stop returns its point, as an unscreened
+/// relaxation would. A finished candidate is relaxed again from its
+/// placement: continuing from the partial point restarts the relaxer's
+/// curvature memory, and on LJ75 that ended two of the eight candidates 9
+/// and 10 epsilon above their one-pass minima.
 fn screened_relax<F>(
     ledger: &mut Ledger,
     relax: &mut F,
@@ -5663,16 +5703,64 @@ where
     if ledger.stopped() || ledger.remaining() == 0 {
         return Some((partial, at));
     }
-    let refused = !beats(partial - screen.descent.allowance(), bar);
-    if refused && !screen.descent.audit() {
+    let estimate = partial - screen.descent.allowance();
+    if !beats(estimate, bar) {
+        screen.defer(point, steps, partial, estimate - bar);
         return None;
     }
     let full = relax(ledger, point, steps);
     screen.descent.observe(partial - full.0);
-    if refused && !beats(full.0, bar) && !ledger.stopped() && ledger.remaining() > 0 {
-        return None;
-    }
     Some(full)
+}
+
+/// Relax every candidate the screen deferred, in full, and keep the lowest
+/// that beats the lower of the screen's bar and `held`.
+///
+/// The candidate whose screening pass came closest to the bar that refused
+/// it goes first, the earlier refusal first on a tie, so a budget that ends
+/// the audit has spent it on the refusals the screen was least sure of.
+///
+/// Each deferred candidate is audited once and leaves the screen. Every
+/// call is charged to `ledger`; one that runs out of budget or meets a
+/// caller stop ends the audit, and the candidates after it stay deferred.
+/// The spend at the find is counted from the ledger's spend on entry.
+fn audit_refused_packings<F>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: &mut F,
+    screen: &mut PackingScreen,
+    held: f64,
+) -> Option<(f64, Array1<f64>, usize)>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    let start = ledger.spent();
+    let mut best: Option<(f64, Array1<f64>, usize)> = None;
+    while !screen.deferred.is_empty() && !ledger.stopped() && ledger.remaining() > 0 {
+        let closest = (0..screen.deferred.len())
+            .min_by(|&a, &b| screen.deferred[a].gap.total_cmp(&screen.deferred[b].gap))
+            .expect("a deferred candidate");
+        let candidate = screen.deferred.remove(closest);
+        let left = screen.deferred.len();
+        let steps = candidate.steps.min(ledger.remaining().saturating_sub(left));
+        let (energy, relaxed) = relax(ledger, candidate.point.view(), steps);
+        screen.audited += 1;
+        screen.descent.observe(candidate.partial - energy);
+        let bar = screen
+            .bar
+            .min(held)
+            .min(best.as_ref().map_or(f64::INFINITY, |(held, _, _)| *held));
+        if energy.is_finite() && quench_is_sane(cfg, energy, relaxed.view()) && beats(energy, bar) {
+            best = Some((energy, relaxed, ledger.spent().saturating_sub(start)));
+            if ledger
+                .target()
+                .is_some_and(|target| crate::energy_hits(energy, target, 0.0))
+            {
+                break;
+            }
+        }
+    }
+    best
 }
 
 struct GenericPackingProbe<'a, F: ?Sized> {
@@ -5724,7 +5812,14 @@ const PACKING_CANDIDATES: usize = 8;
 /// comes after [`Config::packing_deferral`] times `PACKING_CANDIDATES + 1`
 /// hops. A capped walk offers it at its last hop at the latest.
 fn packing_offer_hops(cfg: &Config) -> usize {
-    let wanted = cfg.packing_deferral.saturating_mul(PACKING_CANDIDATES + 1);
+    packing_offer_due(cfg, 0)
+}
+
+/// The hop of the offer one deferral after `from`, at the last hop of a
+/// capped walk at the latest. The audit of the catalogue's refusals comes
+/// one deferral after the catalogue.
+fn packing_offer_due(cfg: &Config, from: usize) -> usize {
+    let wanted = from.saturating_add(cfg.packing_deferral.saturating_mul(PACKING_CANDIDATES + 1));
     cfg.max_hops
         .map_or(wanted, |cap| wanted.min(cap.saturating_sub(1)))
 }
@@ -6808,7 +6903,10 @@ where
     let mut held_cv: Option<Array1<f64>> = None;
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
-    let mut packings_offered = false;
+    // The hop the catalogue was offered at, and the screen that holds the
+    // candidates it refused with the hop their audit is offered at.
+    let mut packings_offered: Option<usize> = None;
+    let mut packing_audit: Option<(PackingScreen, usize)> = None;
     // The probe runs at the top of the hop loop once the walk has made
     // `packing_offer_hops` hops: 36 by default, fewer when `max_hops` caps
     // the walk, and zero when `packing_deferral` is zero. A candidate that
@@ -6843,30 +6941,50 @@ where
         if ledger.target_reached() {
             break HopStop::of_closed(ledger);
         }
-        if !packings_offered
+        let packing_due = match (&packings_offered, &packing_audit) {
+            (None, _) => hops >= packing_offer_hops(cfg),
+            (Some(_), Some((_, due))) => hops >= *due,
+            (Some(_), None) => false,
+        };
+        if packing_due
             && !escape_refused
             && generic_packings_apply(cfg, n, x.len())
             && ledger.remaining() > 0
-            && hops >= packing_offer_hops(cfg)
         {
-            packings_offered = true;
             let room = ledger.remaining().div_ceil(2);
             let (mut probe, probe_offset) = ledger.side_probe(room);
-            let mut screen = PackingScreen {
-                steps: cfg.screen_steps,
-                bar: ledger.best,
-                descent: descent.clone(),
-            };
+            let held = pending_packing
+                .as_ref()
+                .map_or(f64::INFINITY, |(energy, ..)| *energy);
             // The walk adopts no candidate before it ends, so the catalogue's
             // quenches are diagnostic and leave the walk's adaptive kernels
-            // as they were.
+            // as they were. The second offer finishes the candidates the
+            // first one's screen refused.
             let offered = {
                 let mut scope = probe.diagnostic_scope();
-                generic_packing_candidate_with_encounter(cfg, &mut scope, relax, &mut screen)
+                if let Some((mut screen, _)) = packing_audit.take() {
+                    screen.bar = ledger.best;
+                    audit_refused_packings(cfg, &mut scope, relax, &mut screen, held)
+                } else {
+                    packings_offered = Some(hops);
+                    let mut screen =
+                        PackingScreen::new(cfg.screen_steps, ledger.best, descent.clone());
+                    let offered = generic_packing_candidate_with_encounter(
+                        cfg,
+                        &mut scope,
+                        relax,
+                        &mut screen,
+                    );
+                    if !screen.deferred.is_empty() {
+                        let due = packing_offer_due(cfg, hops);
+                        packing_audit = Some((screen, due));
+                    }
+                    offered
+                }
             };
             let before = ledger.spent();
             let candidate = offered.filter(|(energy, state, _)| {
-                *energy < ledger.best - PACKING_IMPROVEMENT
+                *energy < ledger.best.min(held) - PACKING_IMPROVEMENT
                     && quench_is_sane(cfg, *energy, state.view())
             });
             // Certify on the side ledger so the gradient is part of the
@@ -12675,63 +12793,127 @@ mod tests {
         }
     }
 
-    /// A packing screen whose descent credits `allowance` and has counted
-    /// `refusals` refusals.
-    fn packing_screen(steps: usize, bar: f64, allowance: f64, refusals: usize) -> PackingScreen {
+    /// A packing screen whose descent credits `allowance`.
+    fn packing_screen(steps: usize, bar: f64, allowance: f64) -> PackingScreen {
         let descent = ScreenDescent {
             allowance,
-            refusals,
             ..ScreenDescent::default()
         };
-        PackingScreen {
-            steps,
-            bar,
-            descent,
+        PackingScreen::new(steps, bar, descent)
+    }
+
+    /// Two atoms `1 + index` apart: a distinct placement per index.
+    fn pair_placement(index: usize) -> Array1<f64> {
+        let mut point = Array1::zeros(6);
+        point[3] = 1.0 + index as f64;
+        point
+    }
+
+    /// A relaxer whose descent from the placement of `pair_placement(i)`
+    /// starts at `starts[i]`, falls by one per charged call and stops at
+    /// `floor`. Every placement relaxed for more than `screen` steps is
+    /// recorded in `finished`.
+    fn placed_relax<'a>(
+        starts: &'a [f64],
+        floor: f64,
+        screen: usize,
+        calls: &'a std::cell::Cell<usize>,
+        finished: &'a std::cell::RefCell<Vec<Array1<f64>>>,
+    ) -> impl FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + 'a {
+        move |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if steps > screen {
+                finished.borrow_mut().push(x.to_owned());
+            }
+            let index = (x[3] - 1.0).round() as usize;
+            let mut energy = starts[index];
+            for _ in 0..steps.max(1) {
+                if !led.charge() {
+                    break;
+                }
+                calls.set(calls.get() + 1);
+                energy = (energy - 1.0).max(floor);
+            }
+            (energy, x.to_owned())
         }
     }
 
-    /// From 0 five steps reach -5, and -7 with the credit of 2: not below
-    /// the bar of -10, so the screen refuses. The full relaxation reaches
-    /// -40. The audited refusal finishes it and keeps it.
+    /// Twelve distinct candidates, every one refused: five steps from its
+    /// start reach `start - 5`, `start - 7` with the credit of 2, all above
+    /// the bar of -10, though each relaxes to -40. Each is deferred once, a
+    /// repeated placement is not deferred twice, and the audit relaxes
+    /// every one of the twelve in full from its placement, closest to the
+    /// bar first, and keeps the first.
     #[test]
-    fn an_audited_refusal_keeps_a_candidate_that_relaxes_below_the_bar() {
-        let point = Array1::zeros(6);
+    fn every_distinct_refused_packing_candidate_is_audited() {
+        let cfg = Config::recommended(2);
+        let count = 12;
+        let starts: Vec<f64> = (0..count).map(|i| ((i * 5) % count) as f64).collect();
         let calls = std::cell::Cell::new(0usize);
-        let mut ledger = Ledger::new(1_000);
-        let mut relax = stepped_relax(0.0, -40.0, &calls);
-        let mut screen = packing_screen(5, -10.0, 2.0, ScreenDescent::AUDIT - 1);
-        let (energy, _) = screened_relax(
-            &mut ledger,
-            &mut relax,
-            point.view(),
-            50,
-            &mut screen,
-            f64::INFINITY,
-        )
-        .expect("the audited refusal is finished and kept");
-        assert_eq!(energy, -40.0, "the full relaxation is the one-pass one");
-        assert_eq!(ledger.spent(), 5 + 50, "screen and audit charged");
-        assert_eq!(calls.get(), ledger.spent());
-        assert_eq!(screen.descent.refusals, ScreenDescent::AUDIT);
+        let finished = std::cell::RefCell::new(Vec::new());
+        let mut relax = placed_relax(&starts, -40.0, 5, &calls, &finished);
+        let mut ledger = Ledger::new(10_000);
+        let mut screen = packing_screen(5, -10.0, 2.0);
+        let placements: Vec<Array1<f64>> = (0..count).map(pair_placement).collect();
+        for point in placements.iter().chain([&placements[3], &placements[7]]) {
+            let refused = screened_relax(
+                &mut ledger,
+                &mut relax,
+                point.view(),
+                50,
+                &mut screen,
+                f64::INFINITY,
+            );
+            assert!(refused.is_none(), "the screen finished a refused candidate");
+        }
+        assert_eq!(ledger.spent(), 5 * (count + 2));
+        assert!(finished.borrow().is_empty(), "a refusal was finished");
         assert_eq!(
-            screen.descent.drops.back(),
-            Some(&35.0),
-            "the audit feeds the window the descent the screen left undone"
+            screen.deferred.len(),
+            count,
+            "one deferral per distinct placement"
         );
+
+        let before = ledger.spent();
+        let (energy, kept, found_at) =
+            audit_refused_packings(&cfg, &mut ledger, &mut relax, &mut screen, f64::INFINITY)
+                .expect("an audited candidate below the bar is kept");
+        assert_eq!(energy, -40.0, "the audit is the one-pass relaxation");
+        assert_eq!(found_at, 50, "kept at the first audit");
+        let mut closest_first: Vec<usize> = (0..count).collect();
+        closest_first.sort_by(|&a, &b| starts[a].total_cmp(&starts[b]));
+        assert_eq!(kept, placements[closest_first[0]]);
+        assert_eq!(screen.audited, count);
+        assert!(screen.deferred.is_empty());
+        let order: Vec<Array1<f64>> = closest_first
+            .iter()
+            .map(|&i| placements[i].clone())
+            .collect();
+        assert_eq!(
+            *finished.borrow(),
+            order,
+            "every distinct refusal is audited once, closest to the bar first"
+        );
+        assert_eq!(ledger.spent() - before, 50 * count);
+        assert_eq!(calls.get(), ledger.spent(), "every call charged");
+        assert_eq!(screen.descent.drops.len(), count);
     }
 
-    /// The same below-bar candidate offered once per refusal of an audit
-    /// period is finished exactly once, on the audited refusal, and every
-    /// call of the period is charged.
+    /// An audit that runs out of budget ends there, charged, after the
+    /// refusals closest to the bar; the farther ones stay deferred. Each
+    /// audit reserves one call for every candidate still waiting, so with
+    /// two calls left for four refusals the two closest take one each.
     #[test]
-    fn a_below_bar_candidate_is_finished_once_per_audit_period() {
-        let point = Array1::zeros(6);
+    fn an_audit_out_of_budget_spends_it_on_the_closest_refusals() {
+        let cfg = Config::recommended(2);
+        let starts = [6.0, 0.0, 3.0, 9.0];
         let calls = std::cell::Cell::new(0usize);
-        let mut ledger = Ledger::new(10_000);
-        let mut relax = stepped_relax(0.0, -40.0, &calls);
-        let mut screen = packing_screen(5, -10.0, 2.0, 0);
-        let kept: Vec<bool> = (0..ScreenDescent::AUDIT)
-            .map(|_| {
+        let finished = std::cell::RefCell::new(Vec::new());
+        let mut relax = placed_relax(&starts, -6.0, 5, &calls, &finished);
+        let mut ledger = Ledger::new(5 * starts.len() + 2);
+        let mut screen = packing_screen(5, -10.0, 2.0);
+        for index in 0..starts.len() {
+            let point = pair_placement(index);
+            assert!(
                 screened_relax(
                     &mut ledger,
                     &mut relax,
@@ -12740,19 +12922,27 @@ mod tests {
                     &mut screen,
                     f64::INFINITY,
                 )
-                .is_some()
-            })
-            .collect();
-        let mut expected = vec![false; ScreenDescent::AUDIT];
-        expected[ScreenDescent::AUDIT - 1] = true;
-        assert_eq!(kept, expected);
-        assert_eq!(ledger.spent(), 5 * ScreenDescent::AUDIT + 50);
+                .is_none()
+            );
+        }
+        let kept =
+            audit_refused_packings(&cfg, &mut ledger, &mut relax, &mut screen, f64::INFINITY);
+        assert!(kept.is_none(), "a candidate above the bar was kept");
+        assert_eq!(ledger.remaining(), 0);
         assert_eq!(calls.get(), ledger.spent());
+        assert_eq!(screen.audited, 2, "one call each for the two closest");
+        assert!(finished.borrow().is_empty(), "no audit had room to finish");
+        let waiting: Vec<f64> = screen.deferred.iter().map(|held| held.point[3]).collect();
+        assert_eq!(
+            waiting,
+            vec![1.0, 4.0],
+            "the starts 6 and 9 wait, farthest from the bar"
+        );
     }
 
     /// A candidate whose full relaxation stays above the bar is refused
-    /// after its screening pass, and an audit of it is charged and still
-    /// refuses it.
+    /// after its screening pass, and its audit is charged and keeps
+    /// nothing.
     #[test]
     fn a_packing_candidate_that_cannot_beat_the_bar_stops_after_its_screen() {
         let point = Array1::zeros(6);
@@ -12761,7 +12951,7 @@ mod tests {
         let calls = std::cell::Cell::new(0usize);
         let mut ledger = Ledger::new(1_000);
         let mut relax = stepped_relax(0.0, -6.0, &calls);
-        let mut screen = packing_screen(5, -10.0, 2.0, 0);
+        let mut screen = packing_screen(5, -10.0, 2.0);
         let refused = screened_relax(
             &mut ledger,
             &mut relax,
@@ -12774,19 +12964,16 @@ mod tests {
         assert_eq!(ledger.spent(), 5, "only the screening pass is charged");
         assert_eq!(calls.get(), ledger.spent());
 
-        let calls = std::cell::Cell::new(0usize);
-        let mut ledger = Ledger::new(1_000);
-        let mut relax = stepped_relax(0.0, -6.0, &calls);
-        let mut screen = packing_screen(5, -10.0, 2.0, ScreenDescent::AUDIT - 1);
-        let audited = screened_relax(
+        assert_eq!(screen.deferred.len(), 1, "the refusal waits for its audit");
+        let audited = audit_refused_packings(
+            &Config::recommended(2),
             &mut ledger,
             &mut relax,
-            point.view(),
-            50,
             &mut screen,
             f64::INFINITY,
         );
         assert!(audited.is_none(), "an audit kept a candidate above the bar");
+        assert_eq!(screen.audited, 1);
         assert_eq!(ledger.spent(), 5 + 50, "the audit is charged");
         assert_eq!(calls.get(), ledger.spent());
 
@@ -12795,7 +12982,7 @@ mod tests {
         let calls = std::cell::Cell::new(0usize);
         let mut ledger = Ledger::new(1_000);
         let mut relax = stepped_relax(-4.0, -11.5, &calls);
-        let mut screen = packing_screen(5, -10.0, 2.0, 0);
+        let mut screen = packing_screen(5, -10.0, 2.0);
         let refused = screened_relax(
             &mut ledger,
             &mut relax,
@@ -12815,7 +13002,7 @@ mod tests {
         let calls = std::cell::Cell::new(0usize);
         let mut ledger = Ledger::new(1_000);
         let mut relax = stepped_relax(-4.0, -40.0, &calls);
-        let mut screen = packing_screen(5, -10.0, 2.0, 0);
+        let mut screen = packing_screen(5, -10.0, 2.0);
         let (energy, _) = screened_relax(
             &mut ledger,
             &mut relax,
@@ -12833,7 +13020,7 @@ mod tests {
         let calls = std::cell::Cell::new(0usize);
         let mut ledger = Ledger::new(1_000);
         let mut relax = stepped_relax(0.0, -40.0, &calls);
-        let mut open = packing_screen(5, f64::INFINITY, 2.0, 0);
+        let mut open = packing_screen(5, f64::INFINITY, 2.0);
         let (energy, _) = screened_relax(
             &mut ledger,
             &mut relax,
@@ -12851,7 +13038,7 @@ mod tests {
     #[test]
     fn a_screening_pass_that_ends_the_budget_returns_its_point() {
         let point = Array1::zeros(6);
-        let mut screen = packing_screen(5, -100.0, 0.0, 0);
+        let mut screen = packing_screen(5, -100.0, 0.0);
         let calls = std::cell::Cell::new(0usize);
         let mut ledger = Ledger::new(5);
         let mut relax = stepped_relax(0.0, -40.0, &calls);
@@ -12871,12 +13058,21 @@ mod tests {
 
     /// The packing catalogue on a pair potential under `Config::recommended`,
     /// relaxed with the benchmark drivers' warm L-BFGS. Returns the offer and
-    /// the potential calls it made, counted at the potential.
+    /// the potential calls it made, counted at the potential, then the audit
+    /// of its refusals on the same ledger with that audit's charge, and the
+    /// calls of both counted at the potential.
     fn pair_catalogue(
         potential: &crate::potentials::PairPotential,
         n: usize,
         screen: &mut PackingScreen,
-    ) -> (Option<(f64, Array1<f64>, usize)>, usize, usize) {
+    ) -> (
+        Option<(f64, Array1<f64>, usize)>,
+        usize,
+        usize,
+        Option<(f64, Array1<f64>, usize)>,
+        usize,
+        usize,
+    ) {
         use crate::methods::warm_lbfgs::WarmLbfgs;
         let cfg = Config::recommended(n);
         let mut ledger = Ledger::new(1_000_000);
@@ -12895,35 +13091,43 @@ mod tests {
         };
         let offer = generic_packing_candidate_with_encounter(&cfg, &mut ledger, &mut relax, screen);
         let spent = ledger.spent();
-        (offer, spent, calls)
+        let held = offer
+            .as_ref()
+            .map_or(f64::INFINITY, |(energy, _, _)| *energy);
+        let audit = audit_refused_packings(&cfg, &mut ledger, &mut relax, screen, held);
+        let audit_spent = ledger.spent() - spent;
+        let catalogue_calls = calls - audit_spent;
+        (offer, spent, catalogue_calls, audit, audit_spent, calls)
     }
 
     /// The screen keeps the packing that solves LJ38 and Morse M38 at rho 6
     /// in one offer, at the same energy and for fewer calls, and refuses
-    /// every candidate when none can beat the bar, auditing one of them in
-    /// full. The bar sits two wells
+    /// every candidate when none can beat the bar, for fewer calls than the
+    /// solving offer. The audit then relaxes each of the eight distinct
+    /// refusals in full, and none beats the bar. The bar sits two wells
     /// above the global minimum, about where the walk stands at the offer;
     /// the credit is zero, the strictest the walk can pass.
     #[test]
     fn the_packing_screen_keeps_the_lj38_and_m38_solutions_and_skips_the_rest() {
         use crate::potentials::PairPotential;
         // The spends of the open, the solving and the fully refused
-        // catalogues, counted at the potential.
+        // catalogues, and of the refused catalogue's audit, counted at the
+        // potential.
         for (label, potential, reference, pinned) in [
             (
                 "lj38",
                 PairPotential::lennard_jones(38),
                 -173.928427,
-                (1411, 309, 418),
+                (1411, 309, 297, 1365),
             ),
             (
                 "m38r6",
                 PairPotential::morse(38, 6.0),
                 -157.477108,
-                (1374, 425, 448),
+                (1374, 425, 297, 1330),
             ),
         ] {
-            let (open, open_spent, open_calls) =
+            let (open, open_spent, open_calls, _, open_audit, _) =
                 pair_catalogue(&potential, 38, &mut PackingScreen::open());
             let (open_energy, _, _) = open.expect("the open catalogue offers a packing");
             assert!(
@@ -12931,10 +13135,12 @@ mod tests {
                 "{label}: the open catalogue offered {open_energy}"
             );
             assert_eq!(open_calls, open_spent, "{label}: every call charged");
+            assert_eq!(open_audit, 0, "{label}: an open screen refuses nothing");
 
             let steps = Config::recommended(38).screen_steps;
-            let mut screen = packing_screen(steps, reference + 2.0, 0.0, 0);
-            let (kept, kept_spent, kept_calls) = pair_catalogue(&potential, 38, &mut screen);
+            let mut screen = packing_screen(steps, reference + 2.0, 0.0);
+            let (kept, kept_spent, kept_calls, _, _, _) =
+                pair_catalogue(&potential, 38, &mut screen);
             let (kept_energy, _, _) = kept.expect("the solving packing passes the screen");
             assert_eq!(
                 kept_energy.to_bits(),
@@ -12947,23 +13153,37 @@ mod tests {
                 "{label}: the screen spent {kept_spent} against {open_spent}"
             );
 
-            // Every candidate is refused. Eight refusals in a row hold one
-            // multiple of the audit period, so one is relaxed in full, and
-            // it is still refused.
-            let mut beaten = packing_screen(steps, open_energy, 0.0, 0);
-            let (none, none_spent, none_calls) = pair_catalogue(&potential, 38, &mut beaten);
+            let mut beaten = packing_screen(steps, open_energy, 0.0);
+            let (none, none_spent, none_calls, audit, audit_spent, calls) =
+                pair_catalogue(&potential, 38, &mut beaten);
             assert!(
                 none.is_none(),
                 "{label}: a candidate that cannot beat the bar was finished"
             );
             assert_eq!(none_calls, none_spent, "{label}: every call charged");
-            assert_eq!(beaten.descent.refusals, PACKING_CANDIDATES);
-            assert_eq!(beaten.descent.drops.len(), 1, "{label}: one audit");
             assert!(
-                none_spent < open_spent,
-                "{label}: refusing every candidate spent {none_spent} against {open_spent}"
+                none_spent < kept_spent,
+                "{label}: refusing every candidate spent {none_spent} against {kept_spent}"
             );
-            assert_eq!((open_spent, kept_spent, none_spent), pinned, "{label}");
+            assert!(
+                audit.is_none(),
+                "{label}: an audit kept a candidate above the bar"
+            );
+            assert_eq!(
+                beaten.audited, PACKING_CANDIDATES,
+                "{label}: every distinct refusal is audited"
+            );
+            assert!(beaten.deferred.is_empty());
+            assert_eq!(
+                calls,
+                none_spent + audit_spent,
+                "{label}: every call charged"
+            );
+            assert_eq!(
+                (open_spent, kept_spent, none_spent, audit_spent),
+                pinned,
+                "{label}"
+            );
         }
     }
 

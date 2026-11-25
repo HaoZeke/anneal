@@ -105,11 +105,13 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
 /// skips a second catalogue, so this is not the hash of a branch that
 /// dropped the lattice move. Screening each candidate against the walk's
 /// best changes what the probe charges, and so the walk after it: the
-/// unscreened probe pinned `c9b6d7d6…`.
+/// unscreened probe pinned `c9b6d7d6…`. The refusals are audited before
+/// the next hop, and their calls move the walk again; with the audit
+/// never scheduled the hash is the screened probe's `63c2f410…`.
 #[test]
 fn recommended_lj98_seed_2000_with_the_probe_at_hop_zero_keeps_its_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash(Some(0));
-    let expected = "63c2f410d032a9fb9dcf7af0839541f25d6fc1eaa9e732b7cad718e592289da4";
+    let expected = "9a965dcdca003e2105864026f3e76cd63a78dcd665e32ab4cae4e5673878d02f";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
