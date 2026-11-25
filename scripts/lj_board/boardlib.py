@@ -21,6 +21,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
+from machine_provenance import machine_digest  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 # Set before NumPy or Numba read the variables.
@@ -277,9 +278,13 @@ def host_lines() -> list[str]:
                 model = " ".join(line.split(":", 1)[1].split())
                 break
     cores = os.cpu_count()
+    try:
+        machine_id = machine_digest()
+    except RuntimeError:
+        machine_id = "absent"
     return [
         f"host={socket.gethostname()}",
-        f"machine_id={read_first('/etc/machine-id')}",
+        f"machine_id={machine_id}",
         f"boot_id={read_first('/proc/sys/kernel/random/boot_id')}",
         f"platform={platform.platform()}",
         f"machine={platform.machine()}",

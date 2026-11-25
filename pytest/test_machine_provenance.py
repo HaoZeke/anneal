@@ -2969,3 +2969,94 @@ def test_machine_provenance_darwin_fallback(tmp_path, monkeypatch):
     # Explicit non-default missing paths still fail instead of querying the host.
     with pytest.raises(RuntimeError, match="machine-id"):
         mp.machine_provenance(tmp_path / "other-id", tmp_path / "other-uuid", tmp_path / "other-cpu")
+
+
+def _no_subprocess(cmd, **_kwargs):
+    raise AssertionError(f"unexpected subprocess {cmd}")
+
+
+def test_machine_digest_salts_the_linux_machine_id(tmp_path, monkeypatch):
+    import hashlib
+    import machine_provenance as mp
+
+    machine_id = tmp_path / "machine-id"
+    machine_id.write_text(" 0123456789abcdef0123456789abcdef \n")
+    monkeypatch.setattr(mp, "MACHINE_ID_PATH", machine_id)
+    monkeypatch.setattr(mp, "PRODUCT_UUID_PATH", tmp_path / "product_uuid")
+    monkeypatch.setattr(mp.subprocess, "run", _no_subprocess)
+
+    for platform in ("linux", "darwin"):
+        monkeypatch.setattr(mp.sys, "platform", platform)
+        digest = mp.machine_digest(mp.MACHINE_ID_PATH, mp.PRODUCT_UUID_PATH)
+        assert digest == hashlib.sha256(
+            b"anneal-bench-machine-id-v1\0" + b"0123456789abcdef0123456789abcdef"
+        ).hexdigest()
+        assert digest != hashlib.sha256(b"0123456789abcdef0123456789abcdef").hexdigest()
+    cpuinfo = tmp_path / "cpuinfo"
+    cpuinfo.write_text("model name\t: Example CPU\n")
+    assert mp.machine_provenance(machine_id, tmp_path / "uuid", cpuinfo) == (digest, "Example CPU")
+
+
+def test_machine_digest_salts_the_macos_ioreg_uuid(tmp_path, monkeypatch):
+    import hashlib
+    import subprocess
+    import machine_provenance as mp
+
+    monkeypatch.setattr(mp, "MACHINE_ID_PATH", tmp_path / "machine-id")
+    monkeypatch.setattr(mp, "PRODUCT_UUID_PATH", tmp_path / "product_uuid")
+    monkeypatch.setattr(mp.sys, "platform", "darwin")
+    calls = []
+
+    def fake_ioreg(cmd, **_kwargs):
+        calls.append(cmd)
+        return subprocess.CompletedProcess(
+            cmd, 0, '  | "IOPlatformUUID" = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"\n', ""
+        )
+
+    monkeypatch.setattr(mp.subprocess, "run", fake_ioreg)
+    digest = mp.machine_digest(mp.MACHINE_ID_PATH, mp.PRODUCT_UUID_PATH)
+    assert calls == [["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"]]
+    assert digest == hashlib.sha256(
+        b"anneal-bench-machine-id-v1\0AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+    ).hexdigest()
+
+    def failed_ioreg(cmd, **_kwargs):
+        return subprocess.CompletedProcess(cmd, 1, "", "")
+
+    monkeypatch.setattr(mp.subprocess, "run", failed_ioreg)
+    with pytest.raises(RuntimeError, match="machine-id"):
+        mp.machine_digest(mp.MACHINE_ID_PATH, mp.PRODUCT_UUID_PATH)
+
+    monkeypatch.setattr(mp.sys, "platform", "linux")
+    monkeypatch.setattr(mp.subprocess, "run", _no_subprocess)
+    with pytest.raises(RuntimeError, match="machine-id"):
+        mp.machine_digest(mp.MACHINE_ID_PATH, mp.PRODUCT_UUID_PATH)
+
+
+def test_only_the_helper_reads_the_machine_id():
+    readers = sorted(
+        str(path.relative_to(ROOT))
+        for top in ("scripts", "bench")
+        for path in (ROOT / top).rglob("*.py")
+        if "/etc/machine-id" in path.read_text(errors="replace")
+    )
+    assert readers == ["scripts/machine_provenance.py"]
+
+
+def test_lj_board_journal_prints_the_salted_digest(monkeypatch):
+    pytest.importorskip("numba")
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "boardlib_machine", ROOT / "scripts" / "lj_board" / "boardlib.py"
+    )
+    boardlib = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(boardlib)
+    monkeypatch.setattr(boardlib, "machine_digest", lambda: "e" * 64)
+    assert "machine_id=" + "e" * 64 in boardlib.host_lines()
+
+    def unavailable():
+        raise RuntimeError("neither /etc/machine-id nor the DMI product_uuid is available")
+
+    monkeypatch.setattr(boardlib, "machine_digest", unavailable)
+    assert "machine_id=absent" in boardlib.host_lines()
