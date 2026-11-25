@@ -4618,6 +4618,7 @@ fn run_capnp_catalog(
     let mut probe_due = false;
     let mut slice_sequence = 0u64;
     let mut last_charged = 0usize;
+    let mut recorded_boundary_count = 0usize;
     #[cfg(feature = "ira")]
     let mut assigned_discovery_role = None;
     let mut applied_decree = None;
@@ -4952,6 +4953,7 @@ fn run_capnp_catalog(
                     .record_work_batch(replica, checkpoint_work)
                     .expect("checkpoint work batch must enter the cooperative ledger");
                 last_charged = snapshot.charged();
+                recorded_boundary_count += snapshot.quench_boundaries().len();
 
                 for transition in snapshot.accepted_transitions() {
                     cooperative
@@ -6710,11 +6712,39 @@ fn run_capnp_catalog(
     )
     .expect("finite start");
     println!("  checkpoint phases {}", phases.report());
-    if evidence_only && let Some(charged) = unsettled_objective_calls(ledger.spent(), last_charged)
-    {
+    if evidence_only {
+        if let Some(charged) = unsettled_objective_calls(ledger.spent(), last_charged) {
+            cooperative
+                .record_work(replica, EVIDENCE_ONLY_WORK_KIND, charged)
+                .expect("terminal evidence-only work must enter the cooperative ledger");
+        }
+    } else {
+        let terminal_boundaries = &ledger.quench_boundaries()[recorded_boundary_count..];
+        let boundary_charged = terminal_boundaries
+            .iter()
+            .map(|boundary| boundary.charged_calls())
+            .sum::<usize>();
+        let terminal_charged = ledger.spent().saturating_sub(last_charged);
+        let auxiliary_charged = terminal_charged
+            .checked_sub(boundary_charged)
+            .expect("terminal boundaries cannot exceed terminal work");
+        let mut terminal_work = Vec::with_capacity(terminal_boundaries.len() + 1);
+        for boundary in terminal_boundaries {
+            terminal_work.push((
+                ChargeKind::BasinEscape,
+                u64::try_from(boundary.charged_calls())
+                    .expect("terminal quench charge must fit u64"),
+            ));
+        }
+        if auxiliary_charged > 0 {
+            terminal_work.push((
+                ChargeKind::AuxiliaryEvaluation,
+                u64::try_from(auxiliary_charged).expect("terminal auxiliary charge must fit u64"),
+            ));
+        }
         cooperative
-            .record_work(replica, EVIDENCE_ONLY_WORK_KIND, charged)
-            .expect("terminal evidence-only work must enter the cooperative ledger");
+            .record_work_batch(replica, terminal_work)
+            .expect("terminal work batch must enter the cooperative ledger");
     }
     // The policy layer's own tally, printed where the run ends rather
     // than only on improvement lines: Leaves fire mostly in the quiet
