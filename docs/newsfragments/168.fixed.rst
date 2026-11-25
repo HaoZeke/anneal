@@ -7,7 +7,10 @@ restraint again. A later failure stays on the plain surface until the
 chain has been quiet for longer than its own longest quiet stretch,
 and that stall tries the restraint once.
 
-The unrestrained quench beside a restrained relaxation runs on that
-same stall. A hop that is still moving does not pay for it. A full pass
-that starts where a restraint screen kept the restraint does not repeat
-it. RelaxStats counts those quenches and the ones the chain walks.
+The unrestrained quench of that same proposal runs on the opening
+relaxation and on a restraint that did not beat the incumbent. It
+replaces the restraint only when it lowers the incumbent. A restraint
+that already beat the incumbent is kept, and that quench is not paid.
+A full pass that starts where a restraint screen kept the restraint
+does not repeat the quench. RelaxStats counts those quenches and the
+ones the chain walks.

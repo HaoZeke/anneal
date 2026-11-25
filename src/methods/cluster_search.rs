@@ -1226,14 +1226,18 @@ where
         // the restraint's answer, not on the proposal, and the proposal's
         // unrestrained minimum was already measured against the incumbent
         // and set aside, as a screened trial is.
-        //
-        // It is not part of a hop that is still moving. Most of those
-        // quenches do not lower the incumbent, and the calls still charge.
-        // The chain asks for one when it has been quiet for longer than
-        // its own longest quiet stretch.
         let restrained_energy = f;
         let mut walked_plain = false;
-        if surface.is_some() && !screen_kept_restraint && led.run_plain_quench {
+        // The unrestrained quench is how a restraint that lost to the
+        // incumbent still leaves that basin. It runs on the opening
+        // relaxation, before any incumbent exists, and on later
+        // restraints that did not beat the incumbent. A restraint that
+        // already beat the incumbent is the minimum the chain walks,
+        // and the extra quench is not paid. A full pass that starts
+        // where a restraint screen kept the restraint does not repeat it.
+        let incumbent = target;
+        let restraint_lost = !incumbent.is_finite() || !(restrained_energy < incumbent);
+        if surface.is_some() && !screen_kept_restraint && restraint_lost {
             let kept_early = early;
             let kept_last = last.borrow().clone();
             let kept_best = best_physical.borrow().clone();
@@ -3064,23 +3068,9 @@ mod tests {
             let start =
                 random_cluster_in_radius(13, cfg.start_radius(), cfg.min_separation, &mut rng);
             let mut hop = RelaxStats::default();
-            {
-                let mut moving_stats = RelaxStats::default();
-                {
-                    let mut relax = warm_relax(&objective, &cfg, &mut moving_stats, seed);
-                    let mut led = Ledger::new(100_000);
-                    let (_, moving) = relax(&mut led, start.view(), cfg.screen_steps);
-                    let _ = relax(&mut led, moving.view(), cfg.relax_steps);
-                }
-                assert_eq!(
-                    moving_stats.plain_quenches, 0,
-                    "seed {seed}: a moving chain ran the unrestrained quench"
-                );
-            }
             let screened = {
                 let mut relax = warm_relax(&objective, &cfg, &mut hop, seed);
                 let mut led = Ledger::new(100_000);
-                led.run_plain_quench = true;
                 let (_, screened) = relax(&mut led, start.view(), cfg.screen_steps);
                 let _ = relax(&mut led, screened.view(), cfg.relax_steps);
                 screened
@@ -3097,7 +3087,6 @@ mod tests {
             {
                 let mut relax = warm_relax(&objective, &cfg, &mut fresh, seed);
                 let mut led = Ledger::new(100_000);
-                led.run_plain_quench = true;
                 let _ = relax(&mut led, screened.view(), cfg.relax_steps);
             }
             assert_eq!(
@@ -5070,8 +5059,8 @@ mod tests {
     /// hash is that run's record: best, hops, charged calls, final energy,
     /// best geometry, accepted transitions, and improvements.
     ///
-    /// The hash moved when the unrestrained quench stopped running on a
-    /// hop that is still moving.
+    /// The hash moved when a restraint that had already beaten the
+    /// incumbent stopped paying for the unrestrained quench.
     #[test]
     fn an_unstopped_run_matches_the_recorded_search() {
         let mut cfg = Config::recommended(13);
@@ -5105,6 +5094,6 @@ mod tests {
             mix(&(*spent as u64).to_le_bytes());
             mix(&energy.to_bits().to_le_bytes());
         }
-        assert_eq!(state, 0x8ecb3cb05e092433);
+        assert_eq!(state, 0x992bc8731bb7f088);
     }
 }

@@ -799,7 +799,7 @@ pub struct Ledger {
     /// Speculative quenches must not publish a minimum the chain does not walk.
     pub(crate) suspend_record: bool,
     /// The chain has been quiet longer than its own longest quiet stretch.
-    /// The unrestrained quench beside a restraint runs only then.
+    /// A later plain hold lifts on that stall.
     pub(crate) run_plain_quench: bool,
 }
 
@@ -6636,8 +6636,8 @@ where
             ledger.best
         };
         let hop_origin = (e, x.clone());
-        // The extra unrestrained quench is an escape, not a step of every
-        // restrained hop. Quiet is the hops since the last new minimum.
+        // Quiet is the hops since the last new minimum. A later plain
+        // hold lifts when this stretch outlasts the chain's own longest.
         ledger.run_plain_quench = stalled(cfg, quiet, longest_quiet);
         if chain_best < best_seen - new_lowest {
             if let Some(origin) = ledger.block_chain.clone() {

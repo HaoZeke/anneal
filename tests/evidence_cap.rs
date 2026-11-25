@@ -9,8 +9,9 @@
 //! the rest is counted, and the run itself is the same to the bit.
 //!
 //! As in `lj_trajectory_pin.rs`, the scalar dot path is forced so the
-//! digest is one trajectory on every target. The digest moved when the
-//! unrestrained quench stopped running on a hop that is still moving.
+//! digest is one trajectory on every target. The digest moved when a
+//! restraint that had already beaten the incumbent stopped paying for
+//! the unrestrained quench.
 
 use anneal_core::methods::cluster_hopping::{
     AcceptedTransition, ChainCheckpoint, CheckpointAction, Config, Ledger, Outcome, QuenchBoundary,
@@ -27,7 +28,7 @@ const SEED: u64 = 2000;
 const ATOMS: usize = 13;
 const BUDGET: usize = 30_000;
 const INTERVAL: usize = 2_000;
-const PINNED: &str = "7431dedf31abdce644c8d3c05102c4382276e5f8d8ad6d29785a26550e0d64d6";
+const PINNED: &str = "5420efa5a6f2dc9cd8a09e5af8bc4aef7608fca93b5c846a26fb286670cefb44";
 
 #[derive(Clone, Copy)]
 enum Keep {

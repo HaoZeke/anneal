@@ -15,10 +15,13 @@
 //!
 //! Removing structure-specific proposals changes the LJ38 pin. Offering
 //! the compacted surface at every size moves the short LJ98 trajectory.
-//! The unrestrained quench of a restrained proposal runs only once the
-//! chain has been quiet longer than its own longest quiet stretch.
-//! The short LJ98 hop count moves from 2 to 3 and the final energy stays
-//! the one recorded here. The assertion stays a fixed trajectory.
+//! A restraint block that does not beat its opening incumbent returns
+//! the chain to where it stood when that incumbent was found. The first
+//! plain hold tries that restraint once more. A later failure waits
+//! until the chain has been quiet longer than its own longest quiet
+//! stretch. The unrestrained quench of the same proposal replaces the
+//! restraint only when it lowers the incumbent. The assertion stays a
+//! fixed trajectory.
 
 use anneal_core::methods::cluster_hopping::{Config, Ledger};
 use anneal_core::methods::cluster_search::search;
@@ -30,7 +33,7 @@ fn lj38_and_lj98_short_searches_stay_put() {
     // (n, seed, budget, best, hops, converged, capped)
     let cases: &[(usize, u64, usize, f64, usize, usize, usize)] = &[
         (38, 1, 2500, -170.711_308_119_462_44, 21, 14, 19),
-        (98, 7, 2500, -529.681_963_509_890_6, 3, 5, 4),
+        (98, 7, 2500, -529.681_963_509_890_6, 2, 4, 3),
     ];
     let mut records = Vec::new();
     for (n, seed, budget, best, hops, converged, capped) in cases {
@@ -66,6 +69,6 @@ fn lj38_and_lj98_short_searches_stay_put() {
     }
     let expected = "\
 LJ38 -170.7113081194624442 21 14 19 2500
-LJ98 -529.6819635098905792 3 5 4 2500";
+LJ98 -529.6819635098905792 2 4 3 2500";
     assert_eq!(records.join("\n"), expected);
 }
