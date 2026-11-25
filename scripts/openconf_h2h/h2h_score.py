@@ -28,14 +28,14 @@ import statistics
 import sys
 from pathlib import Path
 
+import numpy as np
+from rdkit import Chem
+
 for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().parents[1]):
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import energy_hits  # noqa: E402
-
-import numpy as np
-from rdkit import Chem
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from bench_host import run_host  # noqa: E402
