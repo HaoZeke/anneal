@@ -12629,6 +12629,172 @@ mod tests {
         assert_eq!(calls, ledger.spent());
     }
 
+    /// One charge per step; the energy falls by one per step from `start`
+    /// and stops at `floor`.
+    fn stepped_relax(
+        start: f64,
+        floor: f64,
+        calls: &std::cell::Cell<usize>,
+    ) -> impl FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + '_ {
+        move |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let mut energy = start;
+            for _ in 0..steps.max(1) {
+                if !led.charge() {
+                    break;
+                }
+                calls.set(calls.get() + 1);
+                energy = (energy - 1.0).max(floor);
+            }
+            (energy, x.to_owned())
+        }
+    }
+
+    #[test]
+    fn a_packing_candidate_that_cannot_beat_the_bar_stops_after_its_screen() {
+        let point = Array1::zeros(6);
+        let screen = PackingScreen {
+            steps: 5,
+            bar: -10.0,
+            allowance: 2.0,
+        };
+
+        // Five steps reach -5; less the credit of 2 that is -7, not below -10.
+        let calls = std::cell::Cell::new(0usize);
+        let mut ledger = Ledger::new(1_000);
+        let mut relax = stepped_relax(0.0, -40.0, &calls);
+        let refused = screened_relax(&mut ledger, &mut relax, point.view(), 50, screen);
+        assert!(refused.is_none(), "a candidate above the bar was finished");
+        assert_eq!(ledger.spent(), 5, "only the screening pass is charged");
+        assert_eq!(calls.get(), ledger.spent());
+
+        // From -4 the pass reaches -9, and -11 with the credit: finished.
+        let calls = std::cell::Cell::new(0usize);
+        let mut ledger = Ledger::new(1_000);
+        let mut relax = stepped_relax(-4.0, -40.0, &calls);
+        let (energy, _) = screened_relax(&mut ledger, &mut relax, point.view(), 50, screen)
+            .expect("a candidate that may beat the bar is finished");
+        assert_eq!(energy, -40.0, "the full relaxation is the one-pass one");
+        assert_eq!(ledger.spent(), 5 + 50, "screen and full relaxation charged");
+        assert_eq!(calls.get(), ledger.spent());
+
+        // No incumbent, no screen: one pass, as before the screen existed.
+        let calls = std::cell::Cell::new(0usize);
+        let mut ledger = Ledger::new(1_000);
+        let mut relax = stepped_relax(0.0, -40.0, &calls);
+        let open = PackingScreen {
+            bar: f64::INFINITY,
+            ..screen
+        };
+        let (energy, _) = screened_relax(&mut ledger, &mut relax, point.view(), 50, open)
+            .expect("an open screen relaxes");
+        assert_eq!(energy, -40.0);
+        assert_eq!(ledger.spent(), 50);
+        assert_eq!(calls.get(), ledger.spent());
+    }
+
+    #[test]
+    fn a_screening_pass_that_ends_the_budget_returns_its_point() {
+        let point = Array1::zeros(6);
+        let screen = PackingScreen {
+            steps: 5,
+            bar: -100.0,
+            allowance: 0.0,
+        };
+        let calls = std::cell::Cell::new(0usize);
+        let mut ledger = Ledger::new(5);
+        let mut relax = stepped_relax(0.0, -40.0, &calls);
+        let (energy, _) = screened_relax(&mut ledger, &mut relax, point.view(), 50, screen)
+            .expect("the paid point is returned");
+        assert_eq!(energy, -5.0);
+        assert_eq!(ledger.spent(), 5);
+        assert_eq!(calls.get(), ledger.spent());
+    }
+
+    /// The packing catalogue on a pair potential under `Config::recommended`,
+    /// relaxed with the benchmark drivers' warm L-BFGS. Returns the offer and
+    /// the potential calls it made, counted at the potential.
+    fn pair_catalogue(
+        potential: &crate::potentials::PairPotential,
+        n: usize,
+        screen: PackingScreen,
+    ) -> (Option<(f64, Array1<f64>, usize)>, usize, usize) {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+        let cfg = Config::recommended(n);
+        let mut ledger = Ledger::new(1_000_000);
+        let mut calls = 0usize;
+        let mut opt = WarmLbfgs::default();
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
+            opt.forget();
+            let (value, relaxed, _) = opt.minimize(x, iterations, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                calls += 1;
+                Some(potential.value_and_gradient(v))
+            });
+            (value, relaxed)
+        };
+        let offer = generic_packing_candidate_with_encounter(&cfg, &mut ledger, &mut relax, screen);
+        let spent = ledger.spent();
+        (offer, spent, calls)
+    }
+
+    /// The screen keeps the packing that solves LJ38 and Morse M38 at rho 6
+    /// in one offer, at the same energy and for fewer calls, and refuses
+    /// every candidate when none can beat the bar. The bar sits two wells
+    /// above the global minimum, about where the walk stands at the offer;
+    /// the credit is zero, the strictest the walk can pass.
+    #[test]
+    fn the_packing_screen_keeps_the_lj38_and_m38_solutions_and_skips_the_rest() {
+        use crate::potentials::PairPotential;
+        for (label, potential, reference) in [
+            ("lj38", PairPotential::lennard_jones(38), -173.928427),
+            ("m38r6", PairPotential::morse(38, 6.0), -157.477108),
+        ] {
+            let (open, open_spent, open_calls) =
+                pair_catalogue(&potential, 38, PackingScreen::OPEN);
+            let (open_energy, _, _) = open.expect("the open catalogue offers a packing");
+            assert!(
+                crate::energy_hits(open_energy, reference, crate::DEFAULT_HIT_TOL),
+                "{label}: the open catalogue offered {open_energy}"
+            );
+            assert_eq!(open_calls, open_spent, "{label}: every call charged");
+
+            let screen = PackingScreen {
+                steps: Config::recommended(38).screen_steps,
+                bar: reference + 2.0,
+                allowance: 0.0,
+            };
+            let (kept, kept_spent, kept_calls) = pair_catalogue(&potential, 38, screen);
+            let (kept_energy, _, _) = kept.expect("the solving packing passes the screen");
+            assert_eq!(
+                kept_energy.to_bits(),
+                open_energy.to_bits(),
+                "{label}: the screened catalogue lost the solution"
+            );
+            assert_eq!(kept_calls, kept_spent, "{label}: every call charged");
+            assert!(
+                kept_spent < open_spent,
+                "{label}: the screen spent {kept_spent} against {open_spent}"
+            );
+
+            let beaten = PackingScreen {
+                bar: open_energy,
+                ..screen
+            };
+            let (none, none_spent, none_calls) = pair_catalogue(&potential, 38, beaten);
+            assert!(
+                none.is_none(),
+                "{label}: a candidate that cannot beat the bar was finished"
+            );
+            assert_eq!(none_calls, none_spent, "{label}: every call charged");
+            assert!(
+                none_spent < kept_spent,
+                "{label}: refusing every candidate spent {none_spent} against {kept_spent}"
+            );
+        }
+    }
+
     #[test]
     fn the_packing_offer_waits_four_hops_per_structure_and_never_past_the_last_hop() {
         let mut cfg = Config::recommended(26);
