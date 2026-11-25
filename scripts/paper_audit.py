@@ -942,8 +942,18 @@ def bisected_z975() -> float:
 
 
 def paired_stats_module():
-    spec = importlib.util.spec_from_file_location("paired_stats", ROOT / "scripts/paired_stats.py")
+    """Load ``scripts/paired_stats.py`` under a name nothing else imports.
+
+    ``spec_from_file_location("paired_stats", ...)`` would reuse whatever
+    ``sys.modules["paired_stats"]`` already holds once another file of
+    that basename has been imported.
+    """
+    name = "anneal_scripts_paired_stats"
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts/paired_stats.py")
+    if spec is None or spec.loader is None:
+        raise ImportError("scripts/paired_stats.py")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -992,9 +1002,7 @@ def paired_statistics(audit: Audit) -> None:
     audit.record(all(int(float(r["evals_to_hit"])) == int(r["budget"]) for r in misses), "bench/gmin-panel/rows.csv",
                  "every miss carries the budget as its calls, as the Wilcoxon test counts it", "budget",
                  "budget" if all(int(float(r["evals_to_hit"])) == int(r["budget"]) for r in misses) else "other")
-    spec = importlib.util.spec_from_file_location("paired_stats", ROOT / "scripts/paired_stats.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = paired_stats_module()
     panel, groups = gmin_panel_groups(audit)
     worst = 0.0
     for system in panel.PAPER_BUDGETS:

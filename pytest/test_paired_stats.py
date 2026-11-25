@@ -1,15 +1,22 @@
 # Copyright (c) anneal developers
 """The seed-paired comparison counts discordant seeds and reports per-call time."""
 
+import importlib.util
 import sys
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("scipy")
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "openconf_h2h"))
 
-import paired_stats as ps  # noqa: E402
+# scripts/paired_stats.py is a different module. Load this file by path
+# under its own name so the two never share a sys.modules entry.
+_PATH = Path(__file__).resolve().parents[1] / "scripts" / "openconf_h2h" / "h2h_paired_stats.py"
+_SPEC = importlib.util.spec_from_file_location("openconf_h2h_paired_stats", _PATH)
+assert _SPEC is not None and _SPEC.loader is not None
+ps = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = ps
+_SPEC.loader.exec_module(ps)
 
 
 def row(arm, seed, hit, calls=1000, outside=0.5, invalid=0, molecule="m"):
@@ -17,6 +24,11 @@ def row(arm, seed, hit, calls=1000, outside=0.5, invalid=0, molecule="m"):
         "molecule": molecule, "arm": arm, "seed": str(seed), "hit": str(hit), "calls": str(calls),
         "outside_s": str(outside), "invalid": str(invalid),
     }
+
+
+def test_per_call_time_uses_the_recorded_call_count():
+    assert ps.per_call_us(row("anneal", 0, 1, calls=4, outside=0.008)) == pytest.approx(2000.0)
+    assert ps.per_call_us(row("anneal", 0, 1, calls=8, outside=0.008)) == pytest.approx(1000.0)
 
 
 def test_exact_mcnemar_is_a_binomial_test_of_the_discordant_split():
