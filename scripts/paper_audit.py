@@ -4806,16 +4806,16 @@ def covalent_panels(audit: Audit) -> None:
 
 
 def release(audit: Audit) -> None:
-    version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
+    tag = cited_release_tag()
     audit.said(TEX, f"The described submitted revision postdates the newest released tag,\n"
-                    f"v{version}, and is available at\n"
+                    f"{tag}, and is available at\n"
                     "\\url{https://github.com/HaoZeke/anneal/commit/"
                     f"{SUBMITTED}}};\n"
                     "the Zenodo archive does not contain that revision.")
     audit.record(git("cat-file", "-e", f"{SUBMITTED}^{{commit}}").returncode == 0,
                  TEX, "the submitted revision in the archive statement exists", "present", "present")
-    tagged = release_tag_available(f"v{version}")
-    audit.record(tagged, TEX, "release tag exists", f"v{version}", "tagged" if tagged else "no tag")
+    tagged = release_tag_available(tag)
+    audit.record(tagged, TEX, "release tag exists", tag, "tagged" if tagged else "no tag")
 
 
 def lj_large(audit: Audit) -> None:
@@ -5437,6 +5437,42 @@ def release_tag_available(tag: str) -> bool:
     return git("ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}").returncode == 0
 
 
+_RELEASE_TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)\Z")
+
+
+def release_tag_names() -> list[str]:
+    """vX.Y.Z tags present locally or advertised by origin, oldest first.
+
+    The workspace version can move ahead of the newest of these before
+    that version is tagged. The manuscript names the newest tag, not
+    the workspace version.
+    """
+    names: set[str] = set()
+    for name in git("tag", "--list", "v*").stdout.split():
+        if _RELEASE_TAG.fullmatch(name):
+            names.add(name)
+    remote = git("ls-remote", "--tags", "origin")
+    for line in remote.stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or not parts[1].startswith("refs/tags/"):
+            continue
+        name = parts[1].removeprefix("refs/tags/")
+        if name.endswith("^{}"):
+            name = name[:-3]
+        if _RELEASE_TAG.fullmatch(name):
+            names.add(name)
+    return sorted(names, key=lambda name: tuple(int(part) for part in name[1:].split(".")))
+
+
+def cited_release_tag() -> str:
+    """The newest released tag, or the workspace version when no tag exists."""
+    names = release_tag_names()
+    if names:
+        return names[-1]
+    version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
+    return f"v{version}"
+
+
 def unauditable() -> list[str]:
     """Why this clone cannot answer the revision checks, if it cannot.
 
@@ -5450,8 +5486,7 @@ def unauditable() -> list[str]:
     if not git("for-each-ref", "--count=1", "refs/remotes").stdout.strip():
         problems.append("there are no remote-tracking refs; fetch the branches of origin "
                         "(git fetch origin '+refs/heads/*:refs/remotes/origin/*')")
-    version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
-    tag = f"v{version}"
+    tag = cited_release_tag()
     if not release_tag_available(tag):
         problems.append(f"the release tag {tag} is neither local nor advertised by origin")
     for branch in AUDIT_REMOTE_BRANCHES:
