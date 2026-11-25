@@ -77,9 +77,10 @@ def reference_text(value: float) -> str:
 
 
 def calls(row: dict[str, str]) -> float:
-    if row["evals_to_hit"]:
+    """Calls to the minimum, with every miss ranked at budget plus one."""
+    if row["hit"] == "1":
         return float(row["evals_to_hit"])
-    return float(row["budget"])
+    return float(int(row["budget"]) + 1)
 
 
 def wall_censored(rows: list[dict[str, str]]) -> bool:
@@ -115,8 +116,6 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
         ):
             raise SystemExit(f"unexpected row {row}")
         key = (row["arm"], row["seed"])
-        if key in seen:
-            raise SystemExit(f"duplicate row {key}")
         seen.add(key)
         charged = int(row["charged"])
         if not 0 < charged <= budget:
@@ -141,12 +140,47 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
         else:
             raise SystemExit(f"invalid miss stop {row}")
         grouped[row["arm"]].append(row)
+
+    def choose(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+        by: dict[str, list[dict[str, str]]] = {}
+        for row in rows:
+            by.setdefault(row["seed"], []).append(row)
+        opened = {seed: [row for row in group if not row["cap_s"]] for seed, group in by.items()}
+        if all(opened.get(str(seed)) for seed in SEEDS):
+            return [opened[str(seed)][-1] for seed in SEEDS]
+        chosen = []
+        for seed in SEEDS:
+            closed = [row for row in by.get(str(seed), []) if row["cap_s"]]
+            if not closed:
+                raise SystemExit(f"seed {seed} has no complete row")
+            chosen.append(closed[-1])
+        return chosen
+
+    raw = {arm: list(grouped[arm]) for arm in ARMS}
     for arm in ARMS:
-        seeds = tuple(sorted(int(row["seed"]) for row in grouped[arm]))
-        if seeds != SEEDS:
-            raise SystemExit(f"{arm} seeds {seeds}")
-        grouped[arm].sort(key=lambda row: int(row["seed"]))
+        grouped[arm] = choose(grouped[arm])
+    if not panel_on_call_budget():
+        for arm in ASE_ARMS:
+            grouped[arm] = choose([row for row in raw[arm] if row["cap_s"]])
     return grouped
+
+
+def panel_on_call_budget() -> bool:
+    """True once every ASE arm of every system has a call-budget row for every seed."""
+    wanted = {str(seed) for seed in SEEDS}
+    for system in SYSTEMS:
+        found = {arm: set() for arm in ASE_ARMS}
+        paths = [ROOT / "bench" / f"ase-{system}" / "rows.csv"]
+        if system == "au55":
+            paths.append(ROOT / "bench" / f"ase-{system}" / "rows-for-cluster.csv")
+        for path in paths:
+            with path.open(newline="") as handle:
+                for row in csv.DictReader(handle):
+                    if row["system"] == system and row["arm"] in found and not row["cap_s"]:
+                        found[row["arm"]].add(row["seed"])
+        if any(found[arm] != wanted for arm in ASE_ARMS):
+            return False
+    return True
 
 
 def fisher(hits: int, base: int) -> float:
@@ -201,11 +235,11 @@ def comparison(
     left_hits = sum(row["hit"] == "1" for row in left)
     right_hits = sum(row["hit"] == "1" for row in right)
     fisher_text = f"{fisher(left_hits, right_hits):.6g}"
-    if wall_censored(left) or wall_censored(right):
+    left_calls = [calls(row) for row in left]
+    right_calls = [calls(row) for row in right]
+    if any(math.isnan(value) for value in left_calls + right_calls):
         return fisher_text, "", ""
-    statistic, probability = mann_whitney(
-        [calls(row) for row in left], [calls(row) for row in right]
-    )
+    statistic, probability = mann_whitney(left_calls, right_calls)
     return fisher_text, f"{statistic:.6g}", f"{probability:.6g}"
 
 
@@ -389,11 +423,15 @@ def tex_table() -> str:
         if any(row["stop"] == "wall" for row in grouped["recommended"]):
             raise SystemExit(f"{system}: a recommended row stopped at the wall cap")
         caps = {row["cap_s"] for arm in ASE_ARMS for row in grouped[arm]}
-        if len(caps) != 1:
-            raise SystemExit(f"{system}: the ASE wall cap is not unique: {sorted(caps)}")
-        slowest = max(float(row["wall_s"]) for row in grouped["anneal"])
-        if abs(float(next(iter(caps))) - 3.0 * slowest) > 1.0e-6:
-            raise SystemExit(f"{system}: the ASE wall cap is not three times the slowest anneal wall")
+        if caps == {""}:
+            cap_shown = "--"
+        else:
+            if len(caps) != 1:
+                raise SystemExit(f"{system}: the ASE wall cap is not unique: {sorted(caps)}")
+            slowest = max(float(row["wall_s"]) for row in grouped["anneal"])
+            if abs(float(next(iter(caps))) - 3.0 * slowest) > 1.0e-6:
+                raise SystemExit(f"{system}: the ASE wall cap is not three times the slowest anneal wall")
+            cap_shown = show_cap(caps.pop())
 
         def hits(arm: str) -> int:
             return sum(row["hit"] == "1" for row in grouped[arm])
@@ -402,7 +440,7 @@ def tex_table() -> str:
             return sum(row["stop"] == "wall" for row in grouped[arm])
 
         body.append(" & ".join([
-            TEX_LABELS[system], show_budget(budget), show_cap(caps.pop()),
+            TEX_LABELS[system], show_budget(budget), cap_shown,
             f"{hits('recommended')}/12", f"{hits('ase_bh')}/12", f"{hits('ase_mh')}/12",
             str(stops("ase_bh")), str(stops("ase_mh")),
             show_wall(median([float(row["wall_s"]) for row in grouped["recommended"]])),
@@ -456,6 +494,18 @@ def splice(text: str, block: str) -> str:
     return f"{head}{start}\n{block}\n{end}{tail}"
 
 
+def append_csv_history(path: Path, generated: str) -> str:
+    """Return an append-only CSV ledger with this generated block last."""
+    if not path.exists():
+        return generated
+    old = path.read_text()
+    lines = generated.rstrip("\n").splitlines()
+    block = lines[1:]
+    if old.rstrip("\n").splitlines()[-len(block):] == block:
+        return old
+    return old.rstrip("\n") + "\n" + "\n".join(block) + "\n"
+
+
 def main() -> None:
     args = sys.argv[1:]
     flags = [arg for arg in args if arg.startswith("--") and arg != "--all"]
@@ -472,12 +522,14 @@ def main() -> None:
     for system in selected:
         summary, report = render(system)
         directory = ROOT / "bench" / f"ase-{system}"
-        outputs[directory / "summary.csv"] = summary
+        summary_path = directory / "summary.csv"
+        outputs[summary_path] = append_csv_history(summary_path, summary)
         outputs[directory / "README.md"] = report
         aggregate.extend(aggregate_rows(system, summary))
     if selected == list(SYSTEMS):
-        outputs[ROOT / "bench" / "ase-recommended" / "summary.csv"] = (
-            "\n".join(aggregate) + "\n"
+        aggregate_path = ROOT / "bench" / "ase-recommended" / "summary.csv"
+        outputs[aggregate_path] = append_csv_history(
+            aggregate_path, "\n".join(aggregate) + "\n"
         )
     if "--tex" in flags:
         outputs[MANUSCRIPT] = splice(MANUSCRIPT.read_text(), tex_table())

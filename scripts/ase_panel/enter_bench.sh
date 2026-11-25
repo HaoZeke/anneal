@@ -4,9 +4,11 @@
 # and the headline Config::recommended arm.
 #   enter_bench.sh --system lj38 --arm recommended --seed 2000
 # No --arm rewrites that system's summary from the committed rows.
-# An existing seed is left untouched. An ASE seed stops at three times
-# the slowest for_cluster wall. A recommended seed stops at the cap
-# already stored on those ASE rows.
+# An existing anneal or recommended seed is left untouched. An existing
+# basin-hopping or minima-hopping seed is left untouched when its row has
+# no wall cap, and rerun when the stored row stopped on a wall cap.
+# Those two arms stop at the call budget, the same budget as anneal.
+# A recommended seed stops at the cap already stored on its rows.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -65,18 +67,29 @@ with open(path, newline="") as handle:
         row for row in csv.DictReader(handle)
         if (row["system"], row["arm"], row["seed"]) == (system, arm, seed)
     ]
-if len(matches) > 1:
-    raise SystemExit(f"duplicate stored rows for {system} {arm} {seed}")
-print(matches[0]["code_revision"] if matches else "")
+capped = [row for row in matches if row["cap_s"]]
+open_rows = [row for row in matches if not row["cap_s"]]
+print(matches[-1]["code_revision"] if matches else "")
+print("capped" if capped and not open_rows else "keep")
 PY
 )
-  if [[ -n $EXISTING ]]; then
-    if [[ $EXISTING != "$REV" ]]; then
-      echo "stored $SYSTEM $ARM seed $SEED is revision $EXISTING, requested $REV; use a new campaign table" >&2
-      exit 2
+  EXISTING_REV=${EXISTING%%$'\n'*}
+  EXISTING_KIND=${EXISTING#*$'\n'}
+  if [[ -n $EXISTING_REV ]]; then
+    if [[ $ARM == ase_bh || $ARM == ase_mh ]]; then
+      if [[ $EXISTING_KIND == keep ]]; then
+        echo "keep existing $SYSTEM $ARM seed $SEED"
+        exit 0
+      fi
+      echo "rerun $SYSTEM $ARM seed $SEED; the stored row has a wall cap"
+    else
+      if [[ $EXISTING_REV != "$REV" ]]; then
+        echo "stored $SYSTEM $ARM seed $SEED is revision $EXISTING_REV, requested $REV; use a new campaign table" >&2
+        exit 2
+      fi
+      echo "keep existing $SYSTEM $ARM seed $SEED at revision $REV"
+      exit 0
     fi
-    echo "keep existing $SYSTEM $ARM seed $SEED at revision $REV"
-    exit 0
   fi
 fi
 
@@ -94,32 +107,19 @@ if len(caps) != 1:
 print(caps[0])
 PY
 )
-elif [[ $ARM != anneal ]]; then
-  CAP=$(python3 - "$ROWS" "$SYSTEM" << 'PY'
-import csv
-import sys
-from pathlib import Path
-
-path, system = Path(sys.argv[1]), sys.argv[2]
-rows = list(csv.DictReader(path.open())) if path.exists() else []
-anneal = [row for row in rows if row["arm"] == "anneal" and row["system"] == system and row["host"] == "bench"]
-seeds = tuple(sorted(int(row["seed"]) for row in anneal))
-if seeds != tuple(range(2000, 2012)):
-    raise SystemExit(f"wall cap needs anneal seeds 2000-2011, found {seeds}")
-print(f"{3.0 * max(float(row['wall_s']) for row in anneal):.6f}")
-PY
-)
 fi
 
 PANEL=${ASE_PANEL:-/work/target-panel/release/examples/ase_panel}
 ASG=${ASG_EVAL:-/work/target-panel/release/examples/asg_eval}
 PY=${PYTHON:-python3}
+user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 sudo -n unshare --uts sh -c "hostname bench; \
-  export HOME=$WORK/home NUMBA_CACHE_DIR=$WORK/numba; \
-  export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1; \
-  export OMP_PROC_BIND=TRUE OMP_PLACES=cores PYTHONUNBUFFERED=1; \
-  export ASE_PANEL_WORK=$WORK/runs ASE_PANEL=$PANEL ASG_EVAL=$ASG ASE_PANEL_WALL_CAP=$CAP ASE_PANEL_REVISION=$REV; \
-  exec taskset -c 0 $PY $HERE/run_one.py $SYSTEM $ARM $SEED" \
+  exec sudo -u $(id -un) env \
+  HOME=$WORK/home NUMBA_CACHE_DIR=$WORK/numba PYTHONPATH=$user_site \
+  OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 NUMBA_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 BLIS_NUM_THREADS=1 \
+  OMP_PROC_BIND=TRUE OMP_PLACES=cores PYTHONUNBUFFERED=1 \
+  ASE_PANEL_WORK=$WORK/runs ASE_PANEL=$PANEL ASG_EVAL=$ASG ASE_PANEL_WALL_CAP=$CAP ASE_PANEL_REVISION=$REV \
+  taskset -c 0 $PY $HERE/run_one.py $SYSTEM $ARM $SEED" \
   > "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" 2> "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stderr"
 
 python3 - "$SYSTEM" "$ARM" "$SEED" "$WORK/runs/${SYSTEM}-${ARM}-${SEED}.stdout" "$ROWS" << 'PY'
@@ -137,7 +137,7 @@ if len(fields) != 15:
 path = Path(rows_path)
 header = "system,arm,seed,budget,hit,evals_to_hit,charged,best,wall_s,inside_s,outside_s,code_revision,host,stop,cap_s"
 text = path.read_text() if path.exists() else ""
-if f",{arm},{seed}," in text:
+if f",{arm},{seed}," in text and fields[14] != "":
     print(f"keep existing {system} {arm} seed {seed}")
     raise SystemExit(0)
 path.parent.mkdir(parents=True, exist_ok=True)

@@ -62,9 +62,10 @@ def median(values: list[float]) -> float:
 
 
 def calls(row: dict[str, str]) -> float:
-    if row["evals_to_hit"]:
+    """Calls to the minimum, with every miss ranked at budget plus one."""
+    if row["hit"] == "1":
         return float(row["evals_to_hit"])
-    return float(row["budget"])
+    return float(int(row["budget"]) + 1)
 
 
 def g6(value: float) -> str:
@@ -143,9 +144,11 @@ def against(group: list[dict[str, str]], other: list[dict[str, str]]) -> tuple[s
     hits = sum(row["hit"] == "1" for row in group)
     base = sum(row["hit"] == "1" for row in other)
     fisher_text = g6(fisher(hits, base))
-    if wall_censored(group) or wall_censored(other):
+    left_calls = [calls(row) for row in group]
+    right_calls = [calls(row) for row in other]
+    if any(math.isnan(value) for value in left_calls + right_calls):
         return fisher_text, "", ""
-    u_stat, mw_p = mann_whitney([calls(row) for row in group], [calls(row) for row in other])
+    u_stat, mw_p = mann_whitney(left_calls, right_calls)
     return fisher_text, g6(u_stat), g6(mw_p)
 
 
@@ -166,8 +169,6 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
         if row["budget"] != SPEC[system][2] or row["host"] != "bench":
             raise SystemExit(f"unexpected budget or host {row}")
         key = (system, arm, row["seed"])
-        if key in seen:
-            raise SystemExit(f"duplicate row {key}")
         seen.add(key)
         budget = int(row["budget"])
         charged = int(row["charged"])
@@ -190,15 +191,74 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
         elif row["stop"] == "wall":
             if charged >= budget or not row["cap_s"]:
                 raise SystemExit(f"invalid wall stop {row}")
+        elif row["stop"] == "cap reached (12 h CPU)":
+            if charged >= budget or float(row["cap_s"]) != 43_200.0:
+                raise SystemExit(f"invalid CPU-cap stop {row}")
         else:
             raise SystemExit(f"invalid miss stop {row}")
         grouped[system][arm].append(row)
+
+    def choose(rows: list[dict[str, str]], system: str, arm: str) -> list[dict[str, str]]:
+        by: dict[str, list[dict[str, str]]] = {}
+        for row in rows:
+            by.setdefault(row["seed"], []).append(row)
+        opened = {seed: [row for row in group if not row["cap_s"]] for seed, group in by.items()}
+        if all(opened.get(str(seed)) for seed in SEEDS):
+            return [opened[str(seed)][-1] for seed in SEEDS]
+        campaign_keys = list(dict.fromkeys(
+            (row["code_revision"], row["cap_s"])
+            for row in rows if row["cap_s"]
+        ))
+        for revision, cap in reversed(campaign_keys):
+            chosen = []
+            for seed in map(str, SEEDS):
+                same_revision_open = [
+                    row for row in opened.get(seed, [])
+                    if row["code_revision"] == revision
+                ]
+                same_campaign = [
+                    row for row in by.get(seed, [])
+                    if row["code_revision"] == revision and row["cap_s"] == cap
+                ]
+                if same_revision_open:
+                    chosen.append(same_revision_open[-1])
+                elif same_campaign:
+                    chosen.append(same_campaign[-1])
+                else:
+                    break
+            if len(chosen) == len(SEEDS):
+                return chosen
+        complete_caps = [
+            cap for cap in dict.fromkeys(row["cap_s"] for row in rows if row["cap_s"])
+            if all(any(row["cap_s"] == cap for row in by.get(str(seed), [])) for seed in SEEDS)
+        ]
+        if complete_caps:
+            cap = complete_caps[-1]
+            return [
+                [row for row in by[str(seed)] if row["cap_s"] == cap][-1]
+                for seed in SEEDS
+            ]
+        chosen = []
+        for seed in SEEDS:
+            closed = [row for row in by.get(str(seed), []) if row["cap_s"]]
+            if not closed:
+                raise SystemExit(f"{system} {arm} seed {seed} has no complete row")
+            chosen.append(closed[-1])
+        return chosen
+
+    raw = {system: {arm: list(grouped[system][arm]) for arm in ARMS} for system in SYSTEMS}
     for system in SYSTEMS:
         for arm in ARMS:
-            seeds = tuple(sorted(int(row["seed"]) for row in grouped[system][arm]))
-            if seeds != SEEDS:
-                raise SystemExit(f"{system} {arm} seeds {seeds}")
-            grouped[system][arm].sort(key=lambda row: int(row["seed"]))
+            grouped[system][arm] = choose(grouped[system][arm], system, arm)
+    ready = all(
+        all(not row["cap_s"] for row in grouped[system][arm])
+        for system in SYSTEMS for arm in ASE_ARMS
+    )
+    if not ready:
+        for system in SYSTEMS:
+            for arm in ASE_ARMS:
+                grouped[system][arm] = choose(
+                    [row for row in raw[system][arm] if row["cap_s"]], system, arm)
     return grouped
 
 
@@ -245,18 +305,38 @@ def tex_table(grouped: dict[str, dict[str, list[dict[str, str]]]]) -> str:
         arms = grouped[system]
         if any(row["stop"] == "wall" for row in arms["recommended"]):
             raise SystemExit(f"{system}: a recommended row stopped at the wall cap")
-        if not all(row["stop"] == "wall" for arm in ASE_ARMS for row in arms[arm]):
-            raise SystemExit(f"{system}: an ASE row did not stop at the wall cap")
         caps = {row["cap_s"] for arm in ASE_ARMS for row in arms[arm]}
-        slowest = max(float(row["wall_s"]) for row in arms["for_cluster"])
-        if len(caps) != 1 or abs(float(next(iter(caps))) - 3.0 * slowest) > 1.0e-6:
-            raise SystemExit(f"{system}: the ASE wall cap is not three times the slowest for_cluster wall")
+        if caps == {""}:
+            for arm in ASE_ARMS:
+                for row in arms[arm]:
+                    if row["hit"] == "0" and (row["stop"] != "budget" or int(row["charged"]) != int(row["budget"])):
+                        raise SystemExit(f"{system}: a miss was not charged the call budget")
+            cap_shown = "--"
+        elif caps <= {"", "43200.000000"} and "43200.000000" in caps:
+            for arm in ASE_ARMS:
+                for row in arms[arm]:
+                    if row["cap_s"] == "43200.000000":
+                        if row["stop"] != "cap reached (12 h CPU)":
+                            raise SystemExit(f"{system}: invalid CPU-cap row")
+                    elif row["hit"] == "0" and (
+                        row["stop"] != "budget"
+                        or int(row["charged"]) != int(row["budget"])
+                    ):
+                        raise SystemExit(f"{system}: invalid uncapped miss")
+            cap_shown = "43200.000"
+        else:
+            if any(row["stop"] != "wall" for arm in ASE_ARMS for row in arms[arm]):
+                raise SystemExit(f"{system}: an ASE row did not stop at the wall cap")
+            slowest = max(float(row["wall_s"]) for row in arms["for_cluster"])
+            if len(caps) != 1 or abs(float(next(iter(caps))) - 3.0 * slowest) > 1.0e-6:
+                raise SystemExit(f"{system}: the ASE wall cap is not three times the slowest for_cluster wall")
+            cap_shown = f"{float(caps.pop()):.3f}"
 
         def hits(arm: str) -> int:
             return sum(row["hit"] == "1" for row in arms[arm])
 
         body.append(" & ".join([
-            TEX_LABELS[system], show_budget(budget), f"{float(caps.pop()):.3f}",
+            TEX_LABELS[system], show_budget(budget), cap_shown,
             f"{hits('recommended')}/12", f"{hits('ase_bh')}/12", f"{hits('ase_mh')}/12",
             show_wall(median([float(row["wall_s"]) for row in arms["recommended"]])),
             show_wall(median([float(row["wall_s"]) for row in arms["ase_bh"]])),
@@ -304,6 +384,17 @@ def splice(text: str, block: str) -> str:
     head, rest = text.split(start, 1)
     _old, tail = rest.split(end, 1)
     return f"{head}{start}\n{block}\n{end}{tail}"
+
+
+def append_csv_history(path: Path, generated: str) -> str:
+    """Return an append-only CSV ledger with this generated block last."""
+    if not path.exists():
+        return generated
+    old = path.read_text()
+    block = generated.rstrip("\n").splitlines()[1:]
+    if old.rstrip("\n").splitlines()[-len(block):] == block:
+        return old
+    return old.rstrip("\n") + "\n" + "\n".join(block) + "\n"
 
 
 def group_revision(group: list[dict[str, str]]) -> str:
@@ -434,8 +525,9 @@ def main() -> None:
         ]
     )
     out = ROOT / "bench" / "ase-nonlj"
+    summary_path = out / "summary.csv"
     outputs = {
-        out / "summary.csv": "\n".join(summary_lines) + "\n",
+        summary_path: append_csv_history(summary_path, "\n".join(summary_lines) + "\n"),
         out / "README.md": "\n".join(readme),
     }
     if "--tex" in flags:

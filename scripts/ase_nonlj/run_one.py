@@ -16,7 +16,9 @@ on the exact same geometry to within 1e-8 on energy and forces.
 
 from __future__ import annotations
 
+import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -129,7 +131,7 @@ def verify_agreement(system: str, seed: int) -> tuple[float, float, float, float
     return e_anneal, e_ase, abs_de, max_df
 
 
-def make_morse_calculator(rho: float, budget: int, reference: float, fmax: float, deadline: float):
+def make_morse_calculator(rho: float, budget: int, reference: float, fmax: float, deadline: float | None):
     from ase.calculators.morse import MorsePotential
 
     class MeteredMorse(MorsePotential):
@@ -179,7 +181,14 @@ def make_morse_calculator(rho: float, budget: int, reference: float, fmax: float
     return MeteredMorse()
 
 
-def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
+def run_ase(
+    system: str,
+    arm: str,
+    seed: int,
+    work: Path,
+    cap_s: float | None,
+    cpu_cap_s: float | None,
+) -> dict:
     from ase import Atoms
     from ase.optimize.basin import BasinHopping
     from ase.optimize.minimahopping import MinimaHopping
@@ -195,16 +204,26 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
         pbc=False,
     )
     started = time.perf_counter()
+    cpu_started = time.process_time()
     calc = make_morse_calculator(
         spec["rho"],
         spec["budget"],
         spec["reference"],
         FMAX[arm],
-        started + cap_s,
+        None if cap_s is None else started + cap_s,
     )
     atoms.calc = calc
     np.random.seed(seed)
     stop = "budget"
+    old_sigprof = None
+    if cpu_cap_s is not None:
+        old_sigprof = signal.getsignal(signal.SIGPROF)
+
+        def cpu_cap_reached(signum, frame):
+            raise CapReached()
+
+        signal.signal(signal.SIGPROF, cpu_cap_reached)
+        signal.setitimer(signal.ITIMER_PROF, cpu_cap_s)
     try:
         if arm == "ase_bh":
             BasinHopping(
@@ -217,10 +236,15 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
         else:
             MinimaHopping(atoms)(totalsteps=10**9)
     except CapReached:
-        stop = "wall"
+        stop = "cap reached (12 h CPU)" if cpu_cap_s is not None else "wall"
     except (BudgetReached, HitReached):
         stop = "budget"
+    finally:
+        if cpu_cap_s is not None:
+            signal.setitimer(signal.ITIMER_PROF, 0.0)
+            signal.signal(signal.SIGPROF, old_sigprof)
     wall = time.perf_counter() - started
+    cpu = time.process_time() - cpu_started
     best = calc.best_quenched if calc.best_quenched < 1.0e299 else calc.best
     hit = calc.hit_calls is not None
     return {
@@ -229,10 +253,14 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float) -> dict:
         "charged": calc.calls,
         "best": float(best),
         "wall": wall,
+        "cpu": cpu,
         "inside": calc.inside_s,
         "outside": max(0.0, wall - calc.inside_s),
         "stop": "hit" if hit else stop,
-        "cap_s": cap_s,
+        "cap_s": (
+            cpu_cap_s if cpu_cap_s is not None
+            else ("" if cap_s is None else cap_s)
+        ),
     }
 
 
@@ -301,15 +329,13 @@ def main() -> int:
         row = run_anneal(system, seed, arm, cap_text)
     else:
         cap_text = os.environ.get("ASE_NONLJ_WALL_CAP", "")
-        if not cap_text:
-            print("ASE_NONLJ_WALL_CAP is unset", file=sys.stderr)
-            return 2
         row = run_ase(
             system,
             arm,
             seed,
             Path(os.environ.get("ASE_NONLJ_WORK", "/work/ase-nonlj/runs")) / f"{system}-{arm}-{seed}",
-            float(cap_text),
+            float(cap_text) if cap_text else None,
+            float(os.environ["ASE_NONLJ_CPU_CAP"]) if os.environ.get("ASE_NONLJ_CPU_CAP") else None,
         )
     cap = "" if row["cap_s"] == "" else f"{float(row['cap_s']):.6f}"
     print(
@@ -335,6 +361,36 @@ def main() -> int:
         flush=True,
     )
     print(f"boot_id={boot_id()}", flush=True)
+    if arm in ("ase_bh", "ase_mh"):
+        model = next(
+            (
+                line.split(":", 1)[1].strip()
+                for line in Path("/proc/cpuinfo").read_text().splitlines()
+                if line.startswith("model name")
+            ),
+            "unknown",
+        )
+        mem_kib = next(
+            int(line.split()[1])
+            for line in Path("/proc/meminfo").read_text().splitlines()
+            if line.startswith("MemTotal:")
+        )
+        ratio = row["cpu"] / row["wall"] if row["wall"] else 0.0
+        shape = {
+            "system": system,
+            "arm": arm,
+            "seed": seed,
+            "code_revision": revision,
+            "nproc": os.cpu_count(),
+            "model_name": model,
+            "memory_bytes": mem_kib * 1024,
+            "core_affinity": ",".join(str(core) for core in sorted(os.sched_getaffinity(0))),
+            "cpu_s": row["cpu"],
+            "wall_s": row["wall"],
+            "cpu_wall_ratio": ratio,
+            "vm_stayed_live": ratio >= 0.95,
+        }
+        print("shape_json=" + json.dumps(shape, sort_keys=True), flush=True)
     return 0
 
 

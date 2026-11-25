@@ -10,15 +10,17 @@ Lennard-Jones is the untruncated pair. Au55 is Gupta::copper_gold through
 asg_eval serve, the same potential the anneal arms evaluate.
 A hit is a quenched energy within 0.001 of the reference. A miss is
 censored at the paper budget. One calculator call is one energy and one
-gradient. An ASE seed, and a recommended seed, stop at the wall cap stored
-on the ASE rows. The row records the calls, the wall, the time inside and
+gradient. ASE runs can use either the panel wall cap or the preregistered
+process CPU cap. The row records the calls, the wall, the time inside and
 outside the potential, the cap, code_revision and host.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -99,7 +101,15 @@ def place(n: int, seed: int, length: float) -> np.ndarray:
     return np.vstack(points)
 
 
-def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float, budget: int) -> dict:
+def run_ase(
+    system: str,
+    arm: str,
+    seed: int,
+    work: Path,
+    cap_s: float | None,
+    budget: int,
+    cpu_cap_s: float | None,
+) -> dict:
     import ase
     from ase import Atoms
     from ase.optimize.basin import BasinHopping
@@ -120,18 +130,29 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float, budget: 
         length = 1.0
     atoms = Atoms(f"{symbol}{spec['n']}", positions=place(spec["n"], seed, length), pbc=False)
     started = time.perf_counter()
+    deadline = None if cap_s is None else started + cap_s
     server = None
     if spec["kind"] == "lj":
         warmup()
-        calc = LjCalculator(budget, spec["reference"], HIT_TOL, FMAX[arm], deadline=started + cap_s)
+        calc = LjCalculator(budget, spec["reference"], HIT_TOL, FMAX[arm], deadline=deadline)
     else:
         server = AnnealServer(binary, system)
         calc = AnnealCalculator(
-            server, budget, spec["reference"], HIT_TOL, FMAX[arm], deadline=started + cap_s
+            server, budget, spec["reference"], HIT_TOL, FMAX[arm], deadline=deadline
         )
     atoms.calc = calc
     np.random.seed(seed)
     stop = "budget"
+    cpu_started = time.process_time()
+    old_sigprof = None
+    if cpu_cap_s is not None:
+        old_sigprof = signal.getsignal(signal.SIGPROF)
+
+        def cpu_cap_reached(signum, frame):
+            raise CapReached()
+
+        signal.signal(signal.SIGPROF, cpu_cap_reached)
+        signal.setitimer(signal.ITIMER_PROF, cpu_cap_s)
     try:
         if arm == "ase_bh":
             BasinHopping(
@@ -144,13 +165,17 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float, budget: 
         else:
             MinimaHopping(atoms)(totalsteps=10**9)
     except CapReached:
-        stop = "wall"
+        stop = "cap reached (12 h CPU)" if cpu_cap_s is not None else "wall"
     except (BudgetReached, HitReached):
         stop = "budget"
     finally:
+        if cpu_cap_s is not None:
+            signal.setitimer(signal.ITIMER_PROF, 0.0)
+            signal.signal(signal.SIGPROF, old_sigprof)
         if server is not None:
             server.close()
     wall = time.perf_counter() - started
+    cpu = time.process_time() - cpu_started
     best = calc.best_quenched if calc.best_quenched < 1.0e299 else calc.best
     hit = calc.hit_calls is not None
     return {
@@ -159,10 +184,14 @@ def run_ase(system: str, arm: str, seed: int, work: Path, cap_s: float, budget: 
         "charged": calc.calls,
         "best": float(best),
         "wall": wall,
+        "cpu": cpu,
         "inside": calc.inside_s,
         "outside": max(0.0, wall - calc.inside_s),
         "stop": "hit" if hit else stop,
-        "cap_s": cap_s,
+        "cap_s": (
+            cpu_cap_s if cpu_cap_s is not None
+            else ("" if cap_s is None else cap_s)
+        ),
     }
 
 
@@ -191,7 +220,7 @@ def run_anneal(system: str, seed: int, budget: int, preset: str, cap_s: str) -> 
         "inside": float(fields["inside_s"]),
         "outside": float(fields["outside_s"]),
         "stop": stop,
-        "cap_s": cap_s,
+        "cap_s": "" if cap_s is None else cap_s,
     }
 
 
@@ -241,16 +270,16 @@ def main() -> int:
         row = run_anneal(system, seed, budget, preset, cap_text)
     else:
         cap_text = os.environ.get("ASE_PANEL_WALL_CAP", "")
-        if not cap_text:
-            print("ASE_PANEL_WALL_CAP is unset", file=sys.stderr)
-            return 2
         row = run_ase(
             system,
             arm,
             seed,
             Path(os.environ.get("ASE_PANEL_WORK", "/work/ase-panel/runs")) / f"{system}-{arm}-{seed}",
-            float(cap_text),
+            float(cap_text) if cap_text else None,
             budget,
+            float(os.environ["ASE_PANEL_CPU_CAP"])
+            if os.environ.get("ASE_PANEL_CPU_CAP")
+            else None,
         )
     cap = "" if row["cap_s"] == "" else f"{float(row['cap_s']):.6f}"
     print(
@@ -276,6 +305,38 @@ def main() -> int:
         flush=True,
     )
     print(f"boot_id={boot_id()}", flush=True)
+    if arm in ("ase_bh", "ase_mh"):
+        model = next(
+            (
+                line.split(":", 1)[1].strip()
+                for line in Path("/proc/cpuinfo").read_text().splitlines()
+                if line.startswith("model name")
+            ),
+            "unknown",
+        )
+        mem_kib = next(
+            int(line.split()[1])
+            for line in Path("/proc/meminfo").read_text().splitlines()
+            if line.startswith("MemTotal:")
+        )
+        ratio = row["cpu"] / row["wall"] if row["wall"] else 0.0
+        shape = {
+            "system": system,
+            "arm": arm,
+            "seed": seed,
+            "code_revision": revision,
+            "nproc": os.cpu_count(),
+            "model_name": model,
+            "memory_bytes": mem_kib * 1024,
+            "core_affinity": ",".join(
+                str(core) for core in sorted(os.sched_getaffinity(0))
+            ),
+            "cpu_s": row["cpu"],
+            "wall_s": row["wall"],
+            "cpu_wall_ratio": ratio,
+            "vm_stayed_live": ratio >= 0.95,
+        }
+        print("shape_json=" + json.dumps(shape, sort_keys=True), flush=True)
     return 0
 
 

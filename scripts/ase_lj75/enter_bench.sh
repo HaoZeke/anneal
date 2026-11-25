@@ -6,8 +6,7 @@
 #   enter_bench.sh --arm anneal --seed 2000
 #   enter_bench.sh --arm ase_bh --seed 2000
 #   enter_bench.sh --arm ase_mh --seed 2000
-# An ASE seed stops at the paper call budget or at three times the slowest
-# anneal wall, whichever comes first.
+# An ASE seed stops at a hit or at the paper call budget.
 set -euo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -48,22 +47,6 @@ if [[ -f $ROWS ]] && grep -q ",${ARM},${SEED}," "$ROWS"; then
 fi
 
 CAP=""
-if [[ $ARM != anneal ]]; then
-  CAP=$(python3 - "$ROWS" << 'PY'
-import csv
-import sys
-from pathlib import Path
-
-path = Path(sys.argv[1])
-rows = list(csv.DictReader(path.open())) if path.exists() else []
-anneal = [row for row in rows if row["arm"] == "anneal" and row["system"] == "lj75" and row["host"] == "bench"]
-seeds = tuple(sorted(int(row["seed"]) for row in anneal))
-if seeds != tuple(range(2000, 2012)):
-    raise SystemExit(f"wall cap needs anneal seeds 2000-2011, found {seeds}")
-print(f"{3.0 * max(float(row['wall_s']) for row in anneal):.6f}")
-PY
-)
-fi
 
 ANNEAL=${ANNEAL_LJ75:-/work/target-gate/release/examples/leave_gate}
 PY=${PYTHON:-python3}

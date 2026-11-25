@@ -8,14 +8,15 @@ The potential is the untruncated pair in scripts/ase_gofee_h2h/potential.py.
 A hit is a quenched energy within 0.001 of -397.492331. A miss is censored
 at the budget. One calculator call is one energy and one gradient.
 
-Each ASE seed also stops at a wall cap. The cap is three times the slowest
-anneal wall on this harness. A seed that hits the cap is a miss. The row
-records the calls, the wall time, the best energy, and the cap.
+Each ASE seed stops at a hit, the paper call budget, or an optional process
+CPU cap. The CPU cap is independent of the older wall-cap protocol.
 """
 
 from __future__ import annotations
 
+import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -76,11 +77,21 @@ def place(seed: int) -> np.ndarray:
     return np.vstack(points)
 
 
-def run_ase(arm: str, seed: int, work: Path, budget: int, cap_s: float) -> dict:
+def run_ase(
+    arm: str,
+    seed: int,
+    work: Path,
+    budget: int,
+    cap_s: float | None,
+    cpu_cap_s: float | None = None,
+) -> dict:
+    import ase
     from ase import Atoms
     from ase.optimize.basin import BasinHopping
     from ase.optimize.minimahopping import MinimaHopping
 
+    if ase.__version__ != "3.29.0":
+        raise RuntimeError(f"ASE 3.29.0 required, found {ase.__version__}")
     work.mkdir(parents=True, exist_ok=True)
     os.chdir(work)
     warmup()
@@ -91,11 +102,21 @@ def run_ase(arm: str, seed: int, work: Path, budget: int, cap_s: float) -> dict:
         REFERENCE,
         HIT_TOL,
         FMAX[arm],
-        deadline=started + cap_s,
+        deadline=None if cap_s is None else started + cap_s,
     )
     atoms.calc = calc
     np.random.seed(seed)
     stop = "budget"
+    cpu_started = time.process_time()
+    old_sigprof = None
+    if cpu_cap_s is not None:
+        old_sigprof = signal.getsignal(signal.SIGPROF)
+
+        def cpu_cap_reached(signum, frame):
+            raise CapReached()
+
+        signal.signal(signal.SIGPROF, cpu_cap_reached)
+        signal.setitimer(signal.ITIMER_PROF, cpu_cap_s)
     try:
         if arm == "ase_bh":
             BasinHopping(
@@ -108,10 +129,15 @@ def run_ase(arm: str, seed: int, work: Path, budget: int, cap_s: float) -> dict:
         else:
             MinimaHopping(atoms)(totalsteps=10**9)
     except CapReached:
-        stop = "wall"
+        stop = "cap reached (12 h CPU)" if cpu_cap_s is not None else "wall"
     except (BudgetReached, HitReached):
         stop = "budget" if calc.hit_calls is None else "hit"
+    finally:
+        if cpu_cap_s is not None:
+            signal.setitimer(signal.ITIMER_PROF, 0.0)
+            signal.signal(signal.SIGPROF, old_sigprof)
     wall = time.perf_counter() - started
+    cpu = time.process_time() - cpu_started
     best = calc.best_quenched if calc.best_quenched < 1.0e299 else calc.best
     hit = calc.hit_calls is not None
     return {
@@ -120,10 +146,14 @@ def run_ase(arm: str, seed: int, work: Path, budget: int, cap_s: float) -> dict:
         "charged": calc.calls,
         "best": float(best),
         "wall": wall,
+        "cpu": cpu,
         "inside": calc.inside_s,
         "outside": max(0.0, wall - calc.inside_s),
         "stop": "hit" if hit else stop,
-        "cap_s": cap_s,
+        "cap_s": (
+            cpu_cap_s if cpu_cap_s is not None
+            else ("" if cap_s is None else cap_s)
+        ),
     }
 
 
@@ -217,26 +247,66 @@ def main() -> int:
         print("seed is outside 2000-2011", file=sys.stderr)
         return 2
     check_pair()
-    revision = subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
+    revision = os.environ.get("ASE_LJ75_REVISION") or subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
+    budget = int(os.environ.get("ASE_LJ75_BUDGET", BUDGET))
+    if not 0 < budget <= BUDGET:
+        print(f"ASE_LJ75_BUDGET must be in 1-{BUDGET}", file=sys.stderr)
+        return 2
     if arm == "anneal":
         revision = ANNEAL_REVISION
-        row = run_anneal(seed, BUDGET)
+        row = run_anneal(seed, budget)
     else:
         cap_text = os.environ.get("ASE_LJ75_WALL_CAP", "")
-        if not cap_text:
-            print("ASE_LJ75_WALL_CAP is unset", file=sys.stderr)
-            return 2
-        cap_s = float(cap_text)
+        cap_s = float(cap_text) if cap_text else None
         row = run_ase(
             arm,
             seed,
             Path(os.environ.get("ASE_LJ75_WORK", "/work/ase-lj75/runs")) / f"{arm}-{seed}",
-            BUDGET,
+            budget,
             cap_s,
+            float(os.environ["ASE_LJ75_CPU_CAP"])
+            if os.environ.get("ASE_LJ75_CPU_CAP")
+            else None,
         )
-    emit(arm, seed, BUDGET, revision, row)
+    emit(arm, seed, budget, revision, row)
+    if arm in ("ase_bh", "ase_mh"):
+        model = next(
+            (
+                line.split(":", 1)[1].strip()
+                for line in Path("/proc/cpuinfo").read_text().splitlines()
+                if line.startswith("model name")
+            ),
+            "unknown",
+        )
+        mem_kib = next(
+            int(line.split()[1])
+            for line in Path("/proc/meminfo").read_text().splitlines()
+            if line.startswith("MemTotal:")
+        )
+        ratio = row["cpu"] / row["wall"] if row["wall"] else 0.0
+        shape = {
+            "system": "lj75",
+            "arm": arm,
+            "seed": seed,
+            "code_revision": revision,
+            "nproc": os.cpu_count(),
+            "model_name": model,
+            "memory_bytes": mem_kib * 1024,
+            "core_affinity": ",".join(
+                str(core) for core in sorted(os.sched_getaffinity(0))
+            ),
+            "cpu_s": row["cpu"],
+            "wall_s": row["wall"],
+            "cpu_wall_ratio": ratio,
+            "vm_stayed_live": ratio >= 0.95,
+        }
+        print("shape_json=" + json.dumps(shape, sort_keys=True), flush=True)
     return 0
 
 
