@@ -11,6 +11,8 @@ Five blocks, each between a pair of marker comments:
     tab:sc          manuscript.tex  bench/metal-cluster-h2h/sc-n12/results.csv, pvalues.csv
     tab:sc-si       si.tex          bench/metal-cluster-h2h/sc-n12/results.csv
 
+knockout_tables.py writes the TIP4P table from its per-seed rows.
+
     python3 paper/jctc/scripts/h2h_tables.py            # rewrite the blocks
     python3 paper/jctc/scripts/h2h_tables.py --check    # exit 1 if one is stale
 """
@@ -78,9 +80,6 @@ AGOX_HEADS = (
 )
 OTHER_LABEL = {"au55": "Au\\(_{55}\\)", "cu38": "Cu\\(_{38}\\)", "cu12au26": "Cu\\(_{12}\\)Au\\(_{26}\\)",
                "sw10": "Si\\(_{10}\\)", "tc10": "C\\(_{10}\\)", "tip4p8": "(H\\(_2\\)O)\\(_8\\)"}
-TIP4P_LABEL = {"tip4p8": "(H\\(_2\\)O)\\(_8\\)", "tip4p15": "(H\\(_2\\)O)\\(_{15}\\)",
-               "tip4p20": "(H\\(_2\\)O)\\(_{20}\\)", "tip4p21": "(H\\(_2\\)O)\\(_{21}\\)",
-               "tip4p25": "(H\\(_2\\)O)\\(_{25}\\)"}
 
 
 def commit_held(revision: str) -> bool:
@@ -325,23 +324,25 @@ def gofee_small_block() -> str:
             body.append(" & ".join([
                 LJ_LABEL[system] if arm == "paper" else "", ARM_LABEL[arm],
                 budget_tex(row["budget"]) if arm == "paper" else "",
-                f"{row['hits']}/{row['n']}", row["capped"], show_calls(row["calls_to_hit_median"]),
+                f"{row['hits']}/{row['n']}", show_calls(row["calls_to_hit_median"]),
                 show_s(float(row["wall_median_s"])),
             ]) + " \\\\")
-        if system != "lj75":
+        if system != "lj55":
             body.append("\\addlinespace")
     return "\n".join([
         "\\begin{table}",
-        "\\caption{This work against ASE basin hopping (BH), ASE minima hopping (MH)",
-        "and AGOX GOFEE on the same three Lennard-Jones clusters.",
-        "Seeds 2000--2005, one core, budget in force calls.",
-        "Capped counts the runs stopped by a wall cap of 2 hours, which are misses.",
+        "\\caption{This code against ASE basin hopping (BH), ASE minima hopping (MH)",
+        "and AGOX GOFEE on the same two Lennard-Jones clusters, at the effort each run reports.",
+        "The rows of this code ran at the repository heads that \\texttt{bench/ase-gofee-h2h/results.csv}",
+        "records on each row.",
+        "Seeds 2000--2005, one core, budget in force calls; no run on these two clusters had a wall cap,",
+        "and every run that missed spent the budget.",
         "Calls is the median force-call count of the runs that hit, and Wall is the median",
         "wall in seconds of all six runs.}",
         "\\label{tab:gofee}",
         "\\centering",
         "\\small",
-        "\\begin{tabular}{@{}llrrrrr@{}}",
+        "\\begin{tabular}{@{}llrrrr@{}}",
         "\\toprule",
         "Cluster & Arm & Budget & Hits & Capped & Calls & Wall (s) \\\\",
         "\\midrule",

@@ -1062,10 +1062,7 @@ rule ase_recommended:
     shell:
         """
         set -euo pipefail
-        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel
-        ASE_PANEL_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel \
-          ASE_PANEL_TEX=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-panel/manuscript.tex \
-          python3 scripts/ase_panel/summarize.py --all --tex
+        python3 scripts/ase_panel/summarize.py --all
         """
 
 
@@ -1084,12 +1081,8 @@ rule ase_nonlj:
     shell:
         """
         set -euo pipefail
-        mkdir -p ${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-nonlj
-        ASE_NONLJ_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-nonlj \
-          bash scripts/ase_nonlj/enter_bench.sh
-        ASE_NONLJ_OUT=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-nonlj \
-          ASE_NONLJ_TEX=${{ANNEAL_STAMP_ROOT:-/work/anneal-snakemake}}/ase-nonlj/si.tex \
-          python3 scripts/ase_nonlj/summarize.py --tex
+        bash scripts/ase_nonlj/enter_bench.sh
+        python3 scripts/ase_nonlj/summarize.py
         """
 
 

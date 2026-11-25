@@ -37,7 +37,7 @@ import write_figure_provenance_v128
 
 def test_toc_graphic_writes_a_pdf(tmp_path: Path) -> None:
     body = toc_graphic.stream()
-    assert b"potential" in body and b"hop" in body and b"bank" in body
+    assert b"potential" in body and b"hop" in body and b"bank" not in body
     raw = toc_graphic.pdf(body)
     assert raw.startswith(b"%PDF-1.4\n")
     assert b"%%EOF\n" in raw
@@ -541,6 +541,13 @@ def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     import fig_rec_arms
     import figstyle
 
+    assert fig_algorithm_stack.RGPOT_POTENTIALS == (
+        "Lennard-Jones", "Morse", "Gupta", "binary LJ",
+    )
+    assert fig_algorithm_stack.NATIVE_POTENTIALS == ("TIP4P", "Sutton-Chen")
+    assert fig_rec_arms.ARMS == (
+        "single", "surface", "sym", "burst", "soap", "dls-kernel",
+    )
     stack = tmp_path / "stack.pdf"
     arms = tmp_path / "arms.pdf"
     fig_algorithm_stack.draw(stack)

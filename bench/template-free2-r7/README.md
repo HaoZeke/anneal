@@ -51,7 +51,7 @@ The drivers turn it on with `H2H_CAP_TWIST=1`.
 ### Campaign
 
 Base is 4d2fa0f4 (develop 9837358a plus r6 commits 1-2). Arm `CT` ran
-with `H2H_CAP_TWIST=1` from a build whose revision is not known. Its
+with `H2H_CAP_TWIST=1` from a build whose revision is unrecorded. Its
 rows cite 5445c4f7, but no branch or audit ref holds that commit, the
 run logs record the head as `unknown`, and `run_cells.py` writes
 whatever revision it is given on the command line. aa10a14c, the commit
@@ -78,7 +78,7 @@ Seeds 2000-2023, arm order rotating with the seed.
 | lj104 | 11/24 | 16/24 | 0.24 | 4 | 9 | 0.993 |
 | all | 110/192 | 148/192 | | 22 | 60 | |
 
-The table describes the CT build of unknown revision against 4d2fa0f4 and
+The table describes the unrecorded CT build against 4d2fa0f4 and
 nothing later. No McNemar p is given for the cap turn: the branch head
 has changed the stall draw since (a turn that does not move the state is
 now redrawn, and the leave and stall allocators score the arm that

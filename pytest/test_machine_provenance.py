@@ -302,10 +302,23 @@ def test_gmin_panel_rejects_mixed_gmin_revisions_and_emits_machine_columns(tmp_p
         )
         for seed in panel.SEEDS
     ]
-    with pytest.raises(RuntimeError, match="mixed code_revision"):
-        panel.panel_groups(mixed_rows, "head-rev")
+    grouped = panel.panel_groups(mixed_rows, "head-rev")
+    assert set(grouped) == {("lj38", "anneal")}
     with pytest.raises(RuntimeError, match="mixed code_revision"):
         losses2.selected(mixed_rows, "lj38", "gmin", "head-rev", "base-rev")
+
+    mixed_anneal_rows = [
+        make_row(
+            "anneal",
+            seed,
+            "head-rev" if seed != panel.SEEDS[-1] else "other-rev",
+            "a" * 64,
+            "CPU A",
+        )
+        for seed in panel.SEEDS
+    ]
+    with pytest.raises(RuntimeError, match="mixed code_revision"):
+        panel.panel_groups(mixed_anneal_rows, "latest")
 
     mixed_key_rows = [
         make_row("anneal", seed, "head-rev", "a" * 64, "CPU A") for seed in panel.SEEDS
@@ -313,7 +326,7 @@ def test_gmin_panel_rejects_mixed_gmin_revisions_and_emits_machine_columns(tmp_p
         make_row(
             "gmin",
             seed,
-            "svn-100",
+            panel.GMIN_REV,
             "b" * 64,
             "CPU B",
             gmin_build_key="c" * 64 if seed != panel.SEEDS[-1] else "d" * 64,
@@ -328,7 +341,7 @@ def test_gmin_panel_rejects_mixed_gmin_revisions_and_emits_machine_columns(tmp_p
     clean_rows = [
         make_row("anneal", seed, "head-rev", "a" * 64, "CPU A") for seed in panel.SEEDS
     ] + [
-        make_row("gmin", seed, "svn-100", "b" * 64, "CPU B") for seed in panel.SEEDS
+        make_row("gmin", seed, panel.GMIN_REV, "b" * 64, "CPU B") for seed in panel.SEEDS
     ]
     rows_csv = tmp_path / "rows.csv"
     for row in clean_rows:

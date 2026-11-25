@@ -33,13 +33,9 @@ PAPER_CONSTANTS = audit_mod.load_script(
 audit_mod._FETCH_RECORDS = True
 
 CHECKS = (
-    audit_mod.manuscript_ablation,
-    audit_mod.selection_tables,
-    audit_mod.manuscript_retry,
+    audit_mod.paired_statistics,
     audit_mod.manuscript_gmin,
-    audit_mod.manuscript_tip4p,
-    audit_mod.manuscript_hexamer,
-    audit_mod.manuscript_cross_field,
+    audit_mod.withdrawn_benchmarks,
     audit_mod.supporting_information,
     audit_mod.release,
     audit_mod.paper_0120,
@@ -56,30 +52,32 @@ CHECKS = (
     audit_mod.lj_large,
     audit_mod.bench_prose,
     audit_mod.manuscript_ase,
+    audit_mod.manuscript_knockouts,
+    audit_mod.manuscript_priors,
     audit_mod.panel_references,
     audit_mod.generated_tables,
     audit_mod.sutton_chen,
-    audit_mod.supporting_gmin,
     audit_mod.supporting_numbers,
-    audit_mod.method_definitions,
-    audit_mod.prior_switches,
-    audit_mod.jctc_requirements,
     audit_mod.crest_equal,
     audit_mod.crest_equal_bench,
-    audit_mod.au55_superseded,
+    audit_mod.outside_session,
+    audit_mod.g3_session,
     audit_mod.manuscript_new,
     audit_mod.manuscript_followups,
-    audit_mod.manuscript_au55,
     audit_mod.cover_letter,
+    audit_mod.science_claims,
     audit_mod.cap_turn_campaign,
     audit_mod.rerun_check,
     audit_mod.append_only_rows,
-    audit_mod.bibliography_keys,
+    audit_mod.pending_text,
+    audit_mod.citation_metadata,
+    audit_mod.tip4p_unscored,
+    audit_mod.tip4p_r2_rows,
+    audit_mod.rerun_claims,
+    audit_mod.todo_check,
     audit_mod.revision_map,
     audit_mod.all_revision_provenance,
 )
-
-
 PANEL_COMMIT = "9837358a"
 ASE_COMMIT = "61fa67cf"
 
@@ -111,6 +109,35 @@ def audited():
     for path, fragment, _why in audit_mod.UNTRACED:
         audit.said(path, fragment)
     return audit
+
+
+def test_tex_without_comments_strips_inline_comment():
+    assert audit_mod.tex_without_comments("visible % hidden") == "visible "
+
+
+def test_tex_without_comments_preserves_escaped_percent():
+    assert audit_mod.tex_without_comments(r"visible \% value") == r"visible \% value"
+
+
+def test_tex_without_comments_strips_whole_line_comment():
+    assert audit_mod.tex_without_comments("before\n% hidden\nafter") == "before\nafter"
+
+
+def test_tex_without_comments_joins_a_commented_line_end():
+    assert audit_mod.tex_without_comments("foo%\nbar") == "foobar"
+
+
+def test_tex_without_comments_preserves_literal_environment():
+    text = "\\begin{verbatim}\nvisible % literal\n\\end{verbatim}\n"
+    assert audit_mod.tex_without_comments(text) == text
+
+
+def replace_collapsed(text, old, new):
+    """Replace one whitespace-collapsed fragment without flattening the file."""
+    pattern = re.escape(old).replace(r"\ ", r"\s+")
+    replaced, count = re.subn(pattern, lambda _match: new, text, count=1)
+    assert count == 1
+    return replaced
 
 
 def test_every_table_cell_matches_its_rows(audited):
@@ -305,11 +332,14 @@ def test_the_crest_equal_session_is_pinned_only_where_taskset_exists(monkeypatch
     assert runner.pin_prefix("3") == []
 
 
-def test_an_untraced_number_fails_the_audit():
+def test_tex_prose_checks_ignore_comments():
+    fragment = "Required visible sentence."
     audit = audit_mod.Audit()
-    audit_mod.untraced_check(audit)
-    assert [row[1] for row in audit.drifts()] == [path for path, _fragment, _why in audit_mod.UNTRACED]
-    assert not any(row[0] == "DRIFT" for row in audit.results if "no committed row backs" not in row[2])
+    audit.text_cache["sample.tex"] = f"% {fragment}\n   % {fragment}\nVisible text.\n"
+
+    audit.said("sample.tex", fragment)
+
+    assert [result[2] for result in audit.drifts()] == ["prose"]
 
 
 def workspace_version():
@@ -328,67 +358,30 @@ def test_missing_release_tag_and_referenced_remote_stop_the_audit(monkeypatch):
     def without_required_refs(*args, stdin=None):
         if args[:3] == ("show-ref", "--verify", "--quiet") and args[3] in missing:
             return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        if args[:4] == ("ls-remote", "--exit-code", "--tags", "origin"):
+            return subprocess.CompletedProcess(["git", *args], 2, "", "")
         return real_git(*args, stdin=stdin)
 
     monkeypatch.setattr(audit_mod, "git", without_required_refs)
     problems = audit_mod.unauditable()
-    assert f"the release tag v{version} is not present; fetch tags from origin" in problems
+    assert f"the release tag v{version} is neither local nor advertised by origin" in problems
     assert "the remote ref origin/develop is not present; fetch develop from origin" in problems
 
 
-def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_path):
-    """The remote closure is the named branches and the optional tips, no more.
+def test_an_advertised_release_tag_need_not_be_fetched(monkeypatch):
+    real_git = audit_mod.git
+    tag = f"refs/tags/v{workspace_version()}"
 
-    A clone that never had, or no longer has, an optional tip is still
-    auditable. A tip that is present joins the closure. A remote branch that
-    neither the alias table nor the optional list names does not.
-    """
-    repo = tmp_path / "clone"
-    (repo / "bench").mkdir(parents=True)
-    (repo / "Cargo.toml").write_text('[package]\nversion = "0.0.1"\n')
-    (repo / "bench" / "revision-aliases.csv").write_text(
-        "local_revision,pushed_revision,branch_revision,branch,rows_commit,patch_id\n")
+    def without_local_tag(*args, stdin=None):
+        if args == ("show-ref", "--verify", "--quiet", tag):
+            return subprocess.CompletedProcess(["git", *args], 1, "", "")
+        if args == ("ls-remote", "--exit-code", "--tags", "origin", tag):
+            return subprocess.CompletedProcess(["git", *args], 0, "tag\\n", "")
+        return real_git(*args, stdin=stdin)
 
-    def run_git(*args):
-        done = subprocess.run(
-            ["git", "-c", "user.name=audit", "-c", "user.email=audit@example.invalid",
-             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
-            cwd=repo, capture_output=True, text=True, check=True)
-        return done.stdout.strip()
-
-    def commit(message):
-        run_git("commit", "--allow-empty", "-m", message)
-        return run_git("rev-parse", "HEAD")
-
-    run_git("init", "--quiet")
-    root = commit("root")
-    run_git("tag", "v0.0.1")
-    for branch in ("develop", "bench/crest-gaps", "bench/gmin-sc3", "fix/gmin-sc", "fix/gmin-sc2"):
-        run_git("update-ref", f"refs/remotes/origin/{branch}", root)
-    run_git("checkout", "--quiet", "--detach")
-    optional = commit("tip kept by an optional remote")
-    run_git("checkout", "--quiet", "--detach", root)
-    unnamed = commit("tip on a branch nothing names")
-    run_git("checkout", "--quiet", "--detach", root)
-    run_git("update-ref", "refs/remotes/origin/topic/unnamed", unnamed)
-
-    monkeypatch.setattr(audit_mod, "ROOT", repo)
-    optional_ref = "refs/remotes/origin/record/repro-pin"
-
-    def index():
-        return audit_mod.RevisionIndex((root, optional, unnamed), (), (), ())
-
-    assert audit_mod.unauditable() == []
-    without_tip = index()
-    assert without_tip.on_remote(root)
-    assert not without_tip.on_remote(optional)
-    assert not without_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
-
-    run_git("update-ref", optional_ref, optional)
-    assert audit_mod.unauditable() == []
-    with_tip = index()
-    assert with_tip.on_remote(optional), "a present optional tip did not join the closure"
-    assert not with_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
+    monkeypatch.setattr(audit_mod, "git", without_local_tag)
+    assert audit_mod.release_tag_available(f"v{workspace_version()}")
+    assert not [p for p in audit_mod.unauditable() if "release tag" in p]
 
 
 @pytest.mark.parametrize(
@@ -458,98 +451,385 @@ def test_the_sc_h2h_harness_is_pushed_through_its_record_ref(tmp_path, monkeypat
 def test_a_drifted_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    audit.text_cache[audit_mod.TEX] = tex.replace("& 12/12 & 10615.5 & 3591.25", "& 12/12 & 10616.5 & 3591.25")
+    old = "this work & 12/12 & 0 & 12 & 0 & 5722 & 5372.5"
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("5722", "5723"))
     audit_mod.manuscript_gmin(audit)
     assert [r[2] for r in audit.drifts()] == ["median calls"]
+
+
+def test_ase_rows_of_a_non_ancestor_are_reported(monkeypatch):
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.ASE_DATA}/lj98/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    rows[0]["code_revision"] = "9a30f3190b3bb7040c675a904f8388eb68224151"
+    audit.read[path] = rows
+    audit_mod.manuscript_ase(audit)
+    assert "every row is the PROVENANCE ancestor" in {r[2] for r in audit.drifts()}
+
+
+def test_ase_rows_match_the_recorded_runner():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.ASE_DATA}/lj38/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    rows[0]["harness_blob"] = "0" * 40
+    audit.read[path] = rows
+    audit_mod.ase_groups(audit)
+    assert "harness_blob" in {r[2] for r in audit.drifts()}
+
+
+def test_ase_rows_use_one_recorded_host():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.ASE_DATA}/lj38/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    rows[0]["host"] = "f" * 64
+    audit.read[path] = rows
+    audit_mod.ase_groups(audit)
+    assert "single machine-id sha256 host" in {r[2] for r in audit.drifts()}
 
 
 def test_a_drifted_ase_table_cell_is_reported(monkeypatch):
     """An ASE table row, or its caption revision, fails when the commit is not in this repository."""
     withhold(monkeypatch, ASE_COMMIT)
     audit = audit_mod.Audit()
-    audit_mod.manuscript_gmin(audit)
-    shown = {row[4] for row in _unreachable_number(audit)}
-    assert ASE_COMMIT in shown
-    assert "12 of 12" in shown
-
-
-def test_tab_ase_present_while_withheld_is_reported(monkeypatch):
-    """A tab:ase label while the table is withheld is a drift.
-
-    Disabling the absent-while-withheld record leaves this assertion red.
-    """
-    real_load = audit_mod.load_script
-
-    def load_script(name, path):
-        module = real_load(name, path)
-        if path == "scripts/ase_panel/summarize.py":
-            module.tex_table = lambda: ""
-        return module
-
-    monkeypatch.setattr(audit_mod, "load_script", load_script)
-    label = "tab:ase is absent when its commits are not held"
-    start, end = "% ase-panel table: start", "% ase-panel table: end"
-    audit = audit_mod.Audit()
-    text = audit.text(audit_mod.SI)
-    block = text[text.index(start):text.index(end) + len(end)]
-    audit.text_cache[audit_mod.SI] = text.replace(block, f"{start}\n{end}", 1)
+    tex = audit.text(audit_mod.TEX)
+    old = "& 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 &"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 289.0 & 8/12 & 0/12 & 0/12 & 0 & 12 &")
     audit_mod.manuscript_ase(audit)
-    assert not any(row[2] == label for row in audit.drifts())
-    audit = audit_mod.Audit()
-    audit_mod.manuscript_ase(audit)
-    assert any(row[2] == label for row in audit.drifts())
-
-
-def test_a_hand_edited_tab_ase_recommended_hit_is_reported():
-    """A hand-edited recommended-hits cell fails the tab:ase check.
-
-    Disabling that cell check leaves this assertion red.
-    """
-    audit = audit_mod.Audit()
-    text = audit.text(audit_mod.SI)
-    old = "& 4.645 & 12/12 & 0/12 & 0/12 &"
-    assert text.count(old) == 1
-    audit.text_cache[audit_mod.SI] = text.replace(old, "& 4.645 & 99/12 & 0/12 & 0/12 &")
-    audit_mod.manuscript_ase(audit)
-    hits = [item for item in audit.drifts() if item[2] == "recommended hits"]
-    assert any(item[3] == "99/12" for item in hits)
-
-
-def test_a_hand_edited_tab_ase_block_is_reported():
-    """The manuscript block between the ASE marks must be the summariser's block."""
-    audit = audit_mod.Audit()
-    start, end = "% ase-panel table: start", "% ase-panel table: end"
-    text = audit.text(audit_mod.SI)
-    block = text[text.index(start):text.index(end) + len(end)]
-    audit.text_cache[audit_mod.SI] = text.replace(block, f"{start}\nhand edited\n{end}", 1)
     audit_mod.generated_tables(audit)
-    rows = [row for row in audit.drifts() if row[2] == "tab:ase is the summariser's block"]
-    assert rows
-    assert rows[0][3] == "edited by hand"
+    assert sorted(r[2] for r in audit.drifts()) == ["recommended hits", "tab:ase is the summariser's block"]
 
 
 def test_a_drifted_morse_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.SI)
-    old = r"& 11.333 & 47.553 & 47.556 & \(1.3\times 10^{-3}\) & \(1.3\times 10^{-3}\) \\"
+    tex = audit.text(audit_mod.TEX)
+    old = "& 11.333 & 47.553 & 47.556 \\\\"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.SI] = tex.replace(
-        old,
-        r"& 11.333 & 47.553 & 47.556 & \(1.3\times 10^{-3}\) & \(1.3\times 10^{-2}\) \\",
-    )
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 11.333 & 47.553 & 47.557 \\\\")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
-    assert sorted(r[2] for r in audit.drifts()) == ["Fisher p against ase_mh", "tab:ase-morse is the summariser's block"]
+    assert sorted(r[2] for r in audit.drifts()) == ["ase_mh median wall", "tab:ase-morse is the summariser's block"]
+
+
+def test_a_cross_arm_p_value_in_the_ase_section_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "ASE minima hopping is wall-capped"
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "\\(p_\\mathrm{BH}=0.01\\). " + old)
+    audit_mod.manuscript_ase(audit)
+    assert [r[2] for r in audit.drifts()] == ["sec:ase reports no cross-arm p-values"]
 
 
 def test_a_rank_test_in_the_ase_section_is_reported():
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.SI)
-    old = "Every basin-hopping and minima-hopping run of"
+    tex = audit.text(audit_mod.TEX)
+    old = "\\section{Conclusions}"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.SI] = tex.replace(old, "A Mann--Whitney test is not run. " + old)
+    audit.text_cache[audit_mod.TEX] = tex.replace(
+        old, old + "\nA Mann--Whitney test is not run.", 1
+    )
     audit_mod.manuscript_ase(audit)
-    assert [r[2] for r in audit.drifts()] == ["sec:ase reports Fisher only"]
+    assert [r[2] for r in audit.drifts()] == [
+        "the conclusions report no rank test"
+    ]
+
+
+def test_unequal_ase_limits_are_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "same numeric call ceiling and wall cap"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "different call and wall limits", 1)
+    audit_mod.manuscript_ase(audit)
+    assert sorted(r[2] for r in audit.drifts()) == [
+        "ASE limits are not described as unequal",
+        "prose",
+    ]
+
+
+def test_a_returning_endpoint_section_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "\\section{Conclusions}"
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "\\subsection{Endpoints}\n\\label{sec:endpoints}\n" + old)
+    audit_mod.science_claims(audit)
+    assert [r[2] for r in audit.drifts()] == ["the endpoint-energy section is not printed"]
+
+
+def test_the_trap_claim_is_required_in_the_results():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    assert "trap" in tex.lower()
+    audit.text_cache[audit_mod.TEX] = re.sub("trap", "site", tex, flags=re.IGNORECASE)
+    audit_mod.science_claims(audit)
+    assert [r[2] for r in audit.drifts()] == ["the results and conclusions state the trap claim"]
+
+
+def test_a_drifted_template_count_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "at \\(\\rho=14\\) fall from 12 to 4 of 12"
+    assert old in audit_mod.collapse(tex)
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("to 4", "to 3"))
+    audit_mod.manuscript_knockouts(audit)
+    assert {r[2] for r in audit.drifts()} == {"prose"}
+
+
+def test_a_withdrawn_knockout_in_the_text_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex + "\n% Section~\\ref{sec:k-priors}\n"
+    audit_mod.manuscript_knockouts(audit)
+    assert [r[2] for r in audit.drifts()] == ["withdrawn knockout text stays out: sec:k-priors"]
+
+
+def test_the_retired_rigid_restart_sentence_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex + "\nIt quenches a new rigid start and stands there.\n"
+    audit_mod.rigid_stall(audit)
+    assert [r[2] for r in audit.drifts()] == ["retired rigid-stall wording stays out: quenches a new rigid start"]
+
+
+def test_a_rigid_stall_constant_that_drifts_is_reported():
+    audit = audit_mod.Audit()
+    path = "src/methods/stall_archive.rs"
+    audit.text_cache[path] = audit.text(path).replace("pub const MEMORY: usize = 4;", "pub const MEMORY: usize = 5;")
+    audit_mod.rigid_stall(audit)
+    assert [r[2] for r in audit.drifts()] == ["barred stall destinations"]
+
+
+def test_a_template_era_row_in_the_text_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex + "\n% revision \\texttt{c2de652d}\n"
+    audit_mod.presets_and_templates(audit)
+    assert [r[2] for r in audit.drifts()] == ["no table is presented as c2de652d"]
+
+
+def test_a_table_without_its_preset_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "recommended template-free rigid-water preset"
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "rigid-water preset")
+    audit_mod.presets_and_templates(audit)
+    assert [r[2] for r in audit.drifts()] == ["tab:tip4p-gmin names its preset"]
+
+
+def test_a_restart_of_this_code_in_the_text_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex + "\nA stalled chain restarts from a random cluster.\n"
+    audit_mod.no_anneal_restart(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.TEX, "every restart the text names is GMIN's")]
+
+
+def test_a_hexamer_whose_energy_leaves_its_record_is_reported():
+    audit = audit_mod.Audit()
+    audit_mod.hexamer_provenance(audit)
+    assert not audit.drifts()
+    path = f"{audit_mod.VISUALS}/hexamer_gfn2/RECORD"
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path).replace("relaxed_energy_Eh -30.49650686764", "relaxed_energy_Eh -30.5")
+    audit_mod.hexamer_provenance(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [
+        (f"{audit_mod.VISUALS}/hexamer_gfn2/prism.xyz", "energy is the one RECORD gives")]
+
+
+def test_a_record_that_names_another_relaxation_script_is_reported():
+    path = f"{audit_mod.VISUALS}/hexamer_gfn2/RECORD"
+    audit = audit_mod.Audit()
+    record = audit.text(path)
+    blob = record.split("hexamer_gfn2_relax.py blob ")[1].split()[0]
+    audit.text_cache[path] = record.replace(blob, "0" * 40)
+    audit_mod.hexamer_provenance(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [(path, "blob of the relaxation script")]
+
+
+def test_landfold_provenance_does_not_need_pull_refs(monkeypatch):
+    real_git = audit_mod.git
+
+    def heads_only(*args, stdin=None):
+        assert "refs/remotes/origin/pull" not in args
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", heads_only)
+    audit = audit_mod.Audit()
+    audit_mod.hexamer_provenance(audit)
+    assert not audit.drifts()
+    labels = [row[2] for row in audit.results]
+    assert labels.count("committed landfold outputs have sha256 digests") == 1
+    assert len([label for label in labels
+                if label.startswith("digest of system_visuals/landfold/")]) == 8
+
+
+def test_a_placeholder_in_the_text_is_reported():
+    for word in ("rerun pending", "TBD", "TODO"):
+        audit = audit_mod.Audit()
+        tex = audit.text(audit_mod.TEX)
+        audit.text_cache[audit_mod.TEX] = tex.replace("\\section{Conclusions}", f"LJ\\(_{{75}}\\): {word}.\n\n"
+                                                      "\\section{Conclusions}")
+        audit_mod.science_claims(audit)
+        said = word.split()[-1]
+        assert [r[2] for r in audit.drifts()] == [f"the text does not say {said}"]
+
+
+def test_a_claim_that_the_template_era_rows_hold_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "The comparison spans every change between the revisions, not the templates\nalone."
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, old + "\nThe later code reproduces the template-assisted rows.")
+    audit_mod.template_era(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [
+        (audit_mod.SI, "no sentence says the later code matches the template-assisted rows")]
+
+
+def test_a_drifted_template_era_cell_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "& \\texttt{c2de652d} & 2/12 & 0 & 2 & 0 & 4000000 & 0 &"
+    assert si.count(old) == 2
+    audit.text_cache[audit_mod.SI] = si.replace(old, "& \\texttt{c2de652d} & 12/12 & 0 & 2 & 0 & 4000000 & 0 &", 1)
+    audit_mod.generated_tables(audit)
+    assert [r[2] for r in audit.drifts()] == ["tab:si-template-era is the summariser's block"]
+
+
+def test_c2de652d_in_the_manuscript_fails():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "\\section{Conclusions}"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "Revision \\texttt{c2de652d} hits M\\(_{80}\\) on 2 of 12.\n\n" + old)
+    audit_mod.template_era(audit)
+    audit_mod.science_claims(audit)
+    assert [r[2] for r in audit.drifts()] == ["no row is labelled c2de652d"]
+
+
+def test_c2de652d_in_the_si_outside_its_section_fails():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "\\section{Earlier template-assisted revision}"
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, "Revision \\texttt{c2de652d}.\n\n" + old)
+    audit_mod.science_claims(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.SI, "no row is labelled c2de652d")]
+
+
+def test_an_outside_provenance_with_another_tree_is_reported():
+    audit = audit_mod.Audit()
+    audit_mod.outside_session(audit)
+    assert not audit.drifts()
+    path = f"{audit_mod.OUTSIDE_DATA}/PROVENANCE"
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path).replace("tree c6096c4a", "tree 06096c4a")
+    audit_mod.outside_session(audit)
+    assert [r[2] for r in audit.drifts()] == ["tree of the record commit"]
+
+
+def test_an_unreachable_outside_arm_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{audit_mod.OUTSIDE_DATA}/rows.csv"
+    rows = audit.rows(path)
+    old = "61fa67cf380e46876b569da45e7cc091647a775b"
+    assert rows[0]["code_revision"] == old
+    rows[0]["code_revision"] = "1e38f2dacd9981fa9602381cebf1bca108b97230"
+    audit_mod.outside_session(audit)
+    descriptions = {r[2] for r in audit.drifts()}
+    assert "code revisions" in descriptions
+
+
+def test_a_drifted_outside_cell_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "& 38.987 & 37.806 &"
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, "& 38.987 & 30.806 &")
+    audit_mod.outside_session(audit)
+    assert [r[2] for r in audit.drifts()] == ["tab:si-outside is the summariser's block"]
+
+
+def test_a_move_choice_success_claim_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "\\section{Conclusions}"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "The Thompson draw drives the hits on LJ\\(_{98}\\).\n\n" + old)
+    audit_mod.no_move_choice_claim(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.TEX, "no sentence credits the move choice with success")]
+
+
+def test_a_modal_hedge_fails_both_audits():
+    for strict in (False, True):
+        audit = audit_mod.Audit()
+        tex = audit.text(audit_mod.TEX)
+        old = "and both algorithms return an assignment of the optimal cost."
+        assert tex.count(old) == 1
+        audit.text_cache[audit_mod.TEX] = tex.replace(old, old + "\nA tie may break differently.")
+        audit_mod.todo_check(audit, pre_submission=strict)
+        assert [(r[1], r[2], r[4]) for r in audit.drifts()] == [(audit_mod.TEX, "no modal hedge", "may")]
+
+
+def test_a_rendered_rerun_fails_both_audits():
+    for strict in (False, True):
+        audit = audit_mod.Audit()
+        si = audit.text(audit_mod.SI)
+        old = "\\path{paper/jctc/data/gmin_eeec8e2c}"
+        assert si.count(old) == 1
+        audit.text_cache[audit_mod.SI] = si.replace(old, "\\path{paper/jctc/data/gmin_rerun}")
+        audit_mod.todo_check(audit, pre_submission=strict)
+        assert [(r[1], r[2]) for r in audit.drifts()] == [(audit_mod.SI, "no rendered rerun")]
+
+
+def test_every_todo_marker_fails_both_audits():
+    clean = audit_mod.Audit()
+    for path in (audit_mod.TEX, audit_mod.SI, audit_mod.COVER):
+        assert not audit_mod.TODO_TAG.findall(clean.text(path))
+    audit_mod.todo_check(clean, pre_submission=True)
+    assert not clean.drifts()
+    for strict in (False, True):
+        audit = audit_mod.Audit()
+        tex = audit.text(audit_mod.TEX)
+        audit.text_cache[audit_mod.TEX] = tex.replace("\\section{Conclusions}", "\\todo{G1}\n\\section{Conclusions}")
+        audit_mod.todo_check(audit, pre_submission=strict)
+        assert sorted(r[2] for r in audit.drifts()) == ["[TODO: G1] remains (unknown)", "todo markers"]
+
+
+def test_a_hedge_that_defers_a_claim_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed."
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old + " A longer run will test that.")
+    audit_mod.todo_check(audit)
+    assert [r[2] for r in audit.drifts()] == ["no hedge: will test"]
+
+
+def test_a_rerun_tag_in_the_manuscript_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed.\n"
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old[:-1] + "~\\rerun{5}\n", 1)
+    audit_mod.todo_check(audit)
+    audit_mod.rerun_check(audit)
+    assert sorted(r[2] for r in audit.drifts()) == ["[RERUN: item 5] remains (unknown)", "no rendered rerun",
+                                                   "rerun tags", "the tag names an item that waits on a rerun"]
+
+
+def test_a_cover_sentence_off_the_abstract_is_reported():
+    audit = audit_mod.Audit()
+    cover = audit.text(audit_mod.COVER)
+    old = "The title and the content have changed."
+    assert old in cover
+    audit.text_cache[audit_mod.COVER] = cover.replace(old, old + "\nGMIN hits LJ\\(_{150}\\) on 9 of 12.")
+    audit_mod.cover_letter(audit)
+    assert [r[2] for r in audit.drifts()] == [
+        "a cover-letter sentence with a number is a sentence of the abstract",
+        "the numbered cover-letter claims match the two abstract claims"]
 
 
 def test_a_drifted_gmin_panel_summary_cell_is_reported():
@@ -561,12 +841,378 @@ def test_a_drifted_gmin_panel_summary_cell_is_reported():
     assert [r[2] for r in audit.drifts()] == ["gmin_hits"]
 
 
-def test_a_censored_gmin_panel_wall_p_claim_is_reported():
+def test_a_cross_arm_work_p_value_in_the_gmin_table_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    audit.text_cache[audit_mod.TEX] = tex.replace("& 0.40 & 0.16 & -- \\\\", "& 0.40 & 0.16 & 0.0073 \\\\")
+    old = "no cross-arm hit, work, or wall test is reported."
+    assert tex.count(old) == 2
+    start, rest = tex.split("% gmin-panel table: start", 1)
+    table, end = rest.split("% gmin-panel table: end", 1)
+    audit.text_cache[audit_mod.TEX] = (
+        start + "% gmin-panel table: start"
+        + table.replace(old, "\\(p_\\mathrm{calls}=0.021\\). " + old, 1)
+        + "% gmin-panel table: end" + end)
     audit_mod.manuscript_gmin(audit)
-    assert [r[2] for r in audit.drifts()] == ["MW p wall"]
+    assert [r[2] for r in audit.drifts()] == ["tab:gmin reports no cross-arm tests"]
+
+
+def test_a_cross_arm_hit_p_value_in_the_gmin_prose_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = ("At those arm-specific ceilings, this code hits 7 of 12 seeds on\n"
+           "LJ\\(_{98}\\) and 5 of 12 on LJ\\(_{75}\\), while GMIN hits neither; on\n"
+           "LJ\\(_{38}\\), the counts are 12 and 7.")
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old + "\nThe paired result is \\(p=0.016\\).")
+    audit_mod.manuscript_gmin(audit)
+    assert [r[2] for r in audit.drifts()] == ["the GMIN results report no cross-arm hit test"]
+
+
+def test_the_develop_gmin_rows_keep_the_harness_that_ran_them():
+    table = audit_mod.load_script("gmin_table", "paper/jctc/scripts/gmin_table.py")
+    rows = table.develop_rows()
+    assert {r["harness_revision"] for r in rows} == {table.DEVELOP_HARNESS}
+    lines, paired = table.develop_summary()
+    assert lines and paired
+    assert {line["harness_revision"] for line in lines} == {table.DEVELOP_HARNESS}
+    assert {line["anneal_revision"] for line in lines} == {table.SUBMITTED}
+
+
+def test_a_drifted_length_unit_cell_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "M\\(_{80}\\), \\(\\rho=14\\) & \\(4\\times 10^{6}\\) & 12 & 7/12 & 4/12 &"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("7/12 & 4/12", "9/12 & 4/12"))
+    audit_mod.manuscript_knockouts(audit)
+    assert [r[2] for r in audit.drifts()] == ["with"]
+
+
+def test_a_drifted_pooled_length_unit_sentence_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "it hits 40 of 48 against 35\n(pooled McNemar \\(p=0.30\\)"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("against 35", "against 30"))
+    audit_mod.manuscript_knockouts(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose", "prose"]
+
+
+def test_a_length_unit_row_from_another_driver_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/knockouts/pairscale/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    rows[0]["driver_blob"] = "0" * 40
+    audit.read[path] = rows
+    knock = audit_mod.load_script("knockout_tables_audit", "paper/jctc/scripts/knockout_tables.py")
+    audit_mod.knockout_pairscale(audit, audit_mod.knockout_cells(audit, knock, knock.KNOCKOUTS[1]))
+    assert "every row ran the Morse driver of the tree the rows name" in [r[2] for r in audit.drifts()]
+
+
+def test_a_drifted_g1_cell_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "M\\(_{38}\\), \\(\\rho=14\\) & \\(4\\times 10^{5}\\) & 4/12 &"
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, old.replace("4/12", "5/12"))
+    audit_mod.morse_g1(audit)
+    assert [r[2] for r in audit.drifts()] == ["tab:si-morse-g1 is the summariser's block"]
+
+
+def test_a_drifted_g1_sentence_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "and 4 of 12 on M\\(_{38}\\)"
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, "and 5 of 12 on M\\(_{38}\\)")
+    audit_mod.morse_g1(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
+
+
+def test_a_stored_g1_gmin_count_in_si_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "the article prints this code alone here."
+    assert si.count(old) == 1
+    audit.text_cache[audit_mod.SI] = si.replace(old, old + " They take other calls on all 24 hits.")
+    audit_mod.morse_g1(audit)
+    assert [r[2] for r in audit.drifts()] == ["the SI prints no count from the stored GMIN rows of G1"]
+
+
+def test_a_g1_row_of_another_revision_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/gmin_g1/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    rows[5]["code_revision"] = "dd6ff9273be30ab317bfd5508596f4beb19cb3a4"
+    audit.read[path] = rows
+    audit_mod.morse_g1(audit)
+    labels = [r[2] for r in audit.drifts()]
+    assert "rows off the stock preset, the budget or the reference of the run script" in labels
+    assert "the paired rows of the record carry these anneal rows" in labels
+
+
+def test_a_gmin_row_without_a_machine_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/gmin_develop/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    next(r for r in rows if r["code"] == "gmin")["host"] = ""
+    audit.read[path] = rows
+    audit_mod.gmin_sources(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [(path, "every GMIN row names its machine")]
+
+
+def test_a_tip4p_gmin_row_of_another_source_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/tip4p_gmin/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    next(r for r in rows if r["arm"] == "gmin")["gmin_revision"] = "0" * 40
+    audit.read[path] = rows
+    audit_mod.gmin_sources(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [
+        (path, "historical identifier of every GMIN row"),
+        (path, "every TIP4P row carries the historical GMIN identifier"),
+    ]
+
+
+def test_the_rendered_gmin_sources_match_the_rows():
+    si = (ROOT / audit_mod.SI).read_text()
+    recorded = (
+        audit_mod.TIP4P_GMIN,
+        audit_mod.GMIN_TARBALL_SHA256,
+        audit_mod.GMIN_TARBALL_SVNREV,
+    )
+    assert [si.count(value) for value in recorded] == [1, 1, 1]
+    for value in recorded:
+        audit = audit_mod.Audit()
+        audit.text_cache[audit_mod.SI] = si.replace(value, "0" * len(value))
+        audit_mod.gmin_sources(audit)
+        assert "prose" in [r[2] for r in audit.drifts()]
+
+
+def test_a_g3_row_with_other_calls_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/g3_funnel/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    row = next(r for r in rows if r["method"] == "anneal" and r["hit"] == "1")
+    row["evals_to_hit"] = str(int(row["evals_to_hit"]) + 1)
+    audit.read[path] = rows
+    audit_mod.g3_session(audit)
+    labels = [r[2] for r in audit.drifts()]
+    assert any(label.startswith("seeds with the calls and lowest energy of the GMIN table") for label in labels)
+
+
+def test_a_gmin_claim_in_the_template_era_section_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "Both sessions start each seed from the geometry the driver writes for it.\n"
+    assert si.count(old) == 2
+    audit.text_cache[audit_mod.SI] = si.replace(
+        old, old + "GMIN takes the same calls to the same minimum in both.\n", 1)
+    audit_mod.template_era(audit)
+    assert "the template-era section prints no GMIN claim: GMIN takes the same calls" in [
+        r[2] for r in audit.drifts()]
+
+
+def test_a_drifted_move_choice_cell_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & 12 & 5/12 & 6/12 &"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("5/12 & 6/12", "7/12 & 6/12"))
+    audit_mod.manuscript_knockouts(audit)
+    assert "with" in [r[2] for r in audit.drifts()]
+
+
+def test_a_move_choice_row_from_another_driver_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/knockouts/move-a/rows.csv"
+    rows = [dict(r) for r in audit.rows(path)]
+    next(r for r in rows if r["system"] == "au55")["driver_blob"] = "0" * 40
+    audit.read[path] = rows
+    knock = audit_mod.load_script("knockout_tables_audit", "paper/jctc/scripts/knockout_tables.py")
+    audit_mod.knockout_move_a(audit, audit_mod.knockout_cells(audit, knock, knock.KNOCKOUTS[2]))
+    assert "every row ran the driver of the tree the rows name for its cluster" in [r[2] for r in audit.drifts()]
+
+
+def test_a_drifted_pooled_move_choice_sentence_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "preset hits 73 of 96 seeds and the uniform\ndraw 75 (pooled McNemar \\(p=0.85\\)"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("draw 75", "draw 70"))
+    audit_mod.manuscript_knockouts(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
+
+
+def test_lj75_is_present_in_the_gmin_comparison():
+    table = audit_mod.load_script("gmin_table_lj75", "paper/jctc/scripts/gmin_table.py")
+    raw = [row for row in table.rows() if row["system"] == "lj75"]
+    assert len(raw) == 24
+    assert "LJ\\(_{75}\\)" in table.table()
+    assert "GMIN & 0/12" in table.table()
+
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    gmin = tex.split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
+    assert "LJ\\(_{75}\\)" in gmin
+    assert "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & this work & 5/12" in gmin
+    assert "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & 12 & 5/12 & 6/12" in tex
+
+    si = audit.text(audit_mod.SI)
+    assert "They hit LJ\\(_{75}\\) on 5 of 12 against 12" in si
+    assert "The published GOFEE curves count local optimizations on LJ\\(_{75}\\)" in si
+    assert "A fingerprint bias during local optimization is reported on LJ\\(_{38}\\)" in si
+    assert "Published global minima of LJ\\(_{38}\\), LJ\\(_{75}\\), LJ\\(_{98}\\)" in tex
+    assert '"lj75_marks"' in audit.text("paper/jctc/scripts/system_visuals.py")
+
+
+def test_a_gmin_interval_in_the_table_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "different operations. The numeric ceiling is applied separately in each arm's unit"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old + " a Newcombe interval is 0.1 to 0.7;")
+    audit_mod.manuscript_gmin(audit)
+    assert [r[2] for r in audit.drifts()] == ["tab:gmin reports no cross-arm tests"]
+
+
+def test_a_paired_count_that_drifts_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "this work & 12/12 & 5 & 7 & 0 &"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "this work & 12/12 & 4 & 8 & 0 &")
+    audit_mod.manuscript_gmin(audit)
+    assert sorted(r[2] for r in audit.drifts()) == ["both hit", "seeds this arm alone hits"]
+
+
+def test_a_drifted_develop_morse_count_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = ("At the submitted revision, the hit counts for this code and GMIN are 9 and "
+           "0 on M\\(_{55}\\) at \\(\\rho=14\\), 6 and 0 on M\\(_{80}\\) at \\(\\rho=14\\), "
+           "and 4 and 1 on Au\\(_{55}\\).")
+    assert old in audit_mod.collapse(tex)
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("are 9 and", "are 7 and"))
+    audit_mod.manuscript_gmin(audit)
+    assert [(r[2], r[3]) for r in audit.drifts()] == [("prose", old)]
+
+
+def test_a_develop_gmin_cell_that_drifts_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "this work & 9/12 & 9 & 0 & 3 &"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "this work & 7/12 & 9 & 0 & 3 &")
+    audit_mod.manuscript_gmin(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [
+        (f"{audit_mod.TEX} tab:gmin develop m55r14 this work", "hits")]
+
+
+def test_a_develop_row_off_the_submitted_revision_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(f"{audit_mod.GMIN_DEVELOP}/rows.csv")
+    row = next(r for r in rows if r["system"] == "m80r14" and r["code"] == "anneal")
+    row["code_revision"] = "1ce3ab64493196afd25e8690648e21157d91b882"
+    audit_mod.manuscript_gmin(audit)
+    assert "row invariants, pinned revisions, host and session" in {r[2] for r in audit.drifts()}
+
+
+def test_paired_statistics_match_scipy():
+    stats = pytest.importorskip("scipy.stats")
+    for only_a, only_b in ((5, 0), (1, 4), (12, 0), (5, 1), (2, 10), (4, 6)):
+        expected = stats.binomtest(min(only_a, only_b), only_a + only_b, 0.5).pvalue
+        assert math.isclose(audit_mod.mcnemar(only_a, only_b), expected, rel_tol=1e-9)
+    for diffs in ([1.0, 2.0, 3.0, 4.0, 5.0], [3.0, -1.0, 4.0, -1.5, 5.0, 9.0, -2.6, 5.3],
+                  [12.0, -7.0, 3.0, 8.0, 10.0, -1.0, 6.0, 4.0, 2.0, 11.0, 9.0, 5.0]):
+        expected = stats.wilcoxon(diffs, alternative="two-sided", method="exact").pvalue
+        assert math.isclose(audit_mod.wilcoxon_signed_rank(diffs)[2], expected, rel_tol=1e-9)
+
+
+def test_the_shared_statistics_match_scipy():
+    shared = audit_mod.paired_stats_module()
+    shared.self_test()
+    stats = pytest.importorskip("scipy.stats")
+    for only_a, only_b in ((5, 0), (1, 4), (12, 0), (9, 0), (4, 1), (2, 10)):
+        expected = stats.binomtest(min(only_a, only_b), only_a + only_b, 0.5).pvalue
+        assert math.isclose(shared.mcnemar_exact(only_a, only_b), expected, rel_tol=1e-9)
+    for diffs in ([1.0, 2.0, 3.0, 4.0, 5.0], [3.0, -1.0, 4.0, -1.5, 5.0, 9.0, -2.6, 5.3]):
+        expected = stats.wilcoxon(diffs, alternative="two-sided", method="exact").pvalue
+        assert math.isclose(shared.wilcoxon_exact(diffs)[2], expected, rel_tol=1e-9)
+    for a, b in ((12, 0), (7, 0), (4, 1), (121, 94)):
+        n = 192 if a > 12 else 12
+        expected = stats.fisher_exact([[a, n - a], [b, n - b]]).pvalue
+        assert math.isclose(shared.fisher_exact(a, n, b, n), expected, rel_tol=1e-9)
+
+
+def test_a_literal_normal_quantile_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/scripts/water_rerun.py"
+    audit.text_cache[path] = audit.text(path) + "\nHALF = 1.96 * 0.1\n"
+    audit_mod.paired_statistics(audit)
+    assert [(r[1], r[2], r[4]) for r in audit.drifts()] == [(path, "literal normal quantile", "1.96")]
+
+
+def test_the_paired_newcombe_interval_matches_the_published_example():
+    low, high = audit_mod.newcombe_paired_interval(36, 12, 2, 0)
+    assert (round(low, 4), round(high, 4)) == (0.0569, 0.3404)
+    assert audit_mod.mcnemar(5, 0) == 0.0625 and audit_mod.mcnemar(6, 0) == 0.03125
+
+
+def test_a_title_across_funnels_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Template-free basin hopping with adaptive moves for funnelled cluster landscapes"
+    assert old in audit_mod.collapse(tex)
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(
+        tex,
+        old, "Template-free basin hopping across funnels with adaptive moves")
+    audit_mod.science_claims(audit)
+    assert [r[2] for r in audit.drifts()] == ["no overclaim: across funnels", "prose"]
+    titled = audit_mod.Audit()
+    titled.text_cache[audit_mod.TEX] = audit.text_cache[audit_mod.TEX]
+    audit_mod.manuscript_new(titled)
+    assert "prose" in {r[2] for r in titled.drifts()}
+
+
+def test_a_fisher_test_in_the_gmin_section_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed."
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old + " Fisher's test agrees.", 1)
+    audit_mod.manuscript_gmin(audit)
+    assert [r[2] for r in audit.drifts()] == ["the GMIN comparison does not print Fisher"]
+
+
+def test_a_tip4p_cross_arm_interval_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "no cross-arm hit, work, or wall test is reported."
+    assert tex.count(old) == 2
+    start, rest = tex.split("% tip4p-gmin table: start", 1)
+    audit.text_cache[audit_mod.TEX] = start + "% tip4p-gmin table: start" + rest.replace(
+        old, old + " A Newcombe interval is 0.1 to 0.7.", 1)
+    audit_mod.manuscript_knockouts(audit)
+    assert {r[2] for r in audit.drifts()} == {"tab:tip4p-gmin reports no cross-arm test"}
+
+
+def test_a_limits_section_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex.replace("\\section{Conclusions}", "\\section{Limits}\nText.\n\n\\section{Conclusions}")
+    audit_mod.todo_check(audit)
+    assert [r[2] for r in audit.drifts()] == ["no hedge: \\section{Limits}"]
+
+
+def test_a_caption_missing_the_serial_patch_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.SI)
+    old = "(\\texttt{JP=1})"
+    assert old in tex
+    audit.text_cache[audit_mod.SI] = tex.replace(old, "")
+    audit_mod.gmin_patches(audit)
+    assert [r[2] for r in audit.drifts()] == ["the GMIN provenance names the serial run index"]
 
 
 def test_an_uncharged_gmin_panel_miss_is_reported():
@@ -576,21 +1222,6 @@ def test_an_uncharged_gmin_panel_miss_is_reported():
     miss["charged"] = "50000"
     audit_mod.manuscript_gmin(audit)
     assert "row invariants" in {r[2] for r in audit.drifts()}
-
-
-def test_a_stale_gmin_single_session_claim_is_reported():
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.COVER] = (
-        audit.text(audit_mod.COVER)
-        + "\n% check\nthirteen Lennard-Jones, Gupta, and Morse clusters in one session.\n"
-    )
-    audit.text_cache[audit_mod.SI] = audit.text(audit_mod.SI) + "\nThe same-session panel of the main text.\n"
-    audit_mod.manuscript_gmin(audit)
-    audit_mod.supporting_gmin(audit)
-    assert {(r[1], r[2]) for r in audit.drifts()} == {
-        (audit_mod.COVER, "no whole-table single-session claim"),
-        (audit_mod.SI, "no same-session panel claim in SI"),
-    }
 
 
 def test_a_stale_gmin_panel_source_patch_digest_is_reported():
@@ -989,9 +1620,9 @@ def test_every_alias_is_verified_and_clears_the_sc_n12_rows(tmp_path, monkeypatc
     audit, gaps = aliased_audit(tmp_path, monkeypatch, lambda table: table)
     assert not audit.drifts()
     table = [line for line in (ROOT / audit_mod.ALIASES).read_text().splitlines() if line[:1] not in ("#", "l")]
-    expected_places = {f"{audit_mod.ALIASES} {line[:8]}" for line in table} | {", ".join(SC_N12_ROWS)}
-    assert {r[1] for r in audit.results} == expected_places
-    assert gaps == {path: "revision c89653df is not in this repository" for path in SC_N12_ROWS}
+    listed_rows = {", ".join(SC_N12_ROWS)}
+    assert {r[1] for r in audit.results} == {f"{audit_mod.ALIASES} {line[:8]}" for line in table} | listed_rows
+    assert gaps == {}
 
 
 def test_an_alias_off_the_rows_commit_parent_is_held_to_its_paths(tmp_path, monkeypatch):
@@ -1008,30 +1639,6 @@ def test_an_alias_off_the_rows_commit_parent_must_be_its_ancestor(tmp_path, monk
                              (CONF_FIX4,))
     assert {"rows commit 93c14173 sits on a descendant of d9935407",
             "d9935407 differs from the rows commit's parent only in workflow/Snakefile"} <= {r[2] for r in audit.drifts()}
-
-
-def listed_audit(tmp_path, monkeypatch, edit, paths):
-    table = (ROOT / audit_mod.UNPUSHED_FILE).read_text()
-    edited = tmp_path / "unpushed-revisions.csv"
-    edited.write_text(edit(table))
-    monkeypatch.setattr(audit_mod, "UNPUSHED_FILE", str(edited))
-    audit = audit_mod.Audit()
-    for path in paths:
-        audit.rows(path)
-    return audit, audit_mod.provenance(audit)
-
-
-def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
-    def edit(table):
-        lines = [line for line in table.splitlines() if not line.startswith("bf09f7a2b7a6bd6c")]
-        lines = [line for line in lines if not line.startswith("bf09f7a2b7a6bd6359898db675eeafefcd20548b")]
-        return "\n".join(lines + ["e09e0487c52b7f4789bc556ee7fe07ead4999824,listed although its alias holds"]) + "\n"
-
-    audit, _ = listed_audit(tmp_path, monkeypatch, edit, (ASE_GOFEE,))
-    assert [(r[2], r[3], r[4]) for r in audit.drifts()] == [
-        ("unpushed revision bf09f7a2", "not listed", "no pushed equivalent"),
-        ("unpushed revision e09e0487", "listed although its alias holds", "resolved as alias of 57735de1"),
-    ]
 
 
 def remote_tip(cwd=ROOT):
@@ -1112,17 +1719,6 @@ def test_the_remote_tip_takes_main_only_while_the_audit_counts_it(tmp_path, monk
         remote_tip(tmp_path / "only-main")
 
 
-def test_the_revision_index_and_the_remote_tip_read_one_remote_set(monkeypatch):
-    seen = []
-    real = audit_mod.audit_remote_refs
-    monkeypatch.setattr(audit_mod, "audit_remote_refs", lambda: seen.append(1) or real())
-    audit_mod.RevisionIndex((), (), (), ())
-    assert seen
-    refs = audit_mod.audit_remote_refs()
-    assert len(refs) == len(set(refs))
-    assert {f"refs/remotes/origin/{b}" for b in audit_mod.AUDIT_REMOTE_BRANCHES} <= set(refs)
-
-
 def test_the_remote_tip_fails_clearly_when_no_audited_branch_is_present(tmp_path):
     remote_layout(tmp_path / "foreign", "anneal-gmin-pin-followup3", "zzz")
     with pytest.raises(pytest.fail.Exception, match="no audited remote branch is present"):
@@ -1130,11 +1726,6 @@ def test_the_remote_tip_fails_clearly_when_no_audited_branch_is_present(tmp_path
     remote_layout(tmp_path / "bare")
     with pytest.raises(pytest.fail.Exception, match="no audited remote branch is present"):
         remote_tip(tmp_path / "bare")
-
-
-def test_the_remote_tip_of_this_clone_is_in_the_remote_closure(audited):
-    tip = remote_tip()
-    assert audit_mod.resolve_revisions(audited).index.on_remote(tip)
 
 
 def synthetic_audit(*rows, revisions=("code_revision", "code_tree")):
@@ -1146,66 +1737,10 @@ def synthetic_audit(*rows, revisions=("code_revision", "code_tree")):
 LOST = "0123456789abcdef0123456789abcdef01234567"
 
 
-def test_a_cited_revision_on_a_remote_ref_is_not_unresolved(audited):
-    found = audit_mod.resolve_revisions(audited)
-    assert found.unresolved == set(audit_mod.unpushed_reasons())
-    assert found.unresolved.isdisjoint(found.pushed | set(found.aliased) | set(found.same_tree))
-    assert found.pushed and all(found.index.on_remote(name) for name in found.pushed)
-
-
-def test_a_listed_revision_that_a_remote_ref_contains_is_reported(tmp_path, monkeypatch):
-    tip = remote_tip()
-    monkeypatch.setattr(audit_mod, "unpushed_reasons", lambda: {tip: "listed although a remote ref holds it"})
-    audit = synthetic_audit((tip, ""))
-    assert audit_mod.provenance(audit) == {}
-    assert [(r[2], r[3]) for r in audit.drifts()] == [(f"unpushed revision {tip[:8]}", "listed although a remote ref holds it")]
-    assert audit.drifts()[0][4].startswith("resolved on ")
-
-
-def test_a_commit_no_remote_ref_contains_is_unpushed_although_it_exists(monkeypatch):
-    for who in ("AUTHOR", "COMMITTER"):
-        monkeypatch.setenv(f"GIT_{who}_NAME", "t")
-        monkeypatch.setenv(f"GIT_{who}_EMAIL", "t@example.org")
-        monkeypatch.setenv(f"GIT_{who}_DATE", "@86400 +0000")
-    tree = git("rev-parse", f"{remote_tip()}^{{tree}}").stdout.strip()
-    local = git("commit-tree", tree, "-m", "a commit no ref points at").stdout.strip()
-    assert local and git("for-each-ref", "--contains", local, "refs/remotes").stdout == ""
-    audit = synthetic_audit((local, ""))
-    assert audit_mod.provenance(audit) == {"synthetic.csv": f"revision {local[:8]} is not on a pushed branch"}
-    assert [(r[2], r[3], r[4]) for r in audit.drifts()] == [(f"unpushed revision {local[:8]}", "not listed", "no pushed equivalent")]
-
-
-def test_the_recorded_tree_of_a_pushed_commit_resolves_a_lost_revision():
-    tree = git("rev-parse", f"{remote_tip()}^{{tree}}").stdout.strip()
-    audit = synthetic_audit((LOST, tree))
-    assert audit_mod.provenance(audit) == {}
-    assert not audit.drifts()
-    assert any(r[2] == f"revision {LOST[:8]} has the tree of a pushed commit" for r in audit.results)
-    assert audit_mod.resolve_revisions(audit).same_tree[LOST]
-
-
 def test_a_recorded_tree_no_pushed_commit_has_resolves_nothing():
     audit = synthetic_audit((LOST, "f" * 40))
     assert audit_mod.provenance(audit) == {"synthetic.csv": f"revision {LOST[:8]} is not in this repository"}
     assert [r[2] for r in audit.drifts()] == [f"unpushed revision {LOST[:8]}"]
-
-
-def test_one_revision_with_two_recorded_trees_is_reported():
-    tree = git("rev-parse", f"{remote_tip()}^{{tree}}").stdout.strip()
-    audit = synthetic_audit((LOST, tree), (LOST, "f" * 40))
-    audit_mod.provenance(audit)
-    assert f"rows cite revision {LOST[:8]} with one code_tree" in {r[2] for r in audit.drifts()}
-
-
-def test_the_recorded_tree_of_a_pushed_revision_must_be_its_tree():
-    tip = remote_tip()
-    tree = git("rev-parse", f"{tip}^{{tree}}").stdout.strip()
-    audit = synthetic_audit((tip, tree))
-    audit_mod.provenance(audit)
-    assert not audit.drifts()
-    audit = synthetic_audit((tip, "f" * 40))
-    audit_mod.provenance(audit)
-    assert [r[2] for r in audit.drifts()] == [f"code_tree of revision {tip[:8]} is its tree"]
 
 
 def test_an_unmapped_revision_in_any_benchmark_table_fails(monkeypatch):
@@ -1287,10 +1822,7 @@ def test_an_alias_with_another_patch_id_is_reported(tmp_path, monkeypatch):
     assert {r[2] for r in audit.drifts()} == {"pushed_revision bc3e0cb1 has patch-id d4c75b44",
                                                "branch_revision 6e425a39 has patch-id d4c75b44",
                                                "unpushed revision f9d1ac05"}
-    assert gaps == {
-        path: "revision c89653df is not in this repository; revision f9d1ac05 is not in this repository"
-        for path in SC_N12_ROWS
-    }
+    assert gaps == {path: "revision f9d1ac05 is not in this repository" for path in SC_N12_ROWS}
 
 
 def test_an_alias_to_an_unknown_commit_is_reported(tmp_path, monkeypatch):
@@ -1300,10 +1832,7 @@ def test_an_alias_to_an_unknown_commit_is_reported(tmp_path, monkeypatch):
                                                "pushed_revision 79ec1b7f has patch-id debc2a84",
                                                "rows commit ba7c3b45 sits on 79ec1b7f",
                                                "unpushed revision a50f4b02"}
-    assert gaps == {
-        path: "revision a50f4b02 is not in this repository; revision c89653df is not in this repository"
-        for path in SC_N12_ROWS
-    }
+    assert gaps == {path: "revision a50f4b02 is not in this repository" for path in SC_N12_ROWS}
 
 
 def test_an_alias_whose_rows_commit_is_elsewhere_is_reported(tmp_path, monkeypatch):
@@ -1312,10 +1841,7 @@ def test_an_alias_whose_rows_commit_is_elsewhere_is_reported(tmp_path, monkeypat
     assert {r[2] for r in audit.drifts()} == {"rows commit ba7c3b45 sits on 016b6911",
                                                "rows commit ba7c3b45 first cites 9149d1b0",
                                                "unpushed revision 9149d1b0"}
-    assert gaps == {
-        path: "revision 9149d1b0 is not in this repository; revision c89653df is not in this repository"
-        for path in SC_N12_ROWS
-    }
+    assert gaps == {path: "revision 9149d1b0 is not in this repository" for path in SC_N12_ROWS}
 
 
 def git(*args, stdin=None):
@@ -1324,7 +1850,8 @@ def git(*args, stdin=None):
 
 def test_the_revision_index_answers_as_one_git_call_per_question(audited):
     names = sorted({r[c].strip() for rows in audited.read.values() for r in rows for c in audit_mod.REVISION_COLUMNS
-                    if c in r and re.fullmatch(r"[0-9a-f]{7,40}", r[c].strip())} - set(audit_mod.EXTERNAL_REVISIONS))
+                    if c in r and not audit_mod.external_gmin_identifier(r, c)
+                    and re.fullmatch(r"[0-9a-f]{7,40}", r[c].strip())})
     table = audit_mod.alias_table()
     index = audit_mod.alias_index(names, table)
     revisions = sorted({*names, *(r[c] for r in table for c in ("local_revision", "pushed_revision", "branch_revision") if r[c])})
@@ -1354,32 +1881,6 @@ def test_the_revision_index_answers_as_one_git_call_per_question(audited):
         single[local, rows_commit, "first"] = citing[:1] == [rows_commit]
     assert batched == single
     assert sum(single[k] for k in single if k[-1] == "first") == len(table)
-
-
-def test_revision_reachability_comes_from_remote_refs(tmp_path, monkeypatch):
-    def repo(*args):
-        return subprocess.run(
-            ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "core.hooksPath=/dev/null", *args],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        ).stdout.strip()
-
-    repo("init", "-q")
-    (tmp_path / "row.csv").write_text("revision\none\n")
-    repo("add", "row.csv")
-    repo("commit", "-qm", "pushed")
-    pushed = repo("rev-parse", "HEAD")
-    repo("update-ref", "refs/remotes/origin/main", pushed)
-    (tmp_path / "row.csv").write_text("revision\ntwo\n")
-    repo("commit", "-qam", "local only")
-    local = repo("rev-parse", "HEAD")
-    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
-    index = audit_mod.RevisionIndex((pushed, local), (), (), ())
-    assert index.exists(local)
-    assert index.on_remote(pushed)
-    assert not index.on_remote(local)
 
 
 @pytest.mark.parametrize(("driver", "attribute"), [(True, True), (True, False), (False, True)])
@@ -1459,39 +1960,6 @@ def test_type7_quantiles():
         assert math.isclose(audit_mod.type7(values, p), float(np.quantile(values, p)), rel_tol=1e-12)
 
 
-def test_rerun_tags_ignore_comments_and_claims_need_their_fence():
-    tex = "GMIN hits 9 of 12. \\rerun{5}\n% \\rerun{6} in a comment\n"
-    assert audit_mod.rerun_tags(tex) == [(1, "5")]
-    claims = ("GMIN hits 9 of 12",)
-    fenced = "GMIN hits 9 of 12, with p of 0.21.~\\rerun{5}\nNext sentence.\n"
-    assert audit_mod.untagged_claims(fenced, claims[0], "5") == (1, 1)
-    bare = "GMIN hits 9 of 12, with p of 0.21.\nNext sentence.~\\rerun{5}\n"
-    assert audit_mod.untagged_claims(bare, claims[0], "5") == (1, 0)
-    assert audit_mod.untagged_claims(bare, "a missing result", "5") == (0, 0)
-    assert audit_mod.untagged_claims(fenced, claims[0], "6") == (1, 0)
-
-
-@pytest.mark.parametrize("token", [
-    "\\rerun{5}",
-    "\\rerun{8}",
-    "\\rerun",
-    "[RERUN: item 5]",
-    "[RERUN",
-    "[rerun: item 1]",
-])
-@pytest.mark.parametrize("target", [
-    audit_mod.TEX,
-    audit_mod.SI,
-    audit_mod.COVER,
-    "paper/jctc/macros.tex",
-])
-def test_injected_rerun_or_bracket_rerun_fails_the_audit(target, token):
-    audit = audit_mod.Audit()
-    audit.text_cache[target] = audit.text(target) + f"\n{token}\n"
-    audit_mod.rerun_check(audit)
-    assert [(row[1], row[2]) for row in audit.drifts()] == [(target, "no \\rerun or [RERUN remains")]
-
-
 @pytest.mark.parametrize("phrase", [
     "The Zenodo record is pending.",
     "DOI: [to be assigned by Zenodo on acceptance].",
@@ -1507,17 +1975,53 @@ def test_injected_rerun_or_bracket_rerun_fails_the_audit(target, token):
 def test_injected_pending_or_tbd_text_fails_the_audit(target, phrase):
     audit = audit_mod.Audit()
     audit.text_cache[target] = audit.text(target) + f"\n{phrase}\n"
-    audit_mod.rerun_check(audit)
+    audit_mod.pending_text(audit)
     assert [(row[1], row[2]) for row in audit.drifts()] == [
         (target, "no pending, to be assigned, or TBD remains in TeX")
     ]
 
 
-def test_doi_macro_must_be_defined_in_one_place():
+def _audit_with_tags(tex):
     audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX) + "\n\\newcommand{\\DOI}{dup}\n"
+    for path in audit_mod.RERUN_FILES:
+        audit.text_cache[path] = tex if path == audit_mod.TEX else ""
+    audit.text_cache["paper/jctc/macros.tex"] = "\\newcommand{\\rerun}[1]{\\textbf{[RERUN: item #1]}}\n"
+    return audit
+
+
+def test_a_rerun_tag_fails_the_normal_audit_and_pre_submission():
+    tex = "GMIN hits 9 of 12. \\rerun{5}\n% \\rerun{6} in a comment\n"
+    assert audit_mod.rerun_tags(tex) == [(1, "5")]
+    for strict in (False, True):
+        audit = _audit_with_tags(tex)
+        audit_mod.rerun_check(audit, pre_submission=strict)
+        assert sorted(row[2] for row in audit.drifts()) == ["[RERUN: item 5] remains (unknown)",
+                                                           "the tag names an item that waits on a rerun"]
+
+
+def test_no_rerun_item_is_pending():
+    assert audit_mod.RERUN_ITEMS == {} and audit_mod.TODO_ITEMS == {}
+    audit = _audit_with_tags("a number \\rerun{9}\n")
     audit_mod.rerun_check(audit)
-    assert any(row[2] == "\\DOI macro is defined in one place" for row in audit.drifts())
+    assert len(audit.drifts()) == 2
+
+
+def test_no_tag_passes_pre_submission():
+    audit = _audit_with_tags("clean text\n")
+    audit_mod.rerun_check(audit, pre_submission=True)
+    assert not audit.drifts()
+
+
+def test_a_replaced_claim_is_reported_fenced_or_not():
+    for tail in ("", "~\\rerun{5}"):
+        audit = audit_mod.Audit()
+        tex = audit.text(audit_mod.TEX)
+        audit.text_cache[audit_mod.TEX] = tex.replace(
+            "\\section{Conclusions}", "No row was run with the basin bias or the tabu list switched off." + tail
+            + "\n\n\\section{Conclusions}")
+        audit_mod.rerun_claims(audit)
+        assert [(r[2], r[3]) for r in audit.drifts()] == [
+            ("a replaced result is not printed", "No row was run with the basin bias or the tabu list switched off")]
 
 
 def test_copper_tolerance_and_jcc_line_link_the_sources():
@@ -1525,7 +2029,8 @@ def test_copper_tolerance_and_jcc_line_link_the_sources():
     audit_mod.supporting_numbers(audit)
     tolerance = [row for row in audit.results if row[2] == "TARGET_TOL matches tally tolerance"]
     jcc = [row for row in audit.results if row[2] == "the jcc script's target line"]
-    assert tolerance == [("OK", audit_mod.SI, "TARGET_TOL matches tally tolerance", "0.001", "0.001")]
+    assert tolerance == [("OK", "paper/jctc/scripts/hq_sci_tally.py", "TARGET_TOL matches tally tolerance", "0.001",
+                          "0.001")]
     assert jcc and jcc[0][0] == "OK"
     claimed, actual = audit_mod.jcc_target_lines(
         (ROOT / "paper/jctc/scripts/hq_sci_tally.py").read_text(),
@@ -1591,20 +2096,6 @@ def test_resolved_hit_tolerances_follow_the_expression():
     assert audit_mod.resolve_named_hit_tol("not-a-tolerance", names) is None
 
 
-def test_doi_macro_must_match_citation_metadata():
-    audit = audit_mod.Audit()
-    citation = "CITATION.cff"
-    audit.text_cache[citation] = audit.text(citation).replace(
-        "reproducibility archive concept DOI 10.5281/zenodo.20672620",
-        "reproducibility archive concept DOI 10.5281/zenodo.0",
-    )
-    audit_mod.rerun_check(audit)
-    assert any(
-        row[2] == "\\DOI matches the reproducibility archive concept DOI in CITATION.cff"
-        for row in audit.drifts()
-    )
-
-
 def test_the_british_spelling_of_labeled_is_caught():
     doubled_label = ["label" + "l" + suffix for suffix in ("ed", "ing")]
     for word in (*doubled_label, "modelled", "travelled"):
@@ -1662,210 +2153,9 @@ HISTORY_MUTATIONS = [
 ]
 
 
-@pytest.mark.parametrize(("label", "sentence"), HISTORY_MUTATIONS)
-@pytest.mark.parametrize("path", [
-    "bench/metal-cluster-h2h/logs/README.md",
-    "bench/tip4p-h2h/README-h2h.md",
-    "paper/jctc/PROSE-RECEIPT.md",
-    "paper/jctc/REPRODUCE.md",
-    "paper/jctc/si.tex",
-    "paper/related-work.md",
-])
-def test_history_narration_is_rejected(path, label, sentence):
-    audit = audit_mod.Audit()
-    audit_mod.history_narration(audit)
-    assert not [row for row in audit.drifts() if row[1] == path]
-    audit = audit_mod.Audit()
-    audit.text_cache[path] = audit.text(path) + f"\n{sentence}\n"
-    audit_mod.history_narration(audit)
-    flagged = [row for row in audit.drifts() if row[1] == path]
-    assert flagged
-    assert label in flagged[0][4].split(", ")
-
-
-@pytest.mark.parametrize("sentence", [
-    "The seed is used toward the next hop.",
-    "Version v2.1 of the preset.",
-    "The first v1 row has no decimal tag.",
-])
-def test_history_narration_ignores_look_alikes(sentence):
-    path = "bench/tip4p-h2h/README-h2h.md"
-    audit = audit_mod.Audit()
-    audit.text_cache[path] = audit.text(path) + f"\n{sentence}\n"
-    audit_mod.history_narration(audit)
-    assert not [row for row in audit.drifts() if row[1] == path]
-
-
-def test_previously_unreported_is_not_history_narration():
-    """Literature 'previously unreported' is not a revision-history phrase."""
-    path = "paper/related-work.md"
-    audit = audit_mod.Audit()
-    audit.text_cache[path] = "49 previously unreported.\n"
-    audit_mod.history_narration(audit)
-    assert not [row for row in audit.drifts() if row[1] == path]
-    audit = audit_mod.Audit()
-    audit.text_cache[path] = "The value was previously larger.\n"
-    audit_mod.history_narration(audit)
-    flagged = [row for row in audit.drifts() if row[1] == path]
-    assert flagged
-    assert "previously" in flagged[0][4].split(", ")
-
-
-@pytest.mark.parametrize("citation", [
-    r"\cite{missingCitationKey}",
-    r"\citep{missingCitationKey}",
-    r"\citet{missingCitationKey}",
-    r"\nocite{missingCitationKey}",
-    r"\cite*{missingCitationKey}",
-    r"\citep*{missingCitationKey}",
-    r"\citet*{missingCitationKey}",
-    r"\citeauthor{missingCitationKey}",
-    r"\citeauthor*{missingCitationKey}",
-    r"\citealp{missingCitationKey}",
-    r"\citealp*{missingCitationKey}",
-    r"\citealt{missingCitationKey}",
-    r"\citealt*{missingCitationKey}",
-    r"\citeyear{missingCitationKey}",
-    r"\citeyear*{missingCitationKey}",
-    r"\citeyearpar{missingCitationKey}",
-    r"\citeyearpar*{missingCitationKey}",
-    r"\citenum{missingCitationKey}",
-    r"\citenum*{missingCitationKey}",
-    r"\Cite{missingCitationKey}",
-    r"\Cite*{missingCitationKey}",
-    r"\Citet{missingCitationKey}",
-    r"\Citet*{missingCitationKey}",
-    r"\Citep{missingCitationKey}",
-    r"\Citep*{missingCitationKey}",
-    r"\Citeauthor{missingCitationKey}",
-    r"\Citeauthor*{missingCitationKey}",
-    r"\citep[see][12]{missingCitationKey}",
-])
-def test_an_unresolved_cite_key_is_rejected(citation):
-    path = "paper/jctc/manuscript.tex"
-    audit = audit_mod.Audit()
-    audit.text_cache[path] = audit.text(path) + f"\n{citation}\n"
-    audit_mod.bibliography_keys(audit)
-    assert any(
-        row[1] == "paper/jctc/refs.bib"
-        and row[2] == "every \\cite key resolves in the paper bibliography"
-        and "missingCitationKey" in row[4]
-        for row in audit.drifts()
-    )
-
-
-@pytest.mark.parametrize("literal", [
-    "27.2113862", "27.211_386_245_988", "0.529177210903", "0.529_177_210_903", "1.8897261",
-    "4" + ".184",
-])
-@pytest.mark.parametrize("path", [
-    "src/methods/tric_opt.rs",
-    "tests/catalog_signature.rs",
-    "examples/gfn2_water_crest_driver.rs",
-    "examples/ase_objective.py",
-    "scripts/tric_quench/quench_compare.py",
-    "bench/water-h2o16-quench/README.md",
-    "bench/covalent-h2h/gfn2/scc-false-minimum/README.md",
-])
-def test_typed_hartree_and_bohr_literals_are_rejected(path, literal):
-    audit = audit_mod.Audit()
-    audit_mod.conversion_literals(audit)
-    assert not [row for row in audit.drifts() if row[1] == path]
-    audit = audit_mod.Audit()
-    audit.text_cache[path] = audit.text(path) + f"\nconst HARTREE: f64 = {literal};\n"
-    audit_mod.conversion_literals(audit)
-    assert [row for row in audit.drifts() if row[1] == path]
-
-
-def test_a_stale_prose_receipt_line_is_rejected():
-    path = "paper/jctc/PROSE-RECEIPT.md"
-    audit = audit_mod.Audit()
-    audit_mod.prose_receipt_lines(audit)
-    assert not audit.drifts()
-    audit = audit_mod.Audit()
-    audit.text_cache[path] = audit.text(path).replace("paper/jctc/si.tex:13\n", "paper/jctc/si.tex:14\n", 1)
-    audit_mod.prose_receipt_lines(audit)
-    assert [row[2] for row in audit.drifts()] == ["paper/jctc/si.tex:14 holds its recorded string"]
-
-
-def test_a_stale_figure_hash_is_rejected():
-    path = "paper/jctc/FIGURES.md"
-    audit = audit_mod.Audit()
-    audit_mod.figure_row_hashes(audit)
-    assert not audit.drifts()
-    audit = audit_mod.Audit()
-    text = audit.text(path)
-    digest = re.search(r"^Row 1 is \S+\.\n\n([0-9a-f]{64})$", text, re.MULTILINE).group(1)
-    audit.text_cache[path] = text.replace(digest, "0" * 64, 1)
-    audit_mod.figure_row_hashes(audit)
-    assert [row[2] for row in audit.drifts()] == ["row 1 algorithm_stack.pdf sha256"]
-
-
 @pytest.mark.parametrize("path", ["bench/tip4p-h2h/wall-r2.csv", "bench/tip4p-h2h/check-r2.md"])
 def test_generated_tip4p_summaries_are_append_only_records(path):
     assert path in audit_mod.APPEND_ONLY_RECORDS
-
-
-@pytest.mark.parametrize(("path", "old", "new"), [
-    ("bench/tip4p-h2h/wall-r2.csv", "unscored,unscored", "0/12,0/12"),
-    ("bench/tip4p-h2h/check-r2.md", "| unscored | unscored |", "| 0/12 | 0/12 |"),
-    (
-        "bench/tip4p-h2h/README-h2h.md",
-        "Size 25 has no independent reference and is\nunscored.",
-        "Size 25 has no independent reference and has 0/12 hits.",
-    ),
-    (
-        "paper/jctc/manuscript.tex",
-        "Size 25 has no independent reference and is unscored.",
-        "Size 25 has no independent reference and has 0/12 hits.",
-    ),
-    (
-        "paper/jctc/si.tex",
-        "Size 25 has no independent reference and is unscored.",
-        "Size 25 has no independent reference and has 0/12 hits.",
-    ),
-])
-def test_a_tip4p_size_25_hit_count_is_rejected(path, old, new):
-    audit = audit_mod.Audit()
-    text = audit.text(path)
-    assert old in text
-    audit.text_cache[path] = text.replace(old, new, 1)
-    audit_mod.tip4p_unscored(audit)
-    assert [row for row in audit.drifts() if row[1] == path]
-
-
-def test_a_tip4p_size_25_dash_table_cell_is_rejected():
-    path = "paper/jctc/si.tex"
-    audit = audit_mod.Audit()
-    marker = "% tip4p-gmin table: end"
-    row = "(H\\(_2\\)O)\\(_{25}\\) & -- & -- & -- & -- & -- & -- & -- \\\\\\\\\n"
-    audit.text_cache[path] = audit.text(path).replace(marker, row + marker)
-    audit_mod.tip4p_unscored(audit)
-    assert [row for row in audit.drifts() if row[1] == audit_mod.PAPER]
-
-
-@pytest.mark.parametrize(("path", "sentence"), [
-    (
-        "paper/jctc/manuscript.tex",
-        "At 25 molecules the median costs are 17.865 and 53.555 microseconds.",
-    ),
-    (
-        "paper/jctc/si.tex",
-        "The wall-time p is 7.4e-7 at every size.",
-    ),
-])
-def test_a_tip4p_size_25_cost_or_p_claim_is_rejected(path, sentence):
-    audit = audit_mod.Audit()
-    marker = (
-        "\\section*{Author contributions}"
-        if path == "paper/jctc/manuscript.tex"
-        else "% tip4p-gmin prose: end"
-    )
-    audit.text_cache[path] = audit.text(path).replace(
-        marker, sentence + "\n" + marker, 1
-    )
-    audit_mod.tip4p_unscored(audit)
-    assert [row for row in audit.drifts() if row[1] == path]
 
 
 @pytest.mark.parametrize("path", [
@@ -2041,102 +2331,12 @@ def test_a_tracked_snakemake_output_is_deleted_on_force(tmp_path):
         target.write_bytes(original)
 
 
-def test_a_tip4p_unscored_reference_is_rejected():
-    path = "paper/jctc/manuscript.tex"
-    audit = audit_mod.Audit()
-    text = audit.text(path)
-    audit.text_cache[path] = text.replace(
-        "(\\mathrm{H_2O})_{21} &: -916.7074302940",
-        "(\\mathrm{H_2O})_{25} &: -1113.0346568571",
-    )
-    audit_mod.tip4p_unscored(audit)
-    assert [
-        row for row in audit.drifts()
-        if row[1] == path and "reference list is exactly" in row[2]
-    ]
-
-
-def test_every_figure_script_hash_is_checked(tmp_path):
-    script = tmp_path / "paper/jctc/scripts/example.py"
-    script.parent.mkdir(parents=True)
-    script.write_text("print('figure')\n")
-    digest = hashlib.sha256(script.read_bytes()).hexdigest()
-    receipt = tmp_path / "paper/jctc/FIGURE-SOURCE.tsv"
-    receipt.write_text(
-        "path\tsource_sha256\tkind\n"
-        f"paper/jctc/scripts/example.py\t{digest}\tscript\n"
-    )
-
-    audit = audit_mod.Audit()
-    audit_mod.figure_source_scripts(audit, tmp_path)
-    assert not audit.drifts()
-
-    script.write_text("print('changed')\n")
-    audit = audit_mod.Audit()
-    audit_mod.figure_source_scripts(audit, tmp_path)
-    assert len(audit.drifts()) == 1
-
-
-def test_every_committed_figure_source_hash_matches_the_current_file():
-    audit = audit_mod.Audit()
-    audit_mod.figure_source_scripts(audit)
-    assert not audit.drifts()
-    [count] = [row for row in audit.results if row[2] == "effective figure data rows"]
-    assert count[4] == "276.0"
-
-
-@pytest.mark.parametrize("sentence", [
-    "On Au\\(_{55}\\) this setting hits 0 of 12 where GMIN hits 1 of 12.",
-    "Au\\(_{55}\\) is significant by Fisher's test.",
-    "Au\\(_{55}\\) gives \\(p=0.014\\).",
-    "6 of the 9 wins are significant.",
-    "Six of our nine wins are significant.",
-])
-def test_a_stale_au55_claim_is_reported(sentence):
-    assert audit_mod.stale_sentences(f"Intro sentence. {sentence} Closing sentence.") == [sentence]
-
-
-@pytest.mark.parametrize("sentence", [
-    "On Au\\(_{55}\\) the ASE panel hits 0 of 12 where GMIN hits 3 of 12.",
-    "Au\\(_{55}\\) is not significant, with \\(p=0.069\\).",
-    "On Au\\(_{55}\\) this setting hits 6 of 12 where GMIN hits 1 of 12.",
-])
-def test_a_current_au55_claim_is_accepted(sentence):
-    assert audit_mod.stale_sentences(f"Intro sentence. {sentence} Closing sentence.") == []
-
-
-def test_a_table_row_is_not_read_as_a_claim():
-    table = "\\begin{tabular}{ll}\nAu\\(_{55}\\) & GMIN 0 of 12 significant\\\\\n\\end{tabular}\n"
-    assert audit_mod.stale_sentences(table) == []
-
-
-def test_the_au55_claims_hold_in_the_committed_text():
-    audit = audit_mod.Audit()
-    audit_mod.manuscript_au55(audit)
-    assert not audit.drifts()
-    assert any("no Au55 count" in row[2] for row in audit.results)
-
-
 def test_the_landfold_figure_records_its_redrawn_panels():
     audit = audit_mod.Audit()
     audit_mod.manuscript_new(audit)
     rows = [row for row in audit.results if "landfold" in row[2]]
     assert rows
     assert all(row[0] == "OK" for row in rows)
-
-
-@pytest.mark.parametrize("stale, sentence", [
-    ("on 8 of the 8 clusters", "The median wall is lower for this setting on 99 of the 8 clusters."),
-    ("on 1 of the 8", "GMIN hits more seeds on 9 of the 8."),
-])
-def test_a_stale_second_copy_of_a_gmin_number_is_reported(stale, sentence):
-    audit = audit_mod.Audit()
-    text = audit.text(audit_mod.TEX)
-    assert stale in " ".join(text.split())
-    audit.text_cache[audit_mod.TEX] = text + f"\n\\section{{Copy}}\n{sentence}\n"
-    panel, groups = audit_mod.gmin_panel_groups(audit)
-    audit_mod.gmin_body_copies(audit, panel, groups)
-    assert [row for row in audit.drifts() if "every copy" in row[2]]
 
 
 def pdf_length():
@@ -2157,45 +2357,6 @@ def test_the_rendered_abstract_is_counted_without_page_numbers():
     assert length.problems(dict(counts, abstract_words=201, abstract_numerals=7, body_words=7001)) == [
         "abstract has 201 words, more than 200", "abstract has 7 numerals, more than 6",
         "body has 7001 words, outside 5000-7000"]
-
-
-def test_a_long_rendered_abstract_or_a_stale_receipt_is_reported(tmp_path):
-    length = pdf_length()
-    counts = {"abstract_words": 201, "abstract_numerals": 7, "body_words": 6000}
-    receipt = tmp_path / "pdf-length.txt"
-    receipt.write_text(length.receipt_text(counts, 30, {path: "0" * 64 for path in length.SOURCES}))
-    audit = audit_mod.Audit()
-    audit_mod.rendered_length(audit, str(receipt))
-    labels = {row[2] for row in audit.drifts()}
-    assert labels >= {"the PDF counts were measured from the committed sources",
-                      "rendered abstract words, at most 200 for JCTC", "rendered abstract numerals, at most 6 for JCTC"}
-
-
-def test_a_british_spelling_that_reaches_a_pdf_is_reported(tmp_path):
-    scripts = tmp_path / "paper/jctc/scripts"
-    scripts.mkdir(parents=True)
-    (scripts / "table.py").write_text(
-        'CAPTION = r"core-orbit symmetrisation~\\cite{oakleySymmetrisationSchemesGlobal2013}"\n'
-        'HEADER = f"# nearest-neighbour O...O under {3.5} A"\n'
-        'LABEL = f"the nearest-neighbour distance, {1.2} A"\n')
-    (tmp_path / "paper/jctc/manuscript.tex").write_text("The colour of each basin.\n")
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
-    audit = audit_mod.Audit()
-    audit_mod.british_spellings(audit, tmp_path)
-    [row] = audit.drifts()
-    assert row[-1] == ("paper/jctc/manuscript.tex:colour paper/jctc/scripts/table.py:symmetrisation "
-                       "paper/jctc/scripts/table.py:neighbour")
-
-
-def test_a_supporting_information_entry_without_its_format_is_reported():
-    audit = audit_mod.Audit()
-    text = audit.text(audit_mod.TEX)
-    assert text.count("copper slab (PDF).") == 1
-    audit.text_cache[audit_mod.TEX] = text.replace("copper slab (PDF).", "copper slab.")
-    audit_mod.jctc_requirements(audit)
-    labels = {row[2] for row in audit.drifts()}
-    assert "the Supporting Information entry names its format" in labels
 
 
 def cross_labels():
@@ -2221,29 +2382,6 @@ def test_labels_are_numbered_as_achemso_numbers_them():
                        "fig:b": "S2", "eq:b": "S2", "sec:three": "S2"}
 
 
-def test_an_undefined_cross_reference_or_a_stale_label_file_is_reported(monkeypatch):
-    audit = audit_mod.Audit()
-    text = audit.text(audit_mod.TEX)
-    assert text.count("Table~\\siref{tab:ase-morse}") >= 1
-    audit.text_cache[audit_mod.TEX] = text.replace("Table~\\siref{tab:ase-morse}", "Table~\\siref{tab:ase-morse-moved}", 1)
-    labels = cross_labels()
-    monkeypatch.setattr(audit_mod, "load_script", lambda name, path: labels)
-    monkeypatch.setattr(labels, "stale", lambda: ["labels-si.tex"])
-    audit_mod.cross_references(audit)
-    labels_seen = {row[2] for row in audit.drifts()}
-    assert labels_seen == {"the cross-document labels match the sources", "every \\siref names a label of si.tex"}
-
-
-def test_a_rendered_body_outside_the_band_is_reported(tmp_path):
-    length = pdf_length()
-    receipt = tmp_path / "pdf-length.txt"
-    receipt.write_text(length.receipt_text({"abstract_words": 190, "abstract_numerals": 5, "body_words": 16380}, 60,
-                                           length.source_digests()))
-    audit = audit_mod.Audit()
-    audit_mod.rendered_length(audit, str(receipt))
-    assert [row[2] for row in audit.drifts()] == ["rendered body words, 5000-7000 for JCTC"]
-
-
 def test_the_crest_equal_panel_holds_in_the_committed_text():
     audit = audit_mod.Audit()
     audit_mod.crest_equal(audit)
@@ -2260,16 +2398,6 @@ def test_a_crest_run_outside_the_call_tolerance_is_reported():
     audit_mod.crest_equal(audit)
     labels = {row[2] for row in audit.drifts()}
     assert "CREST at 0.90 ps is at the calls of this setting: median within 5%" in labels
-
-
-def test_the_equal_call_panel_is_absent_from_the_paper():
-    audit = audit_mod.Audit()
-    audit_mod.crest_equal(audit)
-    assert not audit.drifts()
-    text = audit.text(audit_mod.TEX)
-    audit.text_cache[audit_mod.TEX] = text + "\nAt equal GFN2 calls the panel returns.\n"
-    audit_mod.crest_equal(audit)
-    assert any(row[2] == "the equal-call panel and the withdrawn hexamer counts are absent" for row in audit.drifts())
 
 
 def test_session_metadata_records_the_anneal_repro_checkout(tmp_path):
@@ -2445,17 +2573,6 @@ def test_a_missing_boot_id_is_recorded_as_null(tmp_path):
     assert module.boot_id_label(tmp_path / "boot_id") is None
     (tmp_path / "boot_id").write_text("0123abcd-0000-4000-8000-000000000000\n")
     assert module.boot_id_label(tmp_path / "boot_id") == machine_provenance.boot_label("0123abcd-0000-4000-8000-000000000000")
-
-
-def test_a_tip4p_separate_cores_claim_is_reported():
-    audit = audit_mod.Audit()
-    text = audit.text(audit_mod.SI)
-    marker = "% tip4p-gmin prose: end"
-    audit.text_cache[audit_mod.SI] = text.replace(
-        marker, "The TIP4P r2 arms ran on separate cores.\n" + marker
-    )
-    audit_mod.manuscript_new(audit)
-    assert [row for row in audit.drifts() if "does not claim separate cores" in row[2]]
 
 
 def crest_equal_runner():
@@ -2672,18 +2789,6 @@ def test_held_out_redoes_run_when_the_second_rename_fails(tmp_path, monkeypatch)
     ]
 
 
-def test_an_unrecorded_revision_without_a_reason_is_reported(monkeypatch):
-    reasons = audit_mod.unrecorded_reasons()
-    path = "results/size-tiered-selection-provenance.csv"
-    assert (path, "code_revision") in reasons
-    monkeypatch.setattr(audit_mod, "unrecorded_reasons",
-                        lambda: {k: v for k, v in reasons.items() if k[0] != path})
-    audit = audit_mod.Audit()
-    audit_mod.manuscript_ablation(audit)
-    audit_mod.revision_map(audit)
-    assert [row for row in audit.drifts() if f"{path} code_revision" in row[2]]
-
-
 def test_disagreeing_hf_fetcher_revisions_fail_the_audit():
     audit = audit_mod.Audit()
     fetcher = "paper/jctc/scripts/fetch_bench_data.py"
@@ -2701,8 +2806,6 @@ def test_disagreeing_hf_fetcher_revisions_fail_the_audit():
     "bench/covalent-h2h/gfn2/rows.csv",
     "bench/crest-equal/rows.csv",
     "bench/gmin-panel/rows.csv",
-    "bench/unreachable-revisions.csv",
-    "bench/unreachable-revisions-updates.csv",
     "paper/jctc/FIGURE-SOURCE.tsv",
     "paper/jctc/FIGURE-SOURCE-updates.tsv",
     "results/size-tiered-selection.csv",
@@ -2733,46 +2836,6 @@ def test_rewriting_or_truncating_a_record_line_fails_the_audit(target):
     truncated.text_cache[target] = lines[0]
     audit_mod.append_only_rows(truncated)
     assert any(r[1] == target and "truncated" in r[4] for r in truncated.drifts())
-
-
-def test_the_noun_analyses_is_american_and_the_verb_analyse_is_not():
-    assert audit_mod.british_words("all code, analyses and text") == []
-    assert audit_mod.british_words("they analyse the cluster") == ["analyse"]
-
-
-def test_a_changed_declaration_is_rejected():
-    audit = audit_mod.Audit()
-    text = audit.text(audit_mod.TEX)
-    interest = "The authors declare no competing financial interest."
-    notes = text.split("\\section*{Notes}", 1)[1].split("\\begin{suppinfo}", 1)[0]
-    assert interest in notes
-    declaration = notes.split(interest, 1)[1].strip()
-    assert declaration
-    mutated_decl = declaration.replace("publication.", "manuscript.", 1)
-    assert mutated_decl != declaration
-    audit.text_cache[audit_mod.TEX] = text.replace(declaration, mutated_decl, 1)
-    audit_mod.manuscript_new(audit)
-    assert any(
-        row[2] == "the Notes declaration matches the sealed text"
-        and row[4] == "changed"
-        for row in audit.drifts()
-    )
-
-
-def test_a_declaration_away_from_the_competing_interest_sentence_is_rejected():
-    audit = audit_mod.Audit()
-    text = audit.text(audit_mod.TEX)
-    audit.text_cache[audit_mod.TEX] = text.replace(
-        "The authors declare no competing financial interest.\n",
-        "The authors declare no competing financial interest.\nThe archive is public.\n",
-        1,
-    )
-    audit_mod.manuscript_new(audit)
-    assert any(
-        row[2] == "the declaration follows the competing-interest sentence"
-        and row[4] == "elsewhere"
-        for row in audit.drifts()
-    )
 
 
 def test_a_removed_row_of_a_record_absent_at_head_fails_the_audit(monkeypatch):
@@ -2886,33 +2949,11 @@ def test_the_test_dependencies_declare_tomli_for_python_310():
     assert marker in (ROOT / ".github/workflows/ci.yml").read_text()
 
 
-def test_a_template_switch_is_matched_as_a_word_without_a_regex_word_boundary(monkeypatch):
-    calls = []
-
-    def fake(*args, **kwargs):
-        calls.append(args)
-        return b"src/a.rs:    cfg.prior_core_extra = 1;\nsrc/b.rs:    if cfg.prior_core {\n"
-
-    monkeypatch.setattr(audit_mod, "git_bytes", fake)
-    assert audit_mod.reads_switch("rev", "prior_core")
-    assert not any("-E" in call or any("\\b" in part for part in call) for call in calls)
-    monkeypatch.setattr(audit_mod, "git_bytes", lambda *a, **k: b"src/a.rs: cfg.prior_core_extra = 1;\n")
-    assert not audit_mod.reads_switch("rev", "prior_core")
-    monkeypatch.setattr(audit_mod, "git_bytes", lambda *a, **k: b"")
-    assert not audit_mod.reads_switch("rev", "prior_core")
-
-
-def test_a_template_switch_in_an_old_revision_is_read_through_a_fixed_string_search():
-    for name in audit_mod.TEMPLATE_SWITCHES:
-        assert audit_mod.reads_switch("c2de652d", name)
-    assert not audit_mod.reads_switch("a24ba760", "prior_core")
-
-
 @pytest.mark.parametrize("path", ["CITATION.cff", ".zenodo.json"])
 def test_a_swapped_citation_affiliation_order_is_rejected(path):
     audit = audit_mod.Audit()
     audit.text_cache[path] = audit.text(path).replace("SURF B.V.; TurtleTech ehf", "TurtleTech ehf; SURF B.V.")
-    audit_mod.manuscript_new(audit)
+    audit_mod.citation_metadata(audit)
     assert [row for row in audit.drifts() if row[1] == path]
 
 
@@ -2923,252 +2964,12 @@ def _unreachable_number(audit):
     ]
 
 
-def test_a_table_quote_of_an_unreachable_panel_number_fails(monkeypatch):
-    withhold(monkeypatch, PANEL_COMMIT)
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
-        r"LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12",
-        "LJ\\(_{150}\\) & \\(4\\times 10^{6}\\) & this work & 5/12 \\\\\n"
-        "M\\(_{80}\\), \\(\\rho=6\\) & \\(4\\times 10^{6}\\) & this work & 2/12",
-        1,
-    )
-    audit_mod.manuscript_gmin(audit)
-    assert any(row[1].endswith("tab:gmin m80r6") for row in _unreachable_number(audit))
-
-
-def test_a_prose_quote_of_an_unreachable_panel_number_fails(monkeypatch):
-    withhold(monkeypatch, PANEL_COMMIT)
-    hits, _wall = panel_tokens("m80r6")
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
-        r"\label{sec:gmin}",
-        f"\\label{{sec:gmin}}\nOn M\\(_{{80}}\\) at \\(\\rho=6\\) this setting hits {hits}.\n",
-        1,
-    )
-    audit_mod.manuscript_gmin(audit)
-    assert any(
-        row[1] == "paper/jctc/manuscript.tex m80r6" and row[4] == hits
-        for row in _unreachable_number(audit)
-    )
-
-
-def test_a_prose_quote_of_an_unreachable_panel_wall_fails(monkeypatch):
-    withhold(monkeypatch, PANEL_COMMIT)
-    _hits, wall = panel_tokens("m80r6")
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
-        r"\label{sec:gmin}",
-        f"\\label{{sec:gmin}}\nOn M\\(_{{80}}\\) at \\(\\rho=6\\) the median wall is {wall}~s.\n",
-        1,
-    )
-    audit_mod.manuscript_gmin(audit)
-    assert any(row[1] == "paper/jctc/manuscript.tex m80r6" and row[4] == wall
-               for row in _unreachable_number(audit))
-
-
-def test_a_mark_does_not_excuse_an_unreachable_panel_number(monkeypatch):
-    withhold(monkeypatch, PANEL_COMMIT)
-    hits, _wall = panel_tokens("m80r6")
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
-        r"\label{sec:gmin}",
-        f"\\label{{sec:gmin}}\nOn M\\(_{{80}}\\) at \\(\\rho=6\\) this setting hits \\StalePanel{{m80r6}}{hits}.\n",
-        1,
-    )
-    audit_mod.manuscript_gmin(audit)
-    assert any(row[4] == hits for row in _unreachable_number(audit))
-
-
-def test_a_quote_of_an_unreachable_sutton_chen_number_fails():
-    """A Sutton--Chen anneal wall from an absent harness fails the same way."""
-    h2h = audit_mod.load_script("h2h_quote_test", "paper/jctc/scripts/h2h_tables.py")
-    anneal, _gmin = next(pair for pair in h2h.sc_pairs() if pair[0]["system"] == "sc126-38")
-    revision = anneal["harness_revision"][:8]
-    wall = h2h.show_s(float(anneal["wall_median_s"]))
-    assert not audit_mod.harness_reachable(revision)
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
-        r"\label{sec:sc}",
-        f"\\label{{sec:sc}}\n12-6, 38 & anneal wall {wall}, harness \\texttt{{{revision}}}.\n",
-        1,
-    )
-    audit_mod.manuscript_gmin(audit)
-    shown = {row[4] for row in _unreachable_number(audit)}
-    assert revision in shown
-    assert wall in shown
-
-
-def test_an_unmarked_table_quote_of_an_unreachable_panel_row_fails(monkeypatch):
-    withhold(monkeypatch, PANEL_COMMIT)
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
-        r"LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 5/12",
-        "LJ\\(_{150}\\) & \\(4\\times 10^{6}\\) & this work & 5/12 \\\\\n"
-        "M\\(_{80}\\), \\(\\rho=6\\) & \\(4\\times 10^{6}\\) & this work & 2/12",
-        1,
-    )
-    audit_mod.manuscript_gmin(audit)
-    assert any(row[1].endswith("tab:gmin m80r6") for row in _unreachable_number(audit))
-
-
-def test_an_unmarked_prose_quote_of_an_unreachable_panel_row_fails(monkeypatch):
-    withhold(monkeypatch, PANEL_COMMIT)
-    hits, _wall = panel_tokens("m80r6")
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX).replace(
-        r"\label{sec:gmin}",
-        f"\\label{{sec:gmin}}\nM\\(_{{80}}\\) at \\(\\rho=6\\) hits {hits}.\n",
-        1,
-    )
-    audit_mod.manuscript_gmin(audit)
-    assert any(
-        row[1] == "paper/jctc/manuscript.tex m80r6" and row[4] == hits
-        for row in _unreachable_number(audit)
-    )
-
-
-def test_a_stale_mark_on_a_reachable_panel_row_fails():
-    """A mark on a held row does not turn that row into an unheld number."""
-    audit = audit_mod.Audit()
-    text = audit.text(audit_mod.TEX)
-    old = "& 12/12 & 10615.5 &"
-    assert text.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = text.replace(old, r"& \StalePanel{lj38}12/12 & 10615.5 &", 1)
-    audit_mod.manuscript_gmin(audit)
-    assert not any(row[1].endswith("lj38") for row in _unreachable_number(audit))
-
-
-def test_reachable_panel_numbers_are_not_flagged_as_unheld():
-    audit = audit_mod.Audit()
-    audit_mod.manuscript_gmin(audit)
-    assert _unreachable_number(audit) == []
-    assert any(row[2] == "a printed number traces to a commit this repository holds" for row in audit.results)
-
-
-def test_a_side_branch_sha_in_the_tip4p_rows_drifts(tmp_path, monkeypatch):
-    side = "e3ed7dadfce4f0c0aa3b9616f6f07dd9b3171e0a"
-    source = (ROOT / "bench/tip4p-h2h/rows-h2h-r2.csv").read_text()
-    current = source.splitlines()[1].split(",")
-    header = source.splitlines()[0].split(",")
-    anneal = current[header.index("anneal_sha")]
-    mutated = tmp_path / "rows-h2h-r2.csv"
-    mutated.write_text(source.replace(anneal, side))
-    real = audit_mod.load_script
-
-    def load(name, path):
-        module = real(name, path)
-        if name == "printed_h2h":
-            module.TIP4P = mutated
-        return module
-
-    monkeypatch.setattr(audit_mod, "load_script", load)
-    audit = audit_mod.Audit()
-    audit_mod.printed_table_harnesses(audit)
-    drifts = [row for row in audit.drifts() if row[1] == "tab:tip4p-gmin"]
-    assert drifts
-    assert drifts[0][4].startswith("e3ed7dad")
-
-
-def test_a_deadbeef_revision_in_the_morse_rerun_fails(tmp_path, monkeypatch):
-    source = audit_mod.MORSE_RERUN_ROWS.read_text()
-    mutated = tmp_path / "rows.csv"
-    mutated.write_text(source.replace(
-        "eeec8e2c216ae1506768bca8e29846c1c039ca3b",
-        "deadbeef" * 5,
-    ))
-    monkeypatch.setattr(audit_mod, "MORSE_RERUN_ROWS", mutated)
-    audit = audit_mod.Audit()
-    audit_mod.printed_table_harnesses(audit)
-    drifts = [row for row in audit.drifts() if row[1] == "tab:gmin"]
-    assert drifts
-    assert drifts[0][4].startswith("deadbeef")
-
-
-def test_an_unheld_hash_in_a_paper_script_fails():
-    audit = audit_mod.Audit()
-    path = "paper/jctc/scripts/replay_v127.py"
-    audit.text_cache[path] = audit.text(path) + '\nOLDTIP = "9109df21fbfd9470c16cff37a7a7b5228bb809e0"\n'
-    audit_mod.script_commit_hashes(audit)
-    assert any(row[0] == "DRIFT" and row[4].startswith("9109df21") for row in audit.results)
-
-
-def test_sc_prose_counts_from_unheld_harness_fail():
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = (
-        audit.text(audit_mod.TEX)
-        + "\nOn the twelve Sutton--Chen clusters, this setting is ahead on 8 of 12, behind on 0, and tied on 4.\n"
-    )
-    audit_mod.unheld_bench_quotes(audit)
-    drifts = [row for row in audit.drifts() if row[2] == audit_mod.HELD_NUMBER]
-    assert drifts
-
-
-def test_morse_gmin_cell_anywhere_in_manuscript_fails(monkeypatch):
-    withhold(monkeypatch, PANEL_COMMIT)
-    panel = audit_mod.load_script("gmin_panel_morse_test", "scripts/gmin_panel/run_panel.py")
-    rows = panel.read_rows(ROOT / "bench/gmin-panel/rows.csv")
-    groups = panel.panel_groups(rows, "latest")
-    gmin = groups[("m55r14", "gmin")]
-    cell = f"{audit_mod.hits_of(gmin)}/{len(gmin)}"
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.TEX] = (
-        audit.text(audit_mod.TEX)
-        + f"\nOn M\\(_{{55}}\\) at \\(\\rho=14\\), GMIN hits {cell} seeds.\n"
-    )
-    audit_mod.unheld_panel_numbers(audit, panel, groups)
-    drifts = [row for row in audit.drifts() if row[2] == audit_mod.HELD_NUMBER]
-    assert drifts
-
-
-def test_si_sc_cost_row_without_sha_fails():
-    audit = audit_mod.Audit()
-    audit.text_cache[audit_mod.SI] = (
-        audit.text(audit_mod.SI)
-        + "\nSC(12--6) 80 & 114.68 & 11.38 & 35.32 & 2.70 \\\\\n"
-    )
-    audit_mod.unheld_bench_quotes(audit)
-    drifts = [row for row in audit.drifts() if row[2] == audit_mod.HELD_NUMBER]
-    assert drifts
-
-
-def test_c89653df_is_not_skipped_by_resolve_revisions():
-    audit = audit_mod.Audit()
-    audit.rows("bench/metal-cluster-h2h/sc-n12/seeds.csv")
-    found = audit_mod.resolve_revisions(audit)
-    assert "c89653df3ae107e9814917bc6515e578e6788188" in found.unresolved
-
-
 def test_withholding_narration_in_manuscript_or_si_fails():
     for doc in (audit_mod.TEX, audit_mod.SI):
         audit = audit_mod.Audit()
         audit.text_cache[doc] = audit.text(doc) + "\nThese hit counts are not quoted.\n"
         audit_mod.sutton_chen(audit)
         assert any(row[1] == doc and "withholding narration" in row[2] for row in audit.drifts())
-
-
-def test_tuned_gmin_tampered_harness_or_blob_fails(tmp_path, monkeypatch):
-    source = (ROOT / "bench/gmin-tuned/rows-shard2.csv").read_text()
-    real = audit_mod.load_script
-    for bad_old, bad_new in (
-        ("5eb79cdcb0a986984dc7b487e5a3cc93224246f9", "deadbeef" * 5),
-        ("336f5f499ca92f07beb2d621c590fa74cfe9ecc5", "cafebabe" * 5),
-        ("3d71865c78e5ff19866bae2616251929fd08e453", "01234567" * 5),
-    ):
-        replaced = source.replace(bad_old, bad_new)
-        assert replaced != source
-        mutated = tmp_path / f"rows-{bad_new[:8]}.csv"
-        mutated.write_text(replaced)
-
-        def load(name, path, target=mutated):
-            module = real(name, path)
-            if name == "printed_h2h":
-                module.GMIN_TUNED = target
-            return module
-
-        monkeypatch.setattr(audit_mod, "load_script", load)
-        audit = audit_mod.Audit()
-        audit_mod.printed_table_harnesses(audit)
-        assert any(row[1] == "tab:gmin-tuned" for row in audit.drifts())
 
 
 NUMPY_BLOCK = """
@@ -3541,11 +3342,12 @@ def test_unreachable_revisions_in_the_bench_readmes_are_found():
         ("bench/agox-lj75/README.md", "ccc22cee"),
         ("bench/ase-lj75/README.md", "162d2307"),
         ("bench/ase-lj75/README.md", "8173c5e2"),
+        ("bench/ase-nonlj/README.md", "90b88235"),
         ("bench/covalent-h2h/README.md", "ce1e7a46"),
         ("bench/covalent-h2h/README.md", "eb7f8999"),
         ("bench/covalent-h2h/README.md", "a52726af"),
     } <= found
-    reruns = {f"bench/ase-{s}/README.md" for s in ("lj38", "lj55", "lj98", "lj104", "lj150", "au55", "nonlj")}
+    reruns = {f"bench/ase-{s}/README.md" for s in ("lj38", "lj55", "lj98", "lj104", "lj150", "au55")}
     assert not (reruns & {path for path, _ in found})
 
 
@@ -3774,6 +3576,317 @@ def test_an_unreachable_printed_revision_is_reported():
     assert any(row[4].startswith("e3ed7dad") for row in audit.drifts())
 
 
+def test_a_todo_marker_in_the_si_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "Wall times are compared only within a cell."
+    assert old in si
+    audit.text_cache[audit_mod.SI] = si.replace(old, old[:-1] + ".~\\todo{G2}")
+    audit_mod.todo_check(audit)
+    assert sorted(r[2] for r in audit.drifts()) == ["[TODO: G2] remains (unknown)", "todo markers"]
+
+
+def test_a_process_note_in_the_cover_letter_is_reported():
+    audit = audit_mod.Audit()
+    cover = audit.text(audit_mod.COVER)
+    old = "The title and the content have changed."
+    audit.text_cache[audit_mod.COVER] = cover.replace(old, old + "\nA fair GMIN arm is being run.")
+    audit_mod.cover_letter(audit)
+    assert [r[2] for r in audit.drifts()] == ["the cover letter carries no process note (being run)"]
+
+
+def test_a_drifted_ase_call_range_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "stopped at the cap after 3933 to 20950 calls"
+    assert old in audit_mod.collapse(tex)
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("3933", "3934"))
+    audit_mod.manuscript_ase(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
+
+
+def test_a_drifted_newcombe_interval_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "& 12/12 & 4/12 & 8 & 0 & \\(7.8\\times 10^{-3}\\) & 0.30 to 0.86 \\\\"
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("0.86", "0.87"))
+    audit_mod.manuscript_knockouts(audit)
+    assert [r[2] for r in audit.drifts()] == ["Newcombe upper"]
+
+
+def test_a_gmin_line_off_the_rerun_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "LJ\\(_{150}\\) & \\(4\\times 10^{6}\\) & this work"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "M\\(_{55}\\), \\(\\rho=14\\) & \\(1\\times 10^{6}\\) & this work")
+    audit_mod.manuscript_gmin(audit)
+    assert {"table line", "tab:gmin lines"} <= {r[2] for r in audit.drifts()}
+
+
+def test_a_relabeled_develop_block_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = audit_mod.SUBMITTED
+    assert old in si
+    audit.text_cache[audit_mod.SI] = si.replace(old, "1ce3ab64493196afd25e8690648e21157d91b882")
+    audit_mod.presets_and_templates(audit)
+    assert "tab:gmin revision 61fa67cf is named in the SI" in {r[2] for r in audit.drifts()}
+
+
+def test_an_overclaim_that_returns_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed."
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old + " The misses sit in the same trap.")
+    audit_mod.science_claims(audit)
+    assert [r[2] for r in audit.drifts()] == ["no overclaim: same trap"]
+
+
+def test_a_hypothesis_in_the_results_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed."
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old + " This supports the funnel hypothesis.")
+    audit_mod.science_claims(audit)
+    assert [r[2] for r in audit.drifts()] == ["the manuscript states no hypothesis"]
+
+
+def test_reported_run_figures_exclude_unused_components_and_crossings():
+    audit = audit_mod.Audit()
+    stack = audit.text("paper/jctc/scripts/fig_algorithm_stack.py")
+    assert audit_mod.stack_route_clears_temperature(stack)
+    assert '("Lennard-Jones", "Morse", "Gupta", "binary LJ")' in stack
+    assert '("TIP4P", "Sutton-Chen")' in stack
+    assert "GFN2-xTB" not in stack
+    arms = audit.text("paper/jctc/scripts/fig_rec_arms.py")
+    assert '("single", "surface", "sym", "burst", "soap", "dls-kernel")' in arms
+    crossing = stack.replace("(2.25, 0.74)", "(3.15, 0.74)").replace(
+        "(2.25, 1.52)", "(3.15, 1.52)")
+    assert not audit_mod.stack_route_clears_temperature(crossing)
+    assert "bank" not in audit.text("paper/jctc/scripts/toc_graphic.py")
+
+
+def test_unused_potential_and_wrong_arm_label_are_reported():
+    audit = audit_mod.Audit()
+    stack_path = "paper/jctc/scripts/fig_algorithm_stack.py"
+    arms_path = "paper/jctc/scripts/fig_rec_arms.py"
+    audit.text_cache[stack_path] = audit.text(stack_path).replace('"Gupta"', '"EMT"')
+    audit.text_cache[arms_path] = audit.text(arms_path).replace('"dls-kernel"', '"lattice"')
+    audit_mod.science_claims(audit)
+    descriptions = {r[2] for r in audit.drifts()}
+    assert "the rgpot figure row is derived from ClusterKernels" in descriptions
+    assert "the stack figure excludes unused potential EMT" in descriptions
+    assert "the arm figure uses the six ClusterMove names" in descriptions
+
+
+def test_stack_potentials_follow_the_kernel_dispatch():
+    audit = audit_mod.Audit()
+    source = audit.text("src/potentials.rs")
+    old = "    pub binary_lj: fn("
+    assert old in source
+    audit.text_cache["src/potentials.rs"] = source.replace(
+        old, "    pub omitted_binary_lj: fn(", 1)
+    audit_mod.science_claims(audit)
+    assert "the rgpot figure row is derived from ClusterKernels" in {
+        r[2] for r in audit.drifts()
+    }
+
+
+def test_default_screen_cannot_be_described_as_the_margin_path():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = ("For every other proposal, the preset uses the Bayesian screen of\n"
+           "equation~\\ref{eq:bayes-screen}.")
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(
+        old, "For every other proposal, the preset uses the margin screen.")
+    audit_mod.science_claims(audit)
+    assert any(r[2] == "prose" and r[3] == old for r in audit.drifts())
+
+
+def test_icosahedral_stall_skip_cannot_return():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    marker = "The preset enables two responses to a stuck chain."
+    assert marker in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(
+        marker,
+        ("A structure already dominated by an icosahedral signature skips "
+         "that projection.\n" + marker),
+    )
+    audit_mod.science_claims(audit)
+    assert any(
+        r[2].startswith("stale mechanism claim is absent:")
+        for r in audit.drifts()
+    )
+
+
+def test_fivefold_arm_amplitude_is_locked_to_the_code():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "Their root-mean-square displacement is \\(0.75\\) in reduced units."
+    assert old in tex
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("0.75", "0.35"))
+    audit_mod.science_claims(audit)
+    assert any(r[2] == "prose" and r[3] == old for r in audit.drifts())
+
+
+def test_a_historical_printed_row_with_the_trail_disabled_is_reported(monkeypatch):
+    audit = audit_mod.Audit()
+    real_git = audit_mod.git
+    target = audit_mod.TRAIL_ROW_REVISIONS[0]
+
+    def trail_disabled(*args, stdin=None):
+        result = real_git(*args, stdin=stdin)
+        if args == ("show", f"{target}:src/methods/cluster_hopping/config.rs"):
+            return subprocess.CompletedProcess(
+                result.args,
+                result.returncode,
+                result.stdout.replace("cfg.trail_on_stall = true;", "cfg.trail_on_stall = false;"),
+                result.stderr,
+            )
+        return result
+
+    monkeypatch.setattr(audit_mod, "git", trail_disabled)
+    audit_mod.historical_trail_presets(audit)
+    assert [(r[1], r[2]) for r in audit.drifts()] == [
+        ("src/methods/cluster_hopping/config.rs at eeec8e2c",
+         "printed-row preset enables the trail response")
+    ]
+
+
+def test_an_unresolved_citation_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.SI)
+    old = "\\cite{fisherLogicInductiveInference1935}"
+    assert old in tex
+    audit.text_cache[audit_mod.SI] = tex.replace(old, "\\cite{fisherLogicInductiveInference1936}", 1)
+    audit_mod.science_claims(audit)
+    assert "cited keys without an entry" in {r[2] for r in audit.drifts()}
+
+
+def test_a_stray_gmin_patch_line_is_reported():
+    audit = audit_mod.Audit()
+    path = "scripts/morse_h2h/morse-timer.patch"
+    patch = audit.text(path)
+    old = "+      CALL H2H_POT_LEAVE(H2H_TICK)\n"
+    assert old in patch
+    audit.text_cache[path] = patch.replace(old, old + "+      TEMP = 2.0D0\n", 1)
+    audit_mod.gmin_patches(audit)
+    assert [r[2] for r in audit.drifts()] == ["added GMIN lines outside the cap and timers"]
+
+
+def test_a_second_gate_claim_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "For atomic clusters the preset has one atom-count gate:"
+    assert old in audit_mod.collapse(tex)
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(
+        tex,
+        old, "For atomic clusters the preset has two atom-count gates, both at 98 atoms:")
+    audit_mod.count_gates(audit, "c2de652dca0bc75e2b0cb4afffac91fd656404e4")
+    assert sorted(r[2] for r in audit.drifts()) == ["prose", "retired gate wording stays out: two atom-count gates"]
+
+
+def test_a_withdrawn_benchmark_in_the_text_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex.replace("\\end{abstract}", "It hits 121 of 192 seeds.\n\\end{abstract}", 1)
+    audit_mod.withdrawn_benchmarks(audit)
+    assert [r[2] for r in audit.drifts()] == ["the water hexamer against CREST is not printed: 121 of 192"]
+
+
+def test_a_stale_gmin_single_session_claim_is_reported():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.COVER] = (
+        audit.text(audit_mod.COVER)
+        + "\nthirteen Lennard-Jones, Gupta, and Morse clusters in one session.\n"
+    )
+    audit.text_cache[audit_mod.SI] = (
+        audit.text(audit_mod.SI) + "\nThe same-session panel of the main text.\n"
+    )
+    audit_mod.withdrawn_benchmarks(audit)
+    assert {(r[1], r[2]) for r in audit.drifts()} == {
+        (audit_mod.COVER, "no whole-table single-session claim"),
+        (audit_mod.SI, "no same-session panel claim in SI"),
+    }
+
+
+def test_crest_outside_the_related_searches_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    audit.text_cache[audit_mod.SI] = si.replace("\\section{Statistical methods}", "CREST.\n\\section{Statistical methods}", 1)
+    audit_mod.withdrawn_benchmarks(audit)
+    assert [r[2] for r in audit.drifts()] == ["CREST is named only among the searches that report no comparable rate"]
+
+
+def test_a_banned_word_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text(audit_mod.SI)
+    old = "landscape to propose structures"
+    assert old in si
+    audit.text_cache[audit_mod.SI] = si.replace(old, "landscape to propose candidates")
+    audit_mod.science_claims(audit)
+    assert [r[2] for r in audit.drifts()] == ["the text does not say candidate"]
+
+
+def test_a_single_host_claim_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    audit.text_cache[audit_mod.TEX] = tex + "\nBoth arms ran on one host.\n"
+    audit_mod.science_claims(audit)
+    assert [r[2] for r in audit.drifts()] == ["no single-host claim: one host"]
+
+
+def test_a_gmin_match_required_by_the_template_era_script_is_reported():
+    audit = audit_mod.Audit()
+    path = "paper/jctc/scripts/template_era_table.py"
+    audit.text_cache[path] = audit.text(path) + "\n# GMIN differs\n"
+    audit_mod.template_era(audit)
+    assert "the template-era script does not require a GMIN match: GMIN differs" in [r[2] for r in audit.drifts()]
+
+
+def test_record_only_revisions_resolve_and_unpushed_ones_do_not():
+    """f009acc9 and 0cc3814c resolve from the listed record branches.
+
+    An id that is not in the clone, and a commit that is in the clone and
+    on no listed remote, stay unpushed.
+    """
+    import os
+
+    harness = "f009acc96bb95023eeb6e394e863630c752a5d05"
+    traced = "0cc3814c053c2f5a709f0f375ebae07e5373c171"
+    absent = "deadbeefdead"
+    tree = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=audit_mod.ROOT,
+                          capture_output=True, text=True, check=True).stdout.strip()
+    env = dict(os.environ)
+    env.update(GIT_AUTHOR_NAME="audit", GIT_AUTHOR_EMAIL="audit@example.invalid",
+               GIT_COMMITTER_NAME="audit", GIT_COMMITTER_EMAIL="audit@example.invalid")
+    local = subprocess.run(
+        ["git", "-c", "core.hooksPath=/dev/null", "commit-tree", tree, "-m", "local only"],
+        cwd=audit_mod.ROOT, capture_output=True, text=True, check=True, env=env).stdout.strip()
+    index = audit_mod.RevisionIndex((harness, traced, absent, local), (), (), ())
+    assert index.audited_exists(harness) and index.on_remote(harness)
+    assert index.audited_exists(traced) and index.on_remote(traced)
+    assert not index.audited_exists(absent)
+    assert not index.audited_exists(local) and not index.on_remote(local)
+
+    audit = audit_mod.Audit()
+    path = "paper/jctc/data/gmin_develop/rows.csv"
+    rows = [dict(row) for row in audit.rows(path)]
+    rows[0]["harness_revision"] = traced
+    rows[1]["harness_revision"] = absent
+    rows[2]["harness_revision"] = local
+    audit.read[path] = rows
+    gap = audit_mod.provenance(audit).get(path, "")
+    assert f"revision {harness[:8]}" not in gap
+    assert f"revision {traced[:8]}" not in gap
+    assert f"revision {absent[:8]} is not in this repository" in gap
+    assert f"revision {local[:8]} is not in this repository" in gap
+
+
 def _cap_turn_copies():
     audit = audit_mod.Audit()
     rows = [dict(row) for row in audit.rows(audit_mod.CAP_TURN_ROWS)]
@@ -3947,47 +4060,56 @@ def test_only_the_lines_a_base_branch_deleted_after_the_fork_are_spared(monkeypa
     assert audit_mod._upstream_removed_lines("ref", None, "rows.csv") == set()
 
 
-def test_a_morse_cluster_that_trails_gmin_is_reported():
-    audit = audit_mod.Audit()
-    panel, groups = audit_mod.gmin_panel_groups(audit)
-    trailing = dict(groups)
-    trailing[("m55r6", "anneal")] = [{**row, "hit": "0"} for row in groups[("m55r6", "anneal")]]
-    assert audit_mod.hits_of(trailing[("m55r6", "anneal")]) < audit_mod.hits_of(groups[("m55r6", "gmin")])
-    audit_mod.gmin_panel_prose(audit, panel, trailing)
-    assert ("paper/jctc/manuscript.tex", "no Morse cluster trails GMIN") in {
-        (row[1], row[2]) for row in audit.drifts()
-    }
-    clean = audit_mod.Audit()
-    audit_mod.gmin_panel_prose(clean, panel, groups)
-    assert not [row for row in clean.drifts() if row[2] == "no Morse cluster trails GMIN"]
+def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_path):
+    """The remote closure is the named branches and the optional tips, no more.
 
+    A clone that never had, or no longer has, an optional tip is still
+    auditable. A tip that is present joins the closure. A remote branch that
+    neither the alias table nor the optional list names does not.
+    """
+    repo = tmp_path / "clone"
+    (repo / "bench").mkdir(parents=True)
+    (repo / "Cargo.toml").write_text('[package]\nversion = "0.0.1"\n')
+    (repo / "bench" / "revision-aliases.csv").write_text(
+        "local_revision,pushed_revision,branch_revision,branch,rows_commit,patch_id\n")
 
-def _prose_drifts(change):
-    audit = audit_mod.Audit()
-    panel, groups = audit_mod.gmin_panel_groups(audit)
-    changed = dict(groups)
-    change(changed)
-    audit_mod.gmin_panel_prose(audit, panel, changed)
-    return {(row[1], row[2]) for row in audit.drifts()}
+    def run_git(*args):
+        done = subprocess.run(
+            ["git", "-c", "user.name=audit", "-c", "user.email=audit@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
+            cwd=repo, capture_output=True, text=True, check=True)
+        return done.stdout.strip()
 
+    def commit(message):
+        run_git("commit", "--allow-empty", "-m", message)
+        return run_git("rev-parse", "HEAD")
 
-def test_a_gmin_win_a_second_gmin_loss_and_a_slower_wall_are_each_reported():
-    tex = "paper/jctc/manuscript.tex"
+    run_git("init", "--quiet")
+    root = commit("root")
+    run_git("tag", "v0.0.1")
+    for branch in ("develop", "bench/crest-gaps", "bench/gmin-sc3", "fix/gmin-sc", "fix/gmin-sc2"):
+        run_git("update-ref", f"refs/remotes/origin/{branch}", root)
+    run_git("checkout", "--quiet", "--detach")
+    optional = commit("tip kept by an optional remote")
+    run_git("checkout", "--quiet", "--detach", root)
+    unnamed = commit("tip on a branch nothing names")
+    run_git("checkout", "--quiet", "--detach", root)
+    run_git("update-ref", "refs/remotes/origin/topic/unnamed", unnamed)
 
-    def gmin_wins_lj38(groups):
-        groups[("lj38", "anneal")] = [{**row, "hit": "0"} for row in groups[("lj38", "anneal")]]
+    monkeypatch.setattr(audit_mod, "ROOT", repo)
+    optional_ref = "refs/remotes/origin/record/repro-pin"
 
-    def anneal_hits_lj150(groups):
-        groups[("lj150", "anneal")] = [{**row, "hit": "1"} for row in groups[("lj150", "anneal")]]
+    def index():
+        return audit_mod.RevisionIndex((root, optional, unnamed), (), (), ())
 
-    def anneal_is_slower(groups):
-        groups[("lj55", "anneal")] = [{**row, "wall_s": "1e6"} for row in groups[("lj55", "anneal")]]
+    assert audit_mod.unauditable() == []
+    without_tip = index()
+    assert without_tip.on_remote(root)
+    assert not without_tip.on_remote(optional)
+    assert not without_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
 
-    assert (tex, "no GMIN win is significant") in _prose_drifts(gmin_wins_lj38)
-    assert (tex, "the GMIN loss is LJ150") in _prose_drifts(gmin_wins_lj38)
-    assert (tex, "the GMIN loss is LJ150") in _prose_drifts(anneal_hits_lj150)
-    assert (tex, "this setting has lower median wall on every cluster") in _prose_drifts(anneal_is_slower)
-    unchanged = _prose_drifts(lambda groups: None)
-    for label in ("no GMIN win is significant", "the GMIN loss is LJ150",
-                  "this setting has lower median wall on every cluster", "no Morse cluster trails GMIN"):
-        assert (tex, label) not in unchanged
+    run_git("update-ref", optional_ref, optional)
+    assert audit_mod.unauditable() == []
+    with_tip = index()
+    assert with_tip.on_remote(optional), "a present optional tip did not join the closure"
+    assert not with_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"

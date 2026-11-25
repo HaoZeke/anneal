@@ -285,9 +285,8 @@ jobs:
       # from the committed rows and checks the revision each row cites. A
       # revision is resolved when a fetched remote ref contains it, when
       # bench/revision-aliases.csv verifies it, or when the recorded
-      # code_tree matches a fetched tree. bench/unpushed-revisions.csv and
-      # the UNPUSHED map of the audit give the reason for each revision that
-      # stays unresolved. Every branch of origin is fetched, and a branch
+      # code_tree matches a fetched tree. bench/unreachable-revisions.csv
+      # gives the reason for each revision that stays unresolved. Every branch of origin is fetched, and a branch
       # the alias table names that cannot be fetched fails here. The audit
       # exits 2 when the checkout is shallow or an alias target is absent,
       # and exits 1 on drift or an unresolved revision with no reason.

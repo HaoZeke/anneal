@@ -34,12 +34,14 @@ working tree already matches, it does not contact the hub. A missing
 or mismatched file is downloaded directly at ``HF_REVISION`` and then
 checked again. The request does not authenticate.
 
-Usage: fetch_data.py [PREFIX ...]
+Usage: fetch_data.py [PATH_OR_PREFIX ...]
 
-With prefixes, only the manifest rows under them are checked and fetched;
-the figure scripts ask for ``paper/jctc/``. Without, every row is. A row
-the dataset does not hold at ``HF_REVISION`` is reported by its group
-and fails the run.
+With names, only the manifest rows they select are checked and fetched: a
+name that is a manifest path selects that row, and a name that ends in a
+slash selects every row under it. The figure scripts ask for ``paper/jctc/``
+or for the files they read. Without names, every row is checked. A name that
+selects no row is refused. A row the dataset does not hold at
+``HF_REVISION`` is reported by its group and fails the run.
 """
 
 from __future__ import annotations
@@ -157,11 +159,17 @@ def group(path: str) -> str:
     return "/".join(Path(path).parts[:2])
 
 
-def ensure(root: Path = ROOT, prefixes: tuple[str, ...] = ()) -> None:
-    """Make every manifest file under prefixes, or every one, present at its repository path."""
-    rows = [row for row in read_manifest() if not prefixes or row["path"].startswith(prefixes)]
-    if prefixes and not rows:
-        raise SystemExit(f"no row of {MANIFEST.name} lies under {' '.join(prefixes)}")
+def ensure(root: Path = ROOT, paths: tuple[str, ...] | list[str] | None = None) -> None:
+    """Make every manifest file, or the ones the names select, present at its repository path."""
+    rows = read_manifest()
+    if paths is not None:
+        listed = {row["path"] for row in rows}
+        unknown = sorted(name for name in paths if name not in listed
+                         and not (name.endswith("/") and any(path.startswith(name) for path in listed)))
+        if unknown:
+            raise SystemExit(f"{unknown[0]} is not in {MANIFEST.name}")
+        rows = [row for row in rows if any(row["path"] == name or (name.endswith("/") and row["path"].startswith(name))
+                                           for name in paths)]
     missing = [
         row
         for row in rows
@@ -191,8 +199,9 @@ def ensure(root: Path = ROOT, prefixes: tuple[str, ...] = ()) -> None:
         )
 
 
-def main(argv: list[str]) -> int:
-    ensure(prefixes=tuple(argv))
+def main(argv: list[str] | None = None) -> int:
+    paths = sys.argv[1:] if argv is None else argv
+    ensure(paths=paths or None)
     return 0
 
 

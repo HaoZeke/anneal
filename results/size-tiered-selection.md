@@ -33,7 +33,7 @@ Rows are in `size-tiered-selection.csv`.
 `code_revision` and `host` are not columns of the result CSV. They live in
 the sidecar `size-tiered-selection-provenance.csv`. The host is `bench`, as
 above. The revision is `unknown`: the tiered selector was never committed and
-no log of the session is, so `bench/unrecorded-revisions.csv` gives the reason
-and `bench/unreachable-revisions.csv` lists the rows. The
+no log of the session is, so the `KNOWN_GAPS` entry of `scripts/paper_audit.py`
+gives the reason. The
 `size_tiered_selection` rule appends new posterior and uniform rows to the
 result CSV and writes the code revision and the host to the sidecar.

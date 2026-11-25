@@ -13,9 +13,9 @@ import random
 import sys
 from pathlib import Path
 
-from scipy.stats import norm
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts"))
+from paired_stats import Z95 as Z  # noqa: E402
 
-Z = float(norm.ppf(0.975))
 ARMS = ("crest", "driver-count budget", "paper4000", "engrad_matched")
 
 
