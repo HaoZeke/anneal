@@ -3,9 +3,11 @@
 """Run one pre-registered G2 budget-stop cell.
 
 The call budget and the process-CPU cap come from the protocol module.
-A seed that already has a row is not run again. A capped seed that
-stopped short of the pre-registered cap continues from its checkpoint.
-An anneal search keeps one worker process across those segments.
+ASE minima hopping and basin hopping add the evaluator child's user
+and system time to the parent. The shape keeps both parts. A seed that
+already has a row is not run again. A capped seed that stopped short
+of the pre-registered cap continues from its checkpoint. An anneal
+search keeps one worker process across those segments.
 """
 
 from __future__ import annotations
@@ -340,16 +342,72 @@ def _outcome(stop: str, calls: int, best: float, cpu_s: float, wall_s: float, **
     return payload
 
 
+def _process_cpu_s(pid: int) -> float:
+    """User plus system CPU seconds from ``/proc/<pid>/stat``."""
+    text = Path(f"/proc/{int(pid)}/stat").read_text()
+    end = text.rfind(")")
+    if end < 0 or end + 2 >= len(text):
+        raise RuntimeError(f"process {pid} has no stat")
+    fields = text[end + 2:].split()
+    if len(fields) < 13:
+        raise RuntimeError(f"process {pid} stat is short")
+    ticks = int(fields[11]) + int(fields[12])
+    return ticks / float(os.sysconf("SC_CLK_TCK"))
+
+
+class _SearchCpu:
+    """Parent process CPU plus one live evaluator child's user and system CPU.
+
+    A search with no child records zero. The child is read while it is
+    running, so a cap sees the same sum that is recorded.
+    """
+
+    def __init__(self, pid: int | None) -> None:
+        self.pid = None if pid is None else int(pid)
+        self._parent0 = time.process_time()
+        self._wall0 = time.perf_counter()
+        self._child0 = 0.0 if self.pid is None else _process_cpu_s(self.pid)
+
+    def snapshot(self) -> tuple[float, float, float]:
+        parent = time.process_time() - self._parent0
+        if parent < 0.0:
+            parent = 0.0
+        if self.pid is None:
+            child = 0.0
+        else:
+            child = _process_cpu_s(self.pid) - self._child0
+            if child < 0.0:
+                child = 0.0
+        wall = time.perf_counter() - self._wall0
+        total = parent + child
+        if wall < total:
+            wall = total
+        return parent, child, wall
+
+
+def _raise_on_cap(calc, meter: _SearchCpu, cap_s: float, potential) -> None:
+    original = calc.calculate
+
+    def calculate(atoms=None, properties=None, system_changes=None):
+        parent, child, _wall = meter.snapshot()
+        if calc.calls > 0 and parent + child >= cap_s:
+            raise potential.CapReached()
+        return original(atoms, properties, system_changes)
+
+    calc.calculate = calculate
+
+
 def _run_bh(cell, cap_s, state) -> dict:
-    if cap_s is not None or state is not None:
+    if state is not None:
         raise RuntimeError("basin hopping is budget-stopped in one invocation")
     panel, potential = _libraries()
     from ase.optimize.basin import BasinHopping
 
     _spec, atoms, calc, server, previous = _ase_setup(cell, panel, potential, None)
     np.random.seed(int(cell.seed))
-    cpu0 = time.process_time()
-    wall0 = time.perf_counter()
+    meter = _SearchCpu(None if server is None else server.proc.pid)
+    if cap_s is not None:
+        _raise_on_cap(calc, meter, float(cap_s), potential)
     stop = None
     try:
         try:
@@ -364,6 +422,8 @@ def _run_bh(cell, cap_s, state) -> dict:
             stop = "budget"
         except potential.HitReached:
             stop = "hit"
+        except potential.CapReached:
+            stop = "cap"
         if stop is None:
             if calc.hit_calls is not None:
                 stop = "hit"
@@ -372,15 +432,20 @@ def _run_bh(cell, cap_s, state) -> dict:
             else:
                 raise RuntimeError("basin hopping stopped before the budget")
         calls = int(calc.hit_calls if stop == "hit" and calc.hit_calls is not None else calc.calls)
+        if stop == "cap" and calls >= int(cell.budget):
+            stop = "budget"
         if stop == "budget" and calls != int(cell.budget):
             raise RuntimeError(f"budget stop recorded {calls} calls")
+        parent, child, wall = meter.snapshot()
         return _outcome(
             stop,
             calls,
             _best_energy(calc, previous),
-            time.process_time() - cpu0,
-            time.perf_counter() - wall0,
+            parent + child,
+            wall,
             positions=atoms.get_positions().reshape(-1).tolist(),
+            parent_cpu_s=parent,
+            child_cpu_s=child,
         )
     finally:
         if server is not None:
@@ -404,8 +469,7 @@ def _run_mh(cell, root: Path, cap_s, state) -> dict:
         else:
             rng = _load_rng(state["rng_state"])
             completed = int(state["completed"])
-        cpu0 = time.process_time()
-        wall0 = time.perf_counter()
+        meter = _SearchCpu(None if server is None else server.proc.pid)
         stop = None
         while stop is None:
             if calc.hit_calls is not None:
@@ -431,7 +495,8 @@ def _run_mh(cell, root: Path, cap_s, state) -> dict:
             else:
                 completed += 1
                 moved = _rng_token(rng) != token
-                if cap_s is not None and (time.process_time() - cpu0) >= float(cap_s) and moved:
+                parent, child, _wall = meter.snapshot()
+                if cap_s is not None and parent + child >= float(cap_s) and moved:
                     stop = "cap"
                 elif not moved and int(calc.calls) == calls_before:
                     raise RuntimeError("minima hopping made no progress")
@@ -440,15 +505,18 @@ def _run_mh(cell, root: Path, cap_s, state) -> dict:
             stop = "budget"
         if stop == "budget" and calls != int(cell.budget):
             raise RuntimeError(f"budget stop recorded {calls} calls")
+        parent, child, wall = meter.snapshot()
         return _outcome(
             stop,
             calls,
             _best_energy(calc, previous),
-            time.process_time() - cpu0,
-            time.perf_counter() - wall0,
+            parent + child,
+            wall,
             positions=atoms.get_positions().reshape(-1).tolist(),
             rng_state=_dump_rng(rng),
             completed=completed,
+            parent_cpu_s=parent,
+            child_cpu_s=child,
         )
     finally:
         os.chdir(previous_dir)
@@ -910,16 +978,19 @@ def _run_anneal(cell, root: Path, cap_s, state) -> dict:
         stop = str(status["stop"])
     else:
         raise RuntimeError(f"anneal worker {pid} ended in {status.get('phase')}")
+    cpu_s = float(status["cpu_s"])
     return _outcome(
         stop,
         int(status["calls"]),
         float(status["best_e"]),
-        float(status["cpu_s"]),
+        cpu_s,
         float(status["wall_s"]),
         positions=status["positions"],
         worker_pid=pid,
         trajectory=str(status["trajectory"]),
         segment=int(status["segment"]),
+        parent_cpu_s=cpu_s,
+        child_cpu_s=0.0,
     )
 
 
@@ -937,6 +1008,8 @@ def _finish(root: Path, cell, stamp: Path, state, outcome: dict, cpu: int):
             "cpu_s": float(outcome["cpu_s"]),
             "wall_s": float(outcome["wall_s"]),
             "stop": record_stop,
+            "parent_cpu_s": float(outcome["parent_cpu_s"]),
+            "child_cpu_s": float(outcome["child_cpu_s"]),
         }
     ]
     if not terminal:
@@ -964,6 +1037,14 @@ def _finish(root: Path, cell, stamp: Path, state, outcome: dict, cpu: int):
         for item in record
     ]
     extra = _shape_extra(cpu)
+    extra["parent_cpu_s"] = format(
+        math.fsum(float(item["parent_cpu_s"]) for item in segments),
+        ".6f",
+    )
+    extra["child_cpu_s"] = format(
+        math.fsum(float(item["child_cpu_s"]) for item in segments),
+        ".6f",
+    )
     if outcome.get("trajectory") is not None:
         extra["trajectory_sha256"] = str(outcome["trajectory"])
     if cell.arm == "anneal":
