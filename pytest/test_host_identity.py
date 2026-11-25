@@ -3,10 +3,15 @@
 
 A hostname goes through ``host_label``: the sandbox name ``bench`` as is, any
 other name as a salted digest. The kernel boot id goes through ``boot_label``,
-a salted digest, and is read only inside ``scripts/machine_provenance.py``.
-Python, shell and Rust are all scanned. A line that reads the host any other
-way fails, with no exemption for a file. A line that must read it raw is
-exempt by its exact text and a reason.
+a salted digest. The boot id is read in two files only,
+``scripts/machine_provenance.py`` for Python and shell and
+``examples/common/host_label.rs`` for Rust. A Python script may read the host
+name, but only as the argument of ``host_label``; shell goes through
+``machine_provenance.py``; Rust reads it only in ``host_label.rs``. A bank or
+catalog endpoint is written as ``endpoint_label``. Python, shell, batch
+scripts (``.sbatch``) and Rust are all scanned, ``experiments/`` too. A line
+that reads the host any other way fails, with no exemption for a file. A line
+that must read it raw is exempt by its exact text and a reason.
 """
 
 from __future__ import annotations
@@ -21,9 +26,13 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import machine_provenance  # noqa: E402
 
-ROOTS = ("scripts", "bench", "paper/jctc/scripts", "examples", "benches", "src", "python")
-SUFFIXES = {".py", ".sh", ".rs"}
-HOME = {"scripts/machine_provenance.py"}
+ROOTS = (
+    "scripts", "bench", "paper/jctc/scripts", "examples", "benches", "src", "python", "tests",
+    "experiments", "workflow", ".github", "docs/source",
+)
+SUFFIXES = {".py", ".sh", ".bash", ".sbatch", ".slurm", ".smk", ".rs", ".yml", ".yaml"}
+NAMES = {"Snakefile"}
+HOME = {"scripts/machine_provenance.py", "examples/common/host_label.rs"}
 
 READS = (
     re.compile(r"gethostname|gethostbyname|getfqdn|platform\.node\b|platform\.uname|os\.uname|\.nodename"),
@@ -38,13 +47,6 @@ WRAPPED = (
     re.compile(
         r'host_label\(Path\("/proc/sys/kernel/hostname"\)\.read_text\(\)\.splitlines\(\)\[0\]\.strip\(\)\)'
     ),
-    re.compile(
-        r'host_label::host_label\(&(?:first_line|read_trimmed)\("/proc/sys/kernel/hostname"\)\)'
-    ),
-    re.compile(r"host_label::host_label\(&hostname\(\)\)"),
-    re.compile(
-        r'host_label::boot_label\(&(?:first_line|read_trimmed)\("/proc/sys/kernel/random/boot_id"\)\)'
-    ),
 )
 TUNED_REASON = "frozen: the committed tuned rows are verified against this file's exact blob"
 EXEMPT = {
@@ -57,17 +59,9 @@ EXEMPT = {
         'raise SystemExit(f"uts name is {socket.gethostname()}")',
     ): TUNED_REASON + ", and the name is shown on a refused start, never written to a row",
     (
-        "examples/lj_lean_relax_budget.rs",
-        'Command::new("hostname")',
-    ): "the raw name feeds host_label in main and is written nowhere",
-    (
         "scripts/gmin_panel/tuned.py",
         'for path in (Path("/etc/machine-id"), Path("/proc/sys/kernel/random/boot_id")):',
     ): TUNED_REASON + ", and both ids only feed a digest",
-    (
-        "examples/lj_board_row.rs",
-        'emit("boot_id_path=/proc/sys/kernel/random/boot_id");',
-    ): "names the file the boot label stands for and reads nothing",
     (
         "scripts/elja_hq_sci_bankrpc.sh",
         "HOST=${BANK_HOST:-$(hostname)}",
@@ -85,7 +79,7 @@ def guarded_lines():
         if not top.is_dir():
             continue
         for path in sorted(top.rglob("*")):
-            if path.suffix not in SUFFIXES or not path.is_file():
+            if (path.suffix not in SUFFIXES and path.name not in NAMES) or not path.is_file():
                 continue
             if {"__pycache__", "target", "node_modules"} & set(path.parts):
                 continue
@@ -200,28 +194,234 @@ def test_the_board_examples_use_the_digest_rule_of_the_python_label():
         assert '#[path = "common/host_label.rs"]' in text, example
 
 
-LABEL_ASSIGN = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=.*host-label")
-ADDRESS_USE = re.compile(r"_RPC=|\bssh\b|\bscp\b|\brsync\b|tcp://|\bnc\b|--host\b|--address\b")
+LABEL_SOURCE = re.compile(r"\b(?:host|boot|endpoint)-label\b|\b(?:read_)?(?:host|boot|endpoint)_label\b")
+SHELL_ASSIGN = re.compile(r"^\s*(?:export\s+|local\s+|declare\s+(?:-\w+\s+)?|readonly\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
+ADDRESS_NAME = re.compile(r"ADDR|ENDPOINT|URL|_RPC|RPC_|BANK_HOST|SERVER|PEER|REMOTE", re.I)
+SHELL_SINK = re.compile(
+    r"_RPC=|\bssh\b|\bscp\b|\brsync\b|\bsftp\b|\bcurl\b|\bwget\b|\bnc\b|\bncat\b|\bping\b"
+    r"|\b[a-z][a-z0-9+.-]*://|--(?:host|address|endpoint|server|url)\b"
+)
+PY_SINK_CALLS = {
+    "connect", "create_connection", "urlopen", "bind", "sendto", "getaddrinfo",
+    "gethostbyname", "BankClient", "CatalogClient", "Request",
+}
+PY_HTTP_CALLS = {"get", "post", "put", "head", "delete", "request"}
+PY_HTTP_ROOTS = {"requests", "httpx", "urllib", "session", "http"}
+PY_SINK_PROGRAMS = {"ssh", "scp", "rsync", "sftp", "curl", "wget", "nc", "ncat", "ping"}
+RS_SINK = re.compile(r"(?:TcpStream::connect|connect_timeout|SocketAddr|\bconnect|set_var)\s*(?:::<[^>]*>)?\(|\bBANK_RPC\b|\bCATALOG_RPC\b")
+
+
+def logical(lines):
+    joined, current = [], ""
+    for number, line in enumerate(lines, start=1):
+        if line.rstrip().endswith("\\"):
+            current += line.rstrip()[:-1] + " "
+            continue
+        joined.append((number, current + line))
+        current = ""
+    return joined
+
+
+def mentions(name, line):
+    return re.search(rf"\$\{{?{re.escape(name)}\b", line) is not None
+
+
+def shell_label_address_uses(lines):
+    """Lines where a value derived from a label is used as a network address."""
+    rows = [(n, text) for n, text in logical(lines) if not text.lstrip().startswith("#")]
+    tainted = set()
+    changed = True
+    while changed:
+        changed = False
+        for _, text in rows:
+            match = SHELL_ASSIGN.match(text)
+            if not match or match.group(1) in tainted:
+                continue
+            value = match.group(2)
+            if LABEL_SOURCE.search(value) or any(mentions(name, value) for name in tainted):
+                tainted.add(match.group(1))
+                changed = True
+    found = []
+    for number, text in rows:
+        match = SHELL_ASSIGN.match(text)
+        for name in tainted:
+            if not mentions(name, text):
+                continue
+            if SHELL_SINK.search(text) or re.search(rf"\$\{{?{re.escape(name)}\b\}}?:[0-9$]", text):
+                found.append((number, text.strip()))
+                break
+            if match and ADDRESS_NAME.search(match.group(1)):
+                found.append((number, text.strip()))
+                break
+        else:
+            if match and match.group(1) in tainted and ADDRESS_NAME.search(match.group(1)):
+                found.append((number, text.strip()))
+    return found
+
+
+def python_label_address_uses(source):
+    import ast
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+
+    def names(node):
+        return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+    def labelled(node):
+        return any(
+            isinstance(n, ast.Call) and LABEL_SOURCE.fullmatch(getattr(n.func, "id", getattr(n.func, "attr", "")))
+            for n in ast.walk(node)
+        )
+
+    tainted = set()
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)) and node.value is not None:
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if labelled(node.value) or names(node.value) & tainted:
+                    for target in targets:
+                        for name in names(target):
+                            if name not in tainted:
+                                tainted.add(name)
+                                changed = True
+    found = []
+    for node in ast.walk(tree):
+        hit = False
+        if isinstance(node, ast.Call):
+            callee = getattr(node.func, "id", getattr(node.func, "attr", ""))
+            args = [*node.args, *(k.value for k in node.keywords)]
+            used = any(labelled(a) or names(a) & tainted for a in args)
+            root = node.func
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if used and callee in PY_SINK_CALLS:
+                hit = True
+            if used and callee in PY_HTTP_CALLS and getattr(root, "id", "") in PY_HTTP_ROOTS:
+                hit = True
+            for a in args:
+                if isinstance(a, (ast.List, ast.Tuple)) and a.elts and isinstance(a.elts[0], ast.Constant):
+                    if str(a.elts[0].value) in PY_SINK_PROGRAMS and any(labelled(e) or names(e) & tainted for e in a.elts[1:]):
+                        hit = True
+        elif isinstance(node, ast.JoinedStr):
+            text = "".join(v.value for v in node.values if isinstance(v, ast.Constant) and isinstance(v.value, str))
+            if re.search(r"[a-z][a-z0-9+.-]*://", text) and (names(node) & tainted or labelled(node)):
+                hit = True
+        elif isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Store):
+            pass
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.slice, ast.Constant)
+                    and isinstance(target.slice.value, str)
+                    and re.search(r"RPC|ADDR|ENDPOINT", target.slice.value)
+                    and (labelled(node.value) or names(node.value) & tainted)
+                ):
+                    hit = True
+        if hit:
+            found.append((node.lineno, ast.get_source_segment(source, node) or ""))
+    return found
+
+
+def rust_label_address_uses(lines):
+    tainted = set()
+    for line in lines:
+        match = re.match(r"\s*let\s+(?:mut\s+)?([a-z_][a-z0-9_]*)\b.*\b(?:read_)?(?:host|boot|endpoint)_label\b", line)
+        if match:
+            tainted.add(match.group(1))
+    found = []
+    for number, line in enumerate(lines, start=1):
+        if line.lstrip().startswith("//"):
+            continue
+        sink = RS_SINK.search(line)
+        if sink and any(re.search(rf"\b{name}\b", line[sink.start():]) for name in tainted):
+            found.append((number, line.strip()))
+        elif sink and LABEL_SOURCE.search(line[sink.start():]) and "panic!" not in line:
+            found.append((number, line.strip()))
+    return found
+
+
+def label_address_uses(relative, text):
+    lines = text.splitlines()
+    if relative.endswith(".py"):
+        return python_label_address_uses(text)
+    if relative.endswith(".rs"):
+        return rust_label_address_uses(lines)
+    return shell_label_address_uses(lines)
 
 
 def test_a_host_label_is_never_used_as_a_network_address():
     """A label names no machine, so a job that dials it dials nothing."""
     found = []
     for relative, lines in guarded_lines():
-        if not relative.endswith(".sh"):
+        if relative.startswith("pytest/") or relative in HOME:
             continue
-        names = {m.group(1) for line in lines if (m := LABEL_ASSIGN.match(line))}
-        for number, line in enumerate(lines, start=1):
-            if line.lstrip().startswith("#"):
-                continue
-            for name in names:
-                var = rf"\$\{{?{name}\}}?"
-                if re.search(var + r":[0-9$]", line) or (re.search(var, line) and ADDRESS_USE.search(line)):
-                    found.append(f"{relative}:{number}: {line.strip()}")
+        for number, line in label_address_uses(relative, "\n".join(lines)):
+            found.append(f"{relative}:{number}: {line}")
     assert not found, "a host label is used as an address:\n" + "\n".join(found)
 
 
+def test_the_address_check_covers_batch_scripts_and_the_walked_trees():
+    walked = {relative for relative, _ in guarded_lines()}
+    assert any(name.endswith(".sbatch") for name in walked)
+    assert any(name.startswith("experiments/") for name in walked)
+    assert "scripts/elja_leave_ridge.sbatch" in walked
+    assert "experiments/morphology_bias_lj38.sbatch" in walked
+
+
 def test_the_address_check_flags_a_label_used_to_dial():
-    assert LABEL_ASSIGN.match('HOST=${BANK_HOST:-$(python3 "$ROOT/scripts/machine_provenance.py" host-label)}')
-    assert not LABEL_ASSIGN.match("HOST=${BANK_HOST:-$(hostname)}")
-    assert ADDRESS_USE.search('export BANK_RPC=${HOST}:${port}')
+    direct = 'HOST=${BANK_HOST:-$(python3 "$ROOT/scripts/machine_provenance.py" host-label)}\nexport BANK_RPC=${HOST}:${port}\n'
+    indirect = 'H=$(python3 m.py host-label)\nADDR=$H\nssh "$ADDR" true\n'
+    chained = 'H=$(python3 m.py host-label)\nA=$H\nB="$A"\ncurl "http://$B/x"\n'
+    named = 'H=$(python3 m.py host-label)\nSERVER_ADDR=$H\n'
+    batch = 'host=$(python3 m.py boot-label)\nrsync -a . "$host:/x/"\n'
+    for text in (direct, indirect, chained, named, batch):
+        assert shell_label_address_uses(text.splitlines()), text
+    clean = (
+        'HOST=${BANK_HOST:-$(hostname)}\nLABEL=$(python3 m.py host-label)\n'
+        'echo "host=$LABEL"\nexport BANK_RPC=${HOST}:${port}\n'
+        'echo "rpc=$(python3 m.py endpoint-label "${HOST}:${port}")"\n'
+    )
+    assert shell_label_address_uses(clean.splitlines()) == []
+    python_bad = (
+        "import socket\nlabel = host_label(socket.gethostname())\naddr = f'{label}:80'\n"
+        "socket.create_connection((addr, 80))\n"
+    )
+    python_url = "host = host_label('x')\nurl = f'http://{host}/rows'\n"
+    python_ssh = "h = host_label('x')\nsubprocess.run(['ssh', h, 'true'])\n"
+    python_env = "h = host_label('x')\nenv['BANK_RPC'] = h + ':1'\n"
+    for text in (python_bad, python_url, python_ssh, python_env):
+        assert python_label_address_uses(text), text
+    python_ok = "h = host_label('x')\nrow = {'host': h}\nprint(f'host={h}')\n"
+    assert python_label_address_uses(python_ok) == []
+    rust_bad = 'let h = host_label::read_host_label();\nlet s = TcpStream::connect(format!("{h:?}:80"));\n'
+    assert rust_label_address_uses(rust_bad.splitlines())
+    assert rust_label_address_uses(['let h = host_label::read_host_label();', 'println!("hostname={h:?}");']) == []
+
+
+def test_the_examples_print_an_endpoint_only_as_its_label():
+    """The job dials the real address; nothing it prints may contain it."""
+    printing = re.compile(r"(?:e?println|panic|format|write(?:ln)?)!\([^;]*\{(?:endpoint|addr|address|sock)\b[^}]*\}")
+    found = []
+    for example in ("lj_cluster_search", "bank_peek"):
+        text = (ROOT / "examples" / f"{example}.rs").read_text()
+        found += [f"{example}: {m.group(0)}" for m in printing.finditer(text)]
+        assert "host_label::endpoint_label" in text, example
+    assert not found, "\n".join(found)
+    source = (ROOT / "examples" / "common" / "host_label.rs").read_text()
+    assert '"host-99fd2f34271ff224:7426"' in source
+    assert machine_provenance.endpoint_label("elja-compute-17:7426") == "host-99fd2f34271ff224:7426"
+
+
+def test_the_board_examples_read_the_host_only_through_host_label_rs():
+    source = (ROOT / "examples" / "common" / "host_label.rs").read_text()
+    assert 'pub const UNKNOWN: &str = "unknown";' in source
+    for example in ("lj_board_row", "lj55_board_arm", "lj_lean_relax_budget"):
+        text = (ROOT / "examples" / f"{example}.rs").read_text()
+        assert "/proc/sys/kernel" not in text, example
+        assert "absent" not in text.split("fn main")[1].split("uptime")[0], example

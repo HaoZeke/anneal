@@ -140,6 +140,27 @@ def host_label(hostname: str | None = None) -> str:
     return "host-" + hashlib.sha256(HOST_LABEL_SALT + name.encode()).hexdigest()[:16]
 
 
+def endpoint_label(endpoint: str) -> str:
+    """A ``host:port`` endpoint with its host as a host label; the port and any scheme stay.
+
+    A job dials the real address. Anything written down, a log line or a row,
+    shows this form instead. An endpoint with no host raises ``ValueError``
+    rather than being echoed.
+    """
+    scheme, sep, rest = endpoint.partition("://")
+    if not sep:
+        scheme, rest = "", endpoint
+    rest, slash, tail = rest.partition("/")
+    host, colon, port = rest.rpartition(":")
+    if not colon or not port.isdigit():
+        host, port = rest, ""
+    host = host.strip("[]")
+    if not host:
+        raise ValueError("the endpoint has no host")
+    label = host_label(host)
+    return (f"{scheme}://" if sep else "") + label + (f":{port}" if port else "") + slash + tail
+
+
 def boot_label(boot_id: str | None = None) -> str:
     """The boot column of a row or report: a salted digest of the kernel boot id.
 
@@ -442,15 +463,21 @@ def validate_gmin_group_provenance(
 
 
 def main(argv: list[str]) -> int:
-    """``host-label [NAME]`` and ``boot-label`` print the labels shell scripts report."""
+    """``host-label [NAME]``, ``boot-label`` and ``endpoint-label ENDPOINT`` print what shell scripts report."""
     if argv == ["host-label"]:
         print(host_label())
     elif len(argv) == 2 and argv[0] == "host-label":
         print(host_label(argv[1]))
     elif argv == ["boot-label"]:
         print(boot_label())
+    elif len(argv) == 2 and argv[0] == "endpoint-label":
+        try:
+            print(endpoint_label(argv[1]))
+        except ValueError as error:
+            print(f"machine_provenance.py: {error}", file=sys.stderr)
+            return 2
     else:
-        print("usage: machine_provenance.py host-label [NAME] | boot-label", file=sys.stderr)
+        print("usage: machine_provenance.py host-label [NAME] | boot-label | endpoint-label ENDPOINT", file=sys.stderr)
         return 2
     return 0
 

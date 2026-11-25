@@ -26,9 +26,19 @@ these provenance columns:
   `boot-` and the first sixteen hexadecimal digits of the SHA-256 of the
   public salt `anneal-bench-boot-label-v1\0` followed by the id, so two
   measurements still show whether they share a boot.  Shell scripts call
-  `machine_provenance.py boot-label`, and the board examples carry the same
-  rule in `examples/common/host_label.rs`.  The raw id is read in that one
-  place, in Python, shell and Rust alike, and a test fails on any other read.
+  `machine_provenance.py boot-label`, and the Rust examples carry the same
+  rule in `examples/common/host_label.rs`.  The raw id is read in those two
+  files only, the first for Python and shell and the second for Rust, and a
+  test fails on any other read.  Where the kernel gives no host name or boot
+  id, a Rust example writes `unknown`, never a digest of a stand-in.
+- A raw host name is read by Python scripts only as the argument of
+  `host_label`, by shell scripts only through `machine_provenance.py`, and by
+  Rust only in `examples/common/host_label.rs`.  A job still dials the real
+  address of a bank or catalog server.  Anything it writes down shows
+  `endpoint_label` instead, which keeps the port and replaces the host by its
+  label.  The test reads `.py`, `.sh`, `.sbatch` and `.rs` files, in
+  `experiments/` too, and fails when a value derived from a label is used as
+  a network address.
 - `machine_id` is lowercase hexadecimal SHA-256 of the public salt
   `anneal-bench-machine-id-v1\0` followed by the machine's identifier.
   On Linux the identifier is the stripped contents of `/etc/machine-id`;

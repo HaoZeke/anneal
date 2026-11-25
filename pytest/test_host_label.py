@@ -67,3 +67,27 @@ def test_the_label_command_names_a_host_it_is_given():
         capture_output=True, text=True, check=True,
     )
     assert run.stdout.strip() == "host-99fd2f34271ff224"
+
+
+def test_an_endpoint_keeps_its_port_and_scheme_and_loses_its_host():
+    label = machine_provenance.endpoint_label
+    assert label("elja-compute-17:7426") == "host-99fd2f34271ff224:7426"
+    assert label("tcp://elja-compute-17:9000/x") == "tcp://host-99fd2f34271ff224:9000/x"
+    assert label("[fe80::1]:80").endswith(":80") and "fe80" not in label("[fe80::1]:80")
+    assert label("bench:5") == "bench:5"
+    for endpoint in (":80", "", "ipc:///tmp/bank"):
+        with pytest.raises(ValueError):
+            label(endpoint)
+
+
+def test_the_endpoint_command_never_echoes_a_host():
+    ok = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "machine_provenance.py"), "endpoint-label", "elja-compute-17:7426"],
+        capture_output=True, text=True, check=True,
+    )
+    assert ok.stdout.strip() == "host-99fd2f34271ff224:7426"
+    refused = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "machine_provenance.py"), "endpoint-label", ":80"],
+        capture_output=True, text=True, check=False,
+    )
+    assert refused.returncode == 2 and refused.stdout == ""

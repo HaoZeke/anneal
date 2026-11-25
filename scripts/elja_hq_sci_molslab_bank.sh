@@ -78,7 +78,7 @@ submit_mol() {
   fi
   mkdir -p "$out"
   : >"$out/hq_submit.log"
-  echo "h2o${m} arm=${arm} budget=${budget} seeds=${seeds} target=${target} rpc=$(python3 "$ANNEAL_SCRIPTS/machine_provenance.py" host-label "$HOST"):${port}" | tee -a "$out/hq_submit.log"
+  echo "h2o${m} arm=${arm} budget=${budget} seeds=${seeds} target=${target} rpc=$(python3 "$ANNEAL_SCRIPTS/machine_provenance.py" endpoint-label "${HOST}:${port}")" | tee -a "$out/hq_submit.log"
   hq submit \
     --name "h2o${m}-${arm}" \
     --array="0-${last}" \
@@ -107,7 +107,7 @@ submit_slab() {
   fi
   mkdir -p "$out"
   : >"$out/hq_submit.log"
-  echo "cuh2 arm=${arm} budget=${budget} seeds=${seeds} target=-415.971529 rpc=$(python3 "$ANNEAL_SCRIPTS/machine_provenance.py" host-label "$HOST"):${port}" | tee -a "$out/hq_submit.log"
+  echo "cuh2 arm=${arm} budget=${budget} seeds=${seeds} target=-415.971529 rpc=$(python3 "$ANNEAL_SCRIPTS/machine_provenance.py" endpoint-label "${HOST}:${port}")" | tee -a "$out/hq_submit.log"
   hq submit \
     --name "cuh2-${arm}" \
     --array="0-${last}" \

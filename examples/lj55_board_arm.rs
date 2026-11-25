@@ -41,10 +41,8 @@ fn first_line(path: &str) -> String {
 
 fn main() {
     anneal_core::install_rgpot_kernels!();
-    let hostname = host_label::host_label(&first_line("/proc/sys/kernel/hostname"))
-        .unwrap_or_else(|| "absent".to_string());
-    let boot_id = host_label::boot_label(&first_line("/proc/sys/kernel/random/boot_id"))
-        .unwrap_or_else(|| "absent".to_string());
+    let hostname = host_label::read_host_label().unwrap_or_else(|| host_label::UNKNOWN.to_string());
+    let boot_id = host_label::read_boot_label().unwrap_or_else(|| host_label::UNKNOWN.to_string());
     let uptime_s = first_line("/proc/uptime")
         .split_whitespace()
         .next()
