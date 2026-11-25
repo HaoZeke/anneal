@@ -1,10 +1,13 @@
 //! One GFN2-xTB molecular seed for the CREST head-to-head.
 //!
-//! Usage: gfn2_mol_h2h <system> <budget> <seed> <outdir>
+//! Usage: gfn2_mol_h2h <system> <budget> <seed> <outdir> [target_energy]
 //!
 //! Systems: `nh3-8`, `h2o-8`, `h2o-12`, `hf-6`, `meoh-4`, `nh3-2-h2o-4`.
 //! The search is `Config::recommended_molecular`. There is no wall and no
-//! constant set for one molecule. Monomers are GFN2-xTB 6.7.1 vtight
+//! constant set for one molecule. `target_energy`, or `H2O_TARGET_EV` when
+//! the argument is omitted, is an optional stop in eV. It is installed on
+//! the ledger and does not change the preset. Unset, the search runs out
+//! the budget. Monomers are GFN2-xTB 6.7.1 vtight
 //! geometries with the first atom at the origin. `H2H_START_XYZ` shares a
 //! start. `pot_s` is time inside `value_and_gradient`.
 
@@ -17,6 +20,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+/// Objective calls, and the first call whose energy reached the optional target.
+static OBJECTIVE_CALLS: AtomicU64 = AtomicU64::new(0);
+static FIRST_HIT_CALL: AtomicU64 = AtomicU64::new(0);
 
 use anneal_core::catalog::molecular::component_gradient_tolerance;
 use anneal_core::methods::cluster_hopping::Outcome;
@@ -213,11 +220,17 @@ type ForceEval = Box<dyn FnMut(&[f64]) -> (f64, Vec<f64>) + Send>;
 struct ForceObjective {
     bounds: Bounds<f64>,
     dim: usize,
+    /// Stop threshold in eV. `None` runs the budget out.
+    target: Option<f64>,
     eval: Mutex<ForceEval>,
 }
 
 impl ForceObjective {
-    fn new(dim: usize, eval: impl FnMut(&[f64]) -> (f64, Vec<f64>) + Send + 'static) -> Self {
+    fn new(
+        dim: usize,
+        target: Option<f64>,
+        eval: impl FnMut(&[f64]) -> (f64, Vec<f64>) + Send + 'static,
+    ) -> Self {
         Self {
             bounds: Bounds::new(
                 Array1::from_elem(dim, -80.0),
@@ -225,6 +238,7 @@ impl ForceObjective {
                 0.0,
             ),
             dim,
+            target,
             eval: Mutex::new(Box::new(eval)),
         }
     }
@@ -240,6 +254,13 @@ impl ForceObjective {
         let (energy, gradient) = (self.eval.lock().expect("engine lock").as_mut())(coordinates);
         if gradient.len() != self.dim || !energy.is_finite() {
             return (f64::NAN, Array1::from_elem(self.dim, f64::NAN));
+        }
+        let call = OBJECTIVE_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
+        if self
+            .target
+            .is_some_and(|target| anneal_core::energy_hits(energy, target, 0.0))
+        {
+            let _ = FIRST_HIT_CALL.compare_exchange(0, call, Ordering::Relaxed, Ordering::Relaxed);
         }
         (energy, Array1::from_vec(gradient))
     }
@@ -432,6 +453,16 @@ fn main() {
     let budget: usize = args.get(1).and_then(|v| v.parse().ok()).expect("budget");
     let seed: u64 = args.get(2).and_then(|v| v.parse().ok()).expect("seed");
     let outdir = PathBuf::from(args.get(3).expect("outdir"));
+    // Optional stop, already the reference plus the tolerance, in eV.
+    // The preset itself is unchanged: the threshold sits on the ledger.
+    let target_energy = args
+        .get(4)
+        .map(|v| v.parse::<f64>().expect("target_energy"))
+        .or_else(|| {
+            std::env::var("H2O_TARGET_EV")
+                .ok()
+                .map(|v| v.parse::<f64>().expect("H2O_TARGET_EV"))
+        });
     let system = systems()
         .iter()
         .find(|system| system.name == name)
@@ -495,6 +526,10 @@ fn main() {
     writeln!(meta, "molecules: {}", built.groups.len()).ok();
     writeln!(meta, "seed: {seed}").ok();
     writeln!(meta, "budget: {budget}").ok();
+    match target_energy {
+        Some(energy) => writeln!(meta, "target_energy_eV: {energy:.10}").ok(),
+        None => writeln!(meta, "target_energy_eV: off").ok(),
+    };
     writeln!(meta, "spread_steps: {spread_steps}").ok();
     writeln!(meta, "start_intact: {intact}").ok();
     writeln!(meta, "crate: {}", env!("CARGO_PKG_VERSION")).ok();
@@ -511,7 +546,7 @@ fn main() {
     let timed_calls = Arc::new(AtomicU64::new(0));
     let pot_ns_eval = Arc::clone(&pot_ns);
     let timed_calls_eval = Arc::clone(&timed_calls);
-    let objective = ForceObjective::new(3 * atmnrs.len(), move |coordinates| {
+    let objective = ForceObjective::new(3 * atmnrs.len(), target_energy, move |coordinates| {
         let started = Instant::now();
         let (energy, gradient) = pot
             .wrapper()
@@ -528,6 +563,9 @@ fn main() {
 
     let tolerance = component_gradient_tolerance(3 * atmnrs.len()).expect("polish tolerance");
     let mut ledger = Ledger::new(budget);
+    if let Some(energy) = target_energy {
+        ledger.stop_below(energy);
+    }
     let wall = Instant::now();
     let searched = search_from(&objective, &cfg, &mut ledger, start.view(), seed);
     let polished_from = ledger
@@ -538,12 +576,18 @@ fn main() {
     let polish_calls = ledger.answer_polish_calls();
     let wall_s = wall.elapsed().as_secs_f64();
     let spent = ledger.spent();
+    let first_hit_call = FIRST_HIT_CALL.load(Ordering::Relaxed);
     let pot_s = pot_ns.load(Ordering::Relaxed) as f64 / 1.0e9;
     let calls_timed = timed_calls.load(Ordering::Relaxed);
     let outside_s = (wall_s - pot_s).max(0.0);
     writeln!(meta, "wall_s: {wall_s:.6}").ok();
     writeln!(meta, "energy_calls: {spent}").ok();
     writeln!(meta, "timed_calls: {calls_timed}").ok();
+    if first_hit_call > 0 {
+        writeln!(meta, "first_hit_call: {first_hit_call}").ok();
+    } else {
+        writeln!(meta, "first_hit_call: none").ok();
+    }
     writeln!(meta, "pot_s: {pot_s:.6}").ok();
     writeln!(meta, "outside_s: {outside_s:.6}").ok();
     if calls_timed > 0 {
@@ -563,6 +607,7 @@ fn main() {
         Ok(pair) => pair,
         Err(error) => {
             writeln!(meta, "search_error: {error}").ok();
+            writeln!(meta, "stop: search_error").ok();
             writeln!(meta, "best_intact: false").ok();
             write_xyz(
                 &outdir.join("best.xyz"),
@@ -581,6 +626,10 @@ fn main() {
     }
     writeln!(meta, "hops: {}", outcome.hops).ok();
     writeln!(meta, "basins: {}", outcome.basins).ok();
+    match outcome.stop.as_ref() {
+        Some(stop) => writeln!(meta, "stop: {}", stop.code()).ok(),
+        None => writeln!(meta, "stop: none").ok(),
+    };
     writeln!(meta, "quenches_converged: {}", stats.converged).ok();
     writeln!(meta, "quenches_capped: {}", stats.capped).ok();
     writeln!(meta, "objective_best_eV: {:.10}", outcome.best).ok();
