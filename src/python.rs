@@ -3749,7 +3749,7 @@ fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>
     seed: u64,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::archive_search::{Archive, archive_search};
-    use crate::methods::cluster_hopping::random_cluster_in_radius;
+    use crate::methods::cluster_hopping::search_start;
     use crate::methods::cluster_search::{RelaxStats, warm_relax};
     use eindir_core::gradient::Gradient;
     use rand::SeedableRng;
@@ -3766,12 +3766,7 @@ fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>
             Some(Gradient::grad(obj, x))
         };
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-        let start = random_cluster_in_radius(
-            cfg.n_points,
-            cfg.start_radius(),
-            cfg.min_separation,
-            &mut rng,
-        );
+        let start = search_start(cfg, &mut rng);
         let mut archive = Archive::new();
         archive_search(
             cfg,

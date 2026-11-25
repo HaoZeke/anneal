@@ -391,6 +391,33 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert out["floors"] >= 1
 
 
+@pytest.mark.parametrize("n", [13, 38, 75])
+def test_ras_true_starts_where_the_normal_search_starts(n):
+    from anneal._core import cluster_search as core_cluster_search
+
+    seed = 5
+    cfg = Config.recommended(n)
+    start = np.asarray(cfg.search_start(seed))
+    assert start.shape == (3 * n,)
+    assert cfg.liquid_start_radius() == cfg.liquid_start_radius(n)
+    reach = np.linalg.norm(start.reshape(-1, 3), axis=1).max()
+    assert reach <= cfg.liquid_start_radius()
+
+    for kwargs in ({"ras": True}, {"recommended": True}):
+        seen = []
+
+        def energy(x):
+            seen.append(np.array(x, dtype=np.float64).tobytes())
+            return lj_energy(x)
+
+        def grad(x):
+            seen.append(np.array(x, dtype=np.float64).tobytes())
+            return lj_grad(x)
+
+        core_cluster_search(energy, grad, n, 800, seed=seed, **kwargs)
+        assert start.tobytes() in seen, kwargs
+
+
 def flexible_water(x: np.ndarray, molecules: int):
     """Harmonic O-H and H-H springs and an O-O Lennard-Jones term, in eV and angstrom."""
     p = np.asarray(x, dtype=np.float64).reshape(-1, 3)

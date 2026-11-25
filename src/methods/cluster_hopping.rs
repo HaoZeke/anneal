@@ -11805,6 +11805,20 @@ pub fn optimize_with_gradient<'g>(
     run_with_gradient(cfg, start.view(), ledger, relax, grad, &mut rng)
 }
 
+/// The start [`crate::methods::cluster_search::search`] draws for `cfg`.
+///
+/// Rigid bodies get a rigid draw; a point cluster is drawn at liquid density,
+/// see [`Config::scaled_liquid_start`]. Every entry that seeds its own start
+/// for that search, the residual archive search included, draws it here so a
+/// seed gives the same start on each.
+pub fn search_start<R: Rng + ?Sized>(cfg: &Config, rng: &mut R) -> Array1<f64> {
+    if cfg.move_library.is_rigid_body() {
+        random_rigid_cluster(cfg.n_points, cfg.min_separation, rng)
+    } else {
+        cfg.scaled_liquid_start(cfg.n_points, rng)
+    }
+}
+
 /// As [`optimize_with_gradient`], with value and gradient together for
 /// [`Config::hmc`].
 pub fn optimize_with_energy_gradient<'g>(
@@ -11816,11 +11830,7 @@ pub fn optimize_with_energy_gradient<'g>(
     seed: u64,
 ) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = if cfg.move_library.is_rigid_body() {
-        random_rigid_cluster(cfg.n_points, cfg.min_separation, &mut rng)
-    } else {
-        cfg.scaled_liquid_start(cfg.n_points, &mut rng)
-    };
+    let start = search_start(cfg, &mut rng);
     run_with_energy_gradient(
         cfg,
         start.view(),
@@ -16692,6 +16702,38 @@ mod call_floor_tests {
             assert_eq!(s.len(), 12);
             for (ui, si) in u.iter().zip(s.iter()) {
                 assert!((si - 2.0 * ui).abs() < 1.0e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn search_start_is_the_liquid_start_the_search_relaxes_first() {
+        let bits = |x: ArrayView1<f64>| x.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        for n in [13_usize, 38, 75] {
+            let cfg = Config::recommended(n);
+            let radius = cfg.liquid_start_radius(n);
+            for seed in [0_u64, 11] {
+                let start = search_start(&cfg, &mut StdRng::seed_from_u64(seed));
+                let liquid = cfg.scaled_liquid_start(n, &mut StdRng::seed_from_u64(seed));
+                assert_eq!(bits(start.view()), bits(liquid.view()), "n = {n}");
+                let reach = start
+                    .exact_chunks(3)
+                    .into_iter()
+                    .map(|p| p.dot(&p).sqrt())
+                    .fold(0.0_f64, f64::max);
+                assert!(reach <= radius, "n = {n}, seed {seed}: {reach} > {radius}");
+
+                let mut relaxed = Vec::new();
+                let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _: usize| {
+                    let _ = led.charge();
+                    relaxed.push(x.to_owned());
+                    (x.dot(&x), x.to_owned())
+                };
+                let mut ledger = Ledger::new(4);
+                let _ =
+                    optimize_with_energy_gradient(&cfg, &mut ledger, &mut relax, None, None, seed);
+                let first = relaxed.first().expect("the search relaxes its start");
+                assert_eq!(bits(first.view()), bits(start.view()), "n = {n}");
             }
         }
     }

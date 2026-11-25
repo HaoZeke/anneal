@@ -1,6 +1,6 @@
 //! PyO3 wrapper around [`crate::methods::cluster_hopping::Config`].
 
-use numpy::PyReadonlyArray1;
+use numpy::{PyArray1, PyReadonlyArray1};
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyTuple};
@@ -1070,6 +1070,23 @@ impl PyClusterConfig {
     /// Radius of the preset's initial cluster sphere.
     fn start_radius(&self) -> f64 {
         self.inner.start_radius()
+    }
+
+    /// Liquid-density start radius for `n` points, `n_points` when omitted.
+    #[pyo3(signature = (n=None))]
+    fn liquid_start_radius(&self, n: Option<usize>) -> f64 {
+        self.inner
+            .liquid_start_radius(n.unwrap_or(self.inner.n_points))
+    }
+
+    /// The start a seeded search draws, `ras=True` included.
+    fn search_start<'py>(&self, py: Python<'py>, seed: u64) -> Bound<'py, PyArray1<f64>> {
+        use rand::SeedableRng;
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        PyArray1::from_vec(
+            py,
+            crate::methods::cluster_hopping::search_start(&self.inner, &mut rng).to_vec(),
+        )
     }
 
     /// Canonical, versioned JSON for the resolved configuration.
