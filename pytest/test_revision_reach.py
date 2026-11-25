@@ -476,3 +476,10 @@ def test_the_rewritten_tuned_source_builds_the_same_commands(monkeypatch):
             for module in (recorded, current)
         ]
         assert commands[0] == commands[1] and '"$BIN/GMIN"' in commands[0], name
+        runs = [
+            module.anneal_command(module.Cell(name, kind, n, reference, rho, 4_000_000, binary), 2000, 4_000_000)
+            for module in (recorded, current)
+        ]
+        assert runs[0] == runs[1] and f'"$BIN/{binary}"' in runs[0], name
+        inputs = [module.data_shell_file(name, 2000) for module in (recorded, current)]
+        assert inputs[0] == inputs[1] and f"inputs/{name}.data" in inputs[0], name

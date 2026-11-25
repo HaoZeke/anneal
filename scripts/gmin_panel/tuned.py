@@ -453,6 +453,7 @@ def measured_from(fields: dict[str, str], reference: float, budget: int, label: 
 
 
 def run_shell(command: str, log: Path) -> subprocess.CompletedProcess[str]:
+    """Run a command this module built. Never pass it text read from a row."""
     env = os.environ.copy()
     for key in list(env):
         if key.startswith("H2H_") or key.startswith("ANNEAL_"):
@@ -688,6 +689,19 @@ def data_blob(root: Path, name: str) -> str:
     ).stdout.strip()
 
 
+def job_command(table: dict[str, Cell], name: str, code: str, seed: int) -> tuple[Cell, str, str]:
+    """The cell, the input name and the command of one evaluation row, from its system, code and seed."""
+    if code in ("anneal", "gmin") and name in table:
+        cell, data_name = table[name], name
+    elif code in ("gmin_a", "gmin_b") and name.endswith("aa") and name[:-2] in table:
+        cell, data_name = table[name[:-2]], name[:-2]
+    else:
+        raise SystemExit(f"no evaluation command for {name} {code}")
+    if code == "anneal":
+        return cell, data_name, anneal_command(cell, seed, cell.budget)
+    return cell, data_name, gmin_command(cell, seed, cell.budget, data_shell_file(data_name, seed), system=name)
+
+
 def rows_file(args: argparse.Namespace) -> Path:
     if args.rows is not None:
         return args.rows
@@ -710,37 +724,34 @@ def evaluate(args: argparse.Namespace, table: dict[str, Cell], build: dict[str, 
         ["git", "rev-parse", "HEAD"], cwd=args.root, check=True, capture_output=True, text=True
     ).stdout.strip()
     names = [name for name in table if not args.system or name in args.system] if args.eval else []
-    plan: list[tuple[str, Cell, Job, str]] = []
+    plan: list[tuple[str, Job]] = []
     for name in names:
-        cell = table[name]
         for job in abba(EVAL_SEEDS, "anneal", "gmin"):
-            plan.append((name, cell, job, cell.name))
+            plan.append((name, job))
     aa_label = ""
     if args.aa:
         aa_name = aa_cell_name(args)
         aa_label = f"{aa_name}aa"
-        cell = table[aa_name]
         for job in abba(EVAL_SEEDS, "gmin_a", "gmin_b"):
-            plan.append((aa_label, cell, job, aa_name))
-    counts = balance([job for name, _cell, job, _data in plan if name != aa_label])
-    aa_counts = balance([job for name, _cell, job, _data in plan if aa_label and name == aa_label])
+            plan.append((aa_label, job))
+    counts = balance([job for name, job in plan if name != aa_label])
+    aa_counts = balance([job for name, job in plan if aa_label and name == aa_label])
     per_slot = len(EVAL_SEEDS) // 4
     if names and (len(counts) != 8 or set(counts.values()) != {len(names) * per_slot}):
         raise SystemExit(f"ABBA counts {counts}")
     if args.aa and (len(aa_counts) != 8 or set(aa_counts.values()) != {per_slot}):
         raise SystemExit(f"A/A counts {aa_counts}")
-    for name, cell, job, data_name in plan:
+    for name, job in plan:
         code = job.arm
         if (name, code, str(job.seed)) in done:
             print(f"skip {name} {code} {job.seed}", flush=True)
             continue
+        cell, data_name, command = job_command(table, name, code, job.seed)
         budget = cell.budget
         if code == "anneal":
-            command = anneal_command(cell, job.seed, budget)
             binary = build[f"example_{cell.binary}"]
             revision = build["anneal_commit"]
         else:
-            command = gmin_command(cell, job.seed, budget, data_shell_file(data_name, job.seed), system=name)
             binary = build["gmin_binary_sha256"]
             revision = build["gmin_svnrev"]
         print(f"start {name} {code} {job.seed} slot {job.slot} {job.block}", flush=True)
@@ -1054,9 +1065,15 @@ def report(args: argparse.Namespace, table: dict[str, Cell]) -> None:
 
 
 def verify(args: argparse.Namespace, table: dict[str, Cell]) -> None:
+    """Rerun one stored row with the command this module builds for it.
+
+    The row's ``command`` text is never run. It must equal the rebuilt one, and
+    its ``budget`` must be the cell's.
+    """
     if not args.system or len(args.system) != 1 or args.code is None or args.seed is None:
         raise SystemExit("verify needs one --system, --code and --seed")
     system = args.system[0]
+    cell, _data_name, command = job_command(table, system, args.code, args.seed)
     rows = read_rows(args.rows)
     matches = [
         row for row in rows
@@ -1065,17 +1082,15 @@ def verify(args: argparse.Namespace, table: dict[str, Cell]) -> None:
     if not matches:
         raise SystemExit(f"no stored row {system} {args.code} {args.seed}")
     row = matches[-1]
-    command = row["command"]
-    assert_clean(command)
-    proc = run_shell(command, args.logs / "verify" / f"{args.system}-{args.code}-{args.seed}.log")
-    if row["code"] == "anneal":
-        cell = table[row["system"]]
-        fresh = finish_anneal(proc, cell, int(row["seed"]), int(row["budget"]))
+    if row["command"] != command:
+        raise SystemExit(f"stored command of {system} {args.code} {args.seed} is not the one tuned.py builds")
+    if row["budget"] != str(cell.budget):
+        raise SystemExit(f"stored budget {row['budget']} is not {cell.budget}")
+    proc = run_shell(command, args.logs / "verify" / f"{system}-{args.code}-{args.seed}.log")
+    if args.code == "anneal":
+        fresh = finish_anneal(proc, cell, args.seed, cell.budget)
     else:
-        system = row["system"]
-        cell_name = system[:-2] if system.endswith("aa") and system[:-2] in table else system
-        cell = table[cell_name]
-        fresh = finish_gmin(proc, args.work, cell.reference, int(row["budget"]), f"verify {row['system']}")
+        fresh = finish_gmin(proc, args.work, cell.reference, cell.budget, f"verify {system}")
     for key in ("hit", "calls", "calls_to_hit"):
         if fresh[key] != row[key]:
             raise SystemExit(f"verify {key} {fresh[key]} != {row[key]}")
@@ -1221,7 +1236,8 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv[1:])
     table = cell_map(args.root)
     if args.system:
-        unknown = sorted({name for name in args.system if name not in table})
+        known = set(table) | ({f"{name}aa" for name in table} if args.verify else set())
+        unknown = sorted({name for name in args.system if name not in known})
         if unknown:
             raise SystemExit(f"unknown system {', '.join(unknown)}")
     if args.report:
