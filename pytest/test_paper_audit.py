@@ -2,6 +2,7 @@
 """Every paper and benchmark-table number checked by scripts/paper_audit.py
 matches its committed rows, and the audit notices a drifted cell."""
 
+import csv
 import importlib.util
 import math
 import os
@@ -2100,11 +2101,12 @@ def test_openconf_local_revisions_are_read_through_their_aliases(monkeypatch):
 
 
 REPRO_PIN = "9a30f3190b3bb7040c675a904f8388eb68224151"
+REPRO_PIN_REF = "refs/audit/record/repro-pin"
 
 
 def need_origin():
     """The record tests read origin. Off CI an unreachable origin skips them; on CI it fails them."""
-    out = git("ls-remote", "origin", "refs/heads/record/repro-pin")
+    out = git("ls-remote", "origin", REPRO_PIN_REF)
     if out.returncode != 0 or not out.stdout.strip():
         if os.environ.get("CI"):
             pytest.fail(f"origin is unreachable on CI: {out.stderr.strip()}")
@@ -2125,23 +2127,23 @@ def record_drifts():
 
 def test_a_revision_on_a_registered_record_ref_is_reachable(tmp_path, monkeypatch):
     need_origin()
-    assert git("merge-base", "--is-ancestor", REPRO_PIN, "HEAD").returncode == 1
     assert audit_mod.harness_reachable("9a30f319")
+    assert git("merge-base", "--is-ancestor", REPRO_PIN, "HEAD").returncode == 1
     registry(tmp_path, monkeypatch, [])
     assert not audit_mod.harness_reachable("9a30f319")
 
 
 def test_a_revision_on_the_cov_floor2_record_ref_is_reachable(tmp_path, monkeypatch):
     need_origin()
-    assert git("merge-base", "--is-ancestor", "c1c02d1646a7", "HEAD").returncode == 1
     assert audit_mod.harness_reachable("c1c02d1646a7")
+    assert git("merge-base", "--is-ancestor", "c1c02d1646a7", "HEAD").returncode == 1
     registry(tmp_path, monkeypatch, [])
     assert not audit_mod.harness_reachable("c1c02d1646a7")
 
 
 @pytest.mark.parametrize("revision", [SIDE_COMMIT, "b7e90ce985ff"])
 def test_a_revision_on_no_registered_record_ref_is_flagged(revision):
-    # e3ed7dad is on origin/record/bench-sc-h2h-n12, which is not registered;
+    # e3ed7dad is on refs/audit/record/bench-sc-h2h-n12, which is not registered;
     # b7e90ce9 is only on origin/bench/cov-floor2, which is not a record ref.
     need_origin()
     assert audit_mod.commit_of(revision)
@@ -2150,30 +2152,32 @@ def test_a_revision_on_no_registered_record_ref_is_flagged(revision):
 
 def test_a_registry_row_off_origin_is_flagged(tmp_path, monkeypatch):
     need_origin()
+    audit_mod.record_ref_status(audit_mod.RECORD_REFS)
     parent = git("rev-parse", f"{REPRO_PIN}^").stdout.strip()
     tree = git("rev-parse", f"{parent}^{{tree}}").stdout.strip()
-    registry(tmp_path, monkeypatch, [("record/repro-pin", parent, tree)])
-    # The fetch lands on refs/audit/record/fetched, which is the branch tip,
-    # not this parent. A local copy of the parent is not a successful fetch.
+    registry(tmp_path, monkeypatch, [(REPRO_PIN_REF, parent, tree)])
+    # The fetch lands on FETCH_HEAD, which is the audit ref tip, not this
+    # parent. A local copy of the parent is not a successful fetch.
     assert record_drifts() == {
-        f"record/repro-pin is on origin at {parent[:8]}",
-        "record/repro-pin fetches",
+        f"{REPRO_PIN_REF} is on origin at {parent[:8]}",
+        f"{REPRO_PIN_REF} fetches",
     }
     assert not audit_mod.harness_reachable("9a30f319")
 
 
 def test_a_registry_row_with_another_tree_is_flagged(tmp_path, monkeypatch):
     need_origin()
-    registry(tmp_path, monkeypatch, [("record/repro-pin", REPRO_PIN, "0" * 40)])
-    assert record_drifts() == {"record/repro-pin has tree 00000000"}
+    registry(tmp_path, monkeypatch, [(REPRO_PIN_REF, REPRO_PIN, "0" * 40)])
+    assert record_drifts() == {f"{REPRO_PIN_REF} has tree 00000000"}
     assert not audit_mod.harness_reachable("9a30f319")
 
 
 def test_a_registry_row_origin_does_not_hold_is_flagged(tmp_path, monkeypatch):
     need_origin()
-    registry(tmp_path, monkeypatch, [("record/no-such-ref-r184", "1" * 40, "2" * 40)])
-    assert record_drifts() == {"record/no-such-ref-r184 is on origin at 11111111", "record/no-such-ref-r184 fetches",
-                               "record/no-such-ref-r184 has tree 22222222"}
+    missing = "refs/audit/record/no-such-ref-r184"
+    registry(tmp_path, monkeypatch, [(missing, "1" * 40, "2" * 40)])
+    assert record_drifts() == {f"{missing} is on origin at 11111111", f"{missing} fetches",
+                               f"{missing} has tree 22222222"}
 
 
 def test_record_refs_are_not_fetched_unless_asked(tmp_path, monkeypatch):
@@ -2187,15 +2191,16 @@ def test_record_refs_are_not_fetched_unless_asked(tmp_path, monkeypatch):
     monkeypatch.setattr(audit_mod, "git", wrapped)
     monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", False)
     audit_mod._record_ref_status.cache_clear()
-    audit_mod.origin_record_heads.cache_clear()
-    registry(tmp_path, monkeypatch, [("record/repro-pin", REPRO_PIN, "0" * 40)])
-    assert "record/repro-pin fetches" in record_drifts()
-    assert "record/repro-pin is on origin at " + REPRO_PIN[:8] in record_drifts()
+    audit_mod.origin_audit_record_refs.cache_clear()
+    registry(tmp_path, monkeypatch, [(REPRO_PIN_REF, REPRO_PIN, "0" * 40)])
+    assert f"{REPRO_PIN_REF} fetches" in record_drifts()
+    assert f"{REPRO_PIN_REF} is on origin at " + REPRO_PIN[:8] in record_drifts()
     assert not any(args and args[0] in {"fetch", "ls-remote"} for args in calls)
 
 
-def test_a_record_ref_is_fetched_into_the_audit_namespace(tmp_path, monkeypatch):
+def test_a_record_ref_is_fetched_by_its_audit_ref(tmp_path, monkeypatch):
     need_origin()
+    audit_mod.record_ref_status(audit_mod.RECORD_REFS)
     seen = []
     real = audit_mod.git
 
@@ -2206,13 +2211,13 @@ def test_a_record_ref_is_fetched_into_the_audit_namespace(tmp_path, monkeypatch)
     monkeypatch.setattr(audit_mod, "git", wrapped)
     monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", True)
     audit_mod._record_ref_status.cache_clear()
+    audit_mod.origin_audit_record_refs.cache_clear()
     tree = git("rev-parse", f"{REPRO_PIN}^{{tree}}").stdout.strip()
-    registry(tmp_path, monkeypatch, [("record/repro-pin", REPRO_PIN, tree)])
+    registry(tmp_path, monkeypatch, [(REPRO_PIN_REF, REPRO_PIN, tree)])
     assert record_drifts() == set()
     fetches = [args for args in seen if args and args[0] == "fetch"]
-    assert len(fetches) == 1
-    assert fetches[0][-1] == "+refs/heads/record/repro-pin:refs/audit/record/fetched"
-    assert fetches[0][-2] == "--"
+    assert fetches == [("fetch", "--quiet", "--no-tags", "origin", REPRO_PIN_REF)]
+    assert not any("refs/heads/" in arg for args in seen for arg in args)
 
 
 def test_the_gmin_record_is_fetched_by_its_ref(tmp_path, monkeypatch):
@@ -2227,7 +2232,6 @@ def test_the_gmin_record_is_fetched_by_its_ref(tmp_path, monkeypatch):
     monkeypatch.setattr(audit_mod, "git", wrapped)
     monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", True)
     audit_mod._record_ref_status.cache_clear()
-    audit_mod.origin_record_heads.cache_clear()
     audit_mod.origin_audit_record_refs.cache_clear()
     registry(tmp_path, monkeypatch, [(audit_mod.GMIN_RECORD_REF, audit_mod.GMIN_RECORD_SHA, audit_mod.GMIN_RECORD_TREE)])
     assert record_drifts() == set()
@@ -2249,16 +2253,69 @@ def test_a_record_ref_cannot_choose_its_fetch_destination(tmp_path, monkeypatch)
     monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", True)
     audit_mod._record_ref_status.cache_clear()
     for ref in (
-        "record/repro-pin:refs/heads/main",
-        "record/../main",
+        "refs/audit/record/repro-pin:refs/heads/main",
+        "refs/audit/record/../main",
         "--upload-pack=touch",
-        "record/repro-pin.lock",
+        "refs/audit/record/repro-pin.lock",
+        "refs/audit/record/repro-pin.",
     ):
         calls.clear()
         registry(tmp_path, monkeypatch, [(ref, REPRO_PIN, "0" * 40)])
         audit_mod._record_ref_status.cache_clear()
         assert f"{ref} is a record ref with a full SHA" in record_drifts()
         assert not any(args and args[0] == "fetch" for args in calls)
+
+
+def test_branch_form_record_refs_are_rejected(tmp_path, monkeypatch):
+    calls = []
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", True)
+    for ref, sha, tree in (
+        ("record/repro-pin", REPRO_PIN, "4cf101da6fe8f4d1069f5cb472413bd7e232d69c"),
+        ("refs/heads/record/repro-pin", REPRO_PIN, "4cf101da6fe8f4d1069f5cb472413bd7e232d69c"),
+        ("record/sc-h2h-harness", "d59b0b6cf02fc300ff618f79d65da365128eed5a", "16f50956905ca7fc7f51459ef36fb336eebb1d1b"),
+        ("refs/heads/record/sc-h2h-harness", "d59b0b6cf02fc300ff618f79d65da365128eed5a", "16f50956905ca7fc7f51459ef36fb336eebb1d1b"),
+        ("record/cov-floor2-si13", "c1c02d1646a71267e0f6c02cfcfcc07d5b88d9b4", "0991c54d8dfbc8bfa2d0ff8847f0a004649f3e9a"),
+        ("refs/heads/record/cov-floor2-si13", "c1c02d1646a71267e0f6c02cfcfcc07d5b88d9b4", "0991c54d8dfbc8bfa2d0ff8847f0a004649f3e9a"),
+    ):
+        calls.clear()
+        registry(tmp_path, monkeypatch, [(ref, sha, tree)])
+        audit_mod._record_ref_status.cache_clear()
+        assert f"{ref} is a record ref with a full SHA" in record_drifts()
+        assert not any(args and args[0] == "fetch" for args in calls)
+        assert not audit_mod.harness_reachable(sha)
+
+
+def test_committed_record_refs_use_only_audit_refs():
+    with (ROOT / audit_mod.RECORD_REFS).open(newline="") as handle:
+        rows = list(csv.DictReader(line for line in handle if not line.startswith("#")))
+    assert rows
+    refs = [row["ref"].strip() for row in rows]
+    for ref in refs:
+        assert audit_mod.audit_record_ref_name(ref), f"record-refs row must use refs/audit/record/<name>: {ref}"
+        assert not ref.startswith(("record/", "refs/heads/"))
+    assert {
+        "refs/audit/record/repro-pin",
+        "refs/audit/record/sc-h2h-harness",
+        "refs/audit/record/cov-floor2-si13",
+        audit_mod.GMIN_RECORD_REF,
+    } <= set(refs)
+
+
+def test_provenance_record_check_uses_verified_audit_refs(tmp_path, monkeypatch):
+    need_origin()
+    commit = "9178884ee114e60dd597fb5a970edbda648979f8"
+    assert audit_mod._commit_on_provenance_ref("record/outside-perf3-r2", commit)
+    assert audit_mod._commit_on_provenance_ref("refs/audit/record/leave-lj75", "666591a0")
+    registry(tmp_path, monkeypatch, [])
+    assert not audit_mod._commit_on_provenance_ref("record/outside-perf3-r2", commit)
+    assert not audit_mod._commit_on_provenance_ref("refs/audit/record/leave-lj75", "666591a0")
 
 
 def test_a_registry_row_that_is_not_a_record_ref_is_flagged(tmp_path, monkeypatch):
@@ -2804,7 +2861,7 @@ def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_pa
     run_git("update-ref", "refs/remotes/origin/topic/unnamed", unnamed)
 
     monkeypatch.setattr(audit_mod, "ROOT", repo)
-    optional_ref = "refs/remotes/origin/record/repro-pin"
+    optional_ref = "refs/remotes/origin/bench/cov-floor2"
 
     def index():
         return audit_mod.RevisionIndex((root, optional, unnamed), (), (), ())
