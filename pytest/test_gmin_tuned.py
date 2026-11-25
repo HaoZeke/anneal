@@ -6,6 +6,7 @@ import argparse
 import csv
 import hashlib
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -253,6 +254,32 @@ def test_the_anneal_arm_needs_the_clean_recorded_checkout(repo):
         tuned.check_anneal_tree(repo, commit)
     with pytest.raises(SystemExit, match="needs --anneal"):
         tuned.check_anneal_tree(None, commit)
+
+
+def test_the_entry_script_passes_its_paths_to_tuned_as_words(tmp_path):
+    text = (ROOT / "scripts" / "gmin_panel" / "enter_tuned.sh").read_text()
+    block = text[text.index("user_name=$(id -un)"):text.index('chmod +x "$WORK/inside.sh"')]
+    work = tmp_path / "w $(touch pwned) `touch pwned2`; x"
+    work.mkdir()
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    (fake / "taskset").write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$OUT"\n')
+    (fake / "taskset").chmod(0o755)
+    env = {**os.environ, "WORK": str(work), "ROOT": str(work), "HERE": str(work)}
+    subprocess.run(["bash", "-c", "set -eu\n" + block], env=env, cwd=tmp_path, check=True)
+    out = tmp_path / "args"
+    subprocess.run(
+        ["bash", str(work / "inside.sh"), "--report"],
+        env={**os.environ, "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}", "OUT": str(out)},
+        cwd=tmp_path, check=True,
+    )
+    assert out.read_text().splitlines() == [
+        "-c", "0", "/usr/bin/python3", "-u", f"{work}/tuned.py",
+        "--root", str(work), "--bin", f"{work}/bin", "--anneal", f"{work}/anneal-src",
+        "--work", f"{work}/runs/current", "--logs", f"{work}/logs", "--build", f"{work}/build-record.txt",
+        "--report",
+    ]
+    assert not list(tmp_path.rglob("pwned*"))
 
 
 def test_verify_takes_a_noise_label_and_rejects_an_unknown_code():

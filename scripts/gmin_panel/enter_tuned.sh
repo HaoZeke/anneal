@@ -28,20 +28,20 @@ if [[ -n "$(git -C "$WORK/anneal-src" status --porcelain)" ]]; then
   exit 1
 fi
 
-if [[ ! -x $WORK/bin/h2h_gmin_proof || ! -x $WORK/bin/h2h_seed ]]; then
-  mkdir -p "$WORK/rustc-tmp"
-  cargo_home=${CARGO_HOME:-$HOME/.cargo}
-  (
-    cd "$WORK/anneal-src"
-    CARGO_TARGET_DIR="$WORK/target" TMPDIR="$WORK/rustc-tmp" \
-      RUSTFLAGS="--remap-path-prefix=${WORK}/anneal-src=/src --remap-path-prefix=${HOME}=/user --remap-path-prefix=${cargo_home}=/cargo" \
-      cargo +1.88.0 build --release --locked \
-        --example h2h_gmin_proof --example h2h_morse --example h2h_metal --example h2h_seed -j 4
-  )
-  for example in h2h_gmin_proof h2h_morse h2h_metal h2h_seed; do
-    cp -a "$WORK/target/release/examples/$example" "$WORK/bin/"
-  done
-fi
+# The build record names $BASE as anneal_commit, so the examples are built
+# from it on every entry. Cargo rebuilds nothing when they are current.
+mkdir -p "$WORK/rustc-tmp"
+cargo_home=${CARGO_HOME:-$HOME/.cargo}
+(
+  cd "$WORK/anneal-src"
+  CARGO_TARGET_DIR="$WORK/target" TMPDIR="$WORK/rustc-tmp" \
+    RUSTFLAGS="--remap-path-prefix=${WORK}/anneal-src=/src --remap-path-prefix=${HOME}=/user --remap-path-prefix=${cargo_home}=/cargo" \
+    cargo +1.88.0 build --release --locked \
+      --example h2h_gmin_proof --example h2h_morse --example h2h_metal --example h2h_seed -j 4
+)
+for example in h2h_gmin_proof h2h_morse h2h_metal h2h_seed; do
+  cp -a "$WORK/target/release/examples/$example" "$WORK/bin/"
+done
 
 {
   echo "gmin_svnrev=$EXPECT"
@@ -60,31 +60,35 @@ fi
 cp -f "$WORK/build-record.txt" "$ROOT/bench/gmin-tuned/build.txt"
 
 user_name=$(id -un)
+# Paths reach inside.sh as quoted words, never as shell text.
+q() { printf '%q' "$1"; }
 cat > "$WORK/inside.sh" << EOF
 #!/bin/bash
 set -eu
-export HOME=$WORK/home
-export TMPDIR=$WORK/scratch
-export BIN=$WORK/bin
-export ANNEAL=$WORK/anneal-src
-export ROOT=$ROOT
-export WORK=$WORK/runs/current
+export HOME=$(q "$WORK/home")
+export TMPDIR=$(q "$WORK/scratch")
+export BIN=$(q "$WORK/bin")
+export ANNEAL=$(q "$WORK/anneal-src")
+export ROOT=$(q "$ROOT")
+export WORK=$(q "$WORK/runs/current")
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 RAYON_NUM_THREADS=1
 export BLIS_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 VECLIB_MAXIMUM_THREADS=1 NUMBA_NUM_THREADS=1
 export OMP_THREAD_LIMIT=1 GOTO_NUM_THREADS=1 MKL_DOMAIN_NUM_THREADS=1
 export OMP_DYNAMIC=FALSE MKL_DYNAMIC=FALSE OPENBLAS_DYNAMIC=FALSE
 mkdir -p "\$WORK"
 cd "\$ROOT"
-exec taskset -c 0 /usr/bin/python3 -u $HERE/tuned.py \\
+exec taskset -c 0 /usr/bin/python3 -u $(q "$HERE/tuned.py") \\
   --root "\$ROOT" \\
   --bin "\$BIN" \\
   --anneal "\$ANNEAL" \\
   --work "\$WORK" \\
-  --logs $WORK/logs \\
-  --build $WORK/build-record.txt \\
+  --logs $(q "$WORK/logs") \\
+  --build $(q "$WORK/build-record.txt") \\
   "\$@"
 EOF
 chmod +x "$WORK/inside.sh"
 
+# The sh -c text is fixed. The user, the script and the arguments are its operands.
 exec sudo -n unshare --uts sh -c \
-  "hostname bench; exec sudo -u ${user_name} $WORK/inside.sh \"\$@\"" _ "$@"
+  'hostname bench; user=$1; script=$2; shift 2; exec sudo -u "$user" "$script" "$@"' \
+  _ "$user_name" "$WORK/inside.sh" "$@"
