@@ -55,10 +55,11 @@ while the search state is alive. One charge is one oracle evaluation.
 An energy and a gradient returned together count as one. Separate
 energy and gradient calls count as two. `charged` is the sum of the
 named counters: screen, full, check, closure, quench, settle, lattice,
-reoccupy and probe. The anneal driver still receives the search-point
-budget. The recorded budget column stays twice that figure, which is
-the older callback allowance. A molecular first-hit count comes from
-the first matching trace minimum in this same charge unit. A hit
+reoccupy and probe. The anneal driver receives that search budget.
+The recorded budget column is the same number, in oracle units, so a
+miss is censored at one past the oracle allowance. A molecular
+first-hit count comes from the first matching trace minimum in this
+same charge unit. A hit
 without a trace count, or a charged or first-hit count above the
 recorded budget, fails the gate.
 

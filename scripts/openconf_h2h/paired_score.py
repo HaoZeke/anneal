@@ -28,10 +28,12 @@ anneal against develop in ``--versus-develop``.
 together are one evaluation. Separate energy and gradient calls are two.
 An anneal job records that count as ``oracle_calls``. Openconf requests
 energy and gradient separately, so its count stays ``energy_calls +
-grad_calls``. ``budget`` retains the anneal driver's search-point budget
-for old rows; ``call_budget`` is twice that search budget. A legacy
-``job.json`` with no ``oracle_calls`` is still scored as ``energy_calls +
-grad_calls``. A ``charged_calls`` field is not that count.
+grad_calls``. ``budget`` retains the anneal driver's search budget.
+When ``oracle_calls`` is present that budget is already in oracle units,
+so ``call_budget`` equals it. A legacy ``job.json`` with no
+``oracle_calls`` is still scored as ``energy_calls + grad_calls``, and
+its allowance stays twice the search-point budget. A ``charged_calls``
+field is not that count.
 """
 
 from __future__ import annotations
@@ -146,8 +148,17 @@ def required_charged_calls(info: dict) -> int:
 
 
 def call_budget(info: dict, calls: int) -> int:
-    """Potential-call allowance, migrated from the paired search budget."""
-    if info.get("call_budget") is not None:
+    """Allowance in the same unit as ``calls``.
+
+    A job that records ``oracle_calls`` is in oracle units, including
+    when that count is zero. Its allowance is the search budget. A
+    stored allowance of twice the budget is the older separate-call
+    unit and is not used for that job. A legacy job with only
+    ``budget`` keeps twice that figure.
+    """
+    if info.get("oracle_calls") is not None and info.get("budget") is not None:
+        value = int(info["budget"])
+    elif info.get("call_budget") is not None:
         value = int(info["call_budget"])
     elif info.get("budget") is not None:
         value = 2 * int(info["budget"])

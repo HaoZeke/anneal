@@ -212,6 +212,39 @@ def test_paired_calls_charge_every_energy_and_gradient_evaluation():
     assert paired_score.required_charged_calls({**counts, "oracle_calls": 4}) == 4
     assert paired_score.call_budget({"budget": 5}, 10) == 10
     assert paired_score.call_budget({}, 10) == 10
+    assert paired_score.call_budget(
+        {"budget": 5, "oracle_calls": 4, "call_budget": 10}, 4
+    ) == 5
+    assert paired_score.call_budget({"budget": 0, "oracle_calls": 0}, 0) == 0
+    assert paired_score.call_budget({"call_budget": 0}, 4) == 0
+
+
+def test_a_missing_ledger_uses_the_harvest_count():
+    assert h2h_job.oracle_calls_of({}, 4) == 4
+    assert h2h_job.oracle_calls_of({"ledger": None}, 4) == 4
+    assert h2h_job.oracle_calls_of({"ledger": {}}, 4) == 4
+    assert h2h_job.oracle_calls_of({"best_energy": -1.0}, 4) == 4
+    assert h2h_job.oracle_calls_of({"ledger": {"spent": 0}}, 4) == 0
+    assert h2h_job.oracle_calls_of({"ledger": {"spent": 9}}, 4) == 9
+
+
+def test_a_spent_of_zero_is_not_read_as_missing():
+    assert RUN_GATE.charged_from_ledger({"spent": 0}, {"oracle_calls": 7}) == 0
+    assert RUN_GATE.charged_from_ledger({}, {"oracle_calls": 7}) == 7
+    assert RUN_GATE.charged_from_ledger({"spent": 0}, {"oracle_calls": 0}) == 0
+    assert RUN_GATE.charged_from_ledger({}, {}) == 0
+
+
+def test_a_miss_is_censored_one_past_the_oracle_budget():
+    assert RUN_GATE.recorded_budget(40) == 40
+    sample = rows()
+    for row in sample:
+        if row["arm"] == "B":
+            row["hit"] = "0"
+            row["calls_to_hit"] = ""
+            row["budget"] = str(RUN_GATE.recorded_budget(40))
+    missed = next(row for row in sample if row["arm"] == "B")
+    assert ANALYZE.calls_scored(missed) == 41.0
 
 
 def test_paired_calls_require_raw_counter_columns():

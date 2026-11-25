@@ -48,6 +48,21 @@ def charged_value_gradient_calls(counts: dict) -> int:
     return energy + gradient
 
 
+def oracle_calls_of(result: dict, harvest_calls: int) -> int:
+    """Oracle evaluations for one anneal or develop run.
+
+    A ledger ``spent`` of zero is present. A develop search has no
+    ledger, so the count is ``harvest_calls``: a together return is one
+    evaluation, the same unit as ``spent``. ``energy_calls + grad_calls``
+    is about twice that and is not the fallback.
+    """
+    ledger = result.get("ledger") if isinstance(result.get("ledger"), dict) else None
+    spent = None if ledger is None else ledger.get("spent")
+    if spent is None:
+        return int(harvest_calls)
+    return int(spent)
+
+
 class Harvest:
     """Keeps the lowest sub-gate point of each run of sub-gate evaluations.
 
@@ -163,15 +178,16 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
         found.append(harvest.calls)
     hc.write_xyz(out / "candidates.xyz", hc.symbols(mol), frames)
     write_trace(out / "trace.xyz", hc.symbols(mol), [(x, e, c) for (x, e), c in zip(frames, found, strict=True)])
+    oracle_calls = oracle_calls_of(result, harvest.calls)
     return {
         "callback_calls": harvest.callbacks,
-        "oracle_calls": None if error else int(result["ledger"]["spent"]),
+        "oracle_calls": oracle_calls,
         "error": error,
         "wall_s": wall,
         **counts,
         "charged_calls": charged_value_gradient_calls(counts),
         "budget": budget,
-        "call_budget": 2 * budget,
+        "call_budget": budget,
         "hops": result.get("hops"),
         "accepted": result.get("accepted"),
         "ledger": result.get("ledger"),

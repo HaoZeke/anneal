@@ -7,10 +7,11 @@ guard and pins record for the same two anneal revisions. Every number
 below is read from `rows.csv`, `panel.tsv`, `paired.tsv`,
 `local_step.csv`, `guard.csv`, `rescore.tsv` or `pins.txt`.
 
-The series changes no search behaviour (see "What the series changes"),
-so the question this panel asks of it is whether anything moved. Nothing
-did in the outcomes; the only difference measured is a small one in
-time.
+The measured series changes no search behaviour (see "What the series
+changes"), so the question this panel asks of it is whether anything
+moved. Nothing did in the outcomes; the only difference measured is a
+small one in time. Naming each charge was added after that measurement
+and is not part of these rows.
 
 ## Revisions and host
 
@@ -83,13 +84,18 @@ time.
   them. The committed `budget` column is the legacy search-point budget,
   not the potential-call unit used by `calls`; for 915/openconf/2048 it
   is 20066 while the paired allowance is 40132 potential calls. Current
-  rescoring adds `call_budget` and derives it as twice the search budget
-  from old `job.json` files. A file with no `oracle_calls` is still
-  scored as `energy_calls + grad_calls`. A new anneal job records
-  `oracle_calls` from the ledger, one per oracle evaluation, and that
-  value is the score.
-  `charged_calls` is not used. The committed `calls` and `calls_to_hit`
-  columns were not rewritten.
+  rescoring adds `call_budget`. An old `job.json` with no `oracle_calls`
+  derives that allowance as twice the search budget, and is still scored
+  as `energy_calls + grad_calls`. A new anneal job records `oracle_calls`
+  from the ledger, one per oracle evaluation. Its `call_budget` equals
+  the search budget, and that oracle count is the score. The committed
+  rows are not rewritten.
+  `charged_calls` is written and is not the score. A develop run has no
+  ledger, so a new job records `oracle_calls` from the harvest count: a
+  together return is one evaluation, the same unit as an anneal ledger.
+  `energy_calls + grad_calls` would put the per-call time on a different
+  unit. The committed `calls` and `calls_to_hit` columns were not
+  rewritten.
 - `rows.csv` was scored by `scripts/openconf_h2h/paired_score.py` after
   every candidate was polished; `hit` is its strict test (heavy-atom
   RMSD below 0.25 A and energy within 0.5 kcal/mol of the reference)
@@ -107,13 +113,15 @@ time.
 
 ## What the series changes
 
-It adds a test that pins which double bonds the torsion move leaves
-alone, a `ledger` entry in the Python search result, a mirror-aware hit
-score that respects stereo, the host label above and a paired-statistics
-script. The `ledger` is assembled in `src/python.rs` after the search has
-ended, from counters the search already keeps; nothing in the search
-loop changes, which the panel and the guard both confirm below. No tuned
-constant is introduced.
+The measured revisions add a test that pins which double bonds the
+torsion move leaves alone, a `ledger` entry in the Python search
+result, a mirror-aware hit score that respects stereo, the host label
+above and a paired-statistics script. At those revisions the ledger
+was read after the search from counters the search already kept, and
+the panel and the guard below confirm the outcomes did not move. A
+later change records each charge under a name inside the search loop.
+`spent` still equals the sum of those names. No tuned constant is
+introduced.
 
 ## Panel
 

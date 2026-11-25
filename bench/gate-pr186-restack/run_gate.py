@@ -382,7 +382,7 @@ def run_molecule(args, job: dict, budget: int, ident: str, journal: Path, arm_me
                 "slot": job["slot"],
                 "index": job["index"],
                 "core": affinity(),
-                "budget": 2 * budget,
+                "budget": recorded_budget(budget),
                 "search_budget": budget,
                 "callback_calls": 0,
                 "calls_to_hit": None,
@@ -420,6 +420,27 @@ def rss_anon_kb() -> int:
         if line.startswith("RssAnon:"):
             return int(line.split()[1])
     return 0
+
+
+def charged_from_ledger(ledger, info: dict) -> int:
+    """Oracle charges. A spent count of zero is present, not missing."""
+    if not isinstance(ledger, dict):
+        ledger = {}
+    spent = ledger.get("spent")
+    if spent is None:
+        spent = info.get("oracle_calls")
+    if spent is None:
+        return 0
+    return int(spent)
+
+
+def recorded_budget(search_budget: int) -> int:
+    """Call budget in oracle units.
+
+    One charge is one oracle evaluation, so this equals the search
+    budget. A miss is censored at this value.
+    """
+    return int(search_budget)
 
 
 def worker_molecule(args) -> int:
@@ -481,7 +502,7 @@ def worker_molecule(args) -> int:
     ledger = info.get("ledger") or {}
     # One unit: a together energy-and-gradient return is one charge.
     # The raw callback total stays in callback_calls.
-    charged = int(ledger.get("spent") or info.get("oracle_calls") or 0)
+    charged = charged_from_ledger(ledger, info)
     callback_calls = int(info.get("callback_calls") or (energy_calls + grad_calls))
     raw_error = info.get("error") or error or ""
     if raw_error and not error:
@@ -500,7 +521,7 @@ def worker_molecule(args) -> int:
         "slot": args.slot,
         "index": args.index,
         "core": affinity(),
-        "budget": 2 * args.budget,
+        "budget": recorded_budget(args.budget),
         "search_budget": args.budget,
         "callback_calls": callback_calls,
         "calls_to_hit": None,
