@@ -241,6 +241,16 @@ The TIP4P rows of the GMIN comparison were recorded by revision
 \texttt{\seqsplit{e1a69a57a8dda1b44fdde9413ae31e3fc3af1889}}, an ancestor
 of the submitted revision.
 
+The rows of this code in the CREST table are not at revisions in the
+history of the submitted revision.
+The water hexamer rows are revision
+\texttt{\seqsplit{723b7c23bbb31a076a559e3ac7f4f91be9e36e1e}}, outside that
+history.
+The Si\(_{10}\) and C\(_{20}\) rows name \texttt{f3d6a050} and
+\texttt{5351f272}, local builds that are not commits of the repository.
+The C\(_{10}\) rows and the ammonia octamer rows name no revision.
+Section~\ref{sec:si-crest} names the record of each row.
+
 \section{Earlier template-assisted revision}
 \label{sec:si-template-era}
 Table~\ref{tab:si-template-era} pairs the archived rows of this code from the
@@ -691,6 +701,84 @@ last five priors; the builders are parameterized by the atom count and a
 nearest-neighbor length and hold no coordinate table for one cluster.
 Section~\msref{sec:knockouts} tests the removal.
 
+\section{Protocol of the CREST comparison}
+\label{sec:si-crest}
+CREST 3.0.2 runs GFN2-xTB through its legacy xtb driver, and this code runs
+it through the xtb engine of rgpot; both arms count energy and gradient
+calls.
+CREST takes no seed, so its dynamics are not paired with those of this code.
+A pair of Table~\msref{tab:crest} is kept only when the budget of this code
+is at least the median calls of the complete CREST runs.
+An aborted CREST run, which made no call, is dropped from its pair.
+\path{paper/jctc/scripts/crest_table.py} writes the table from the rows
+named below.
+
+\emph{Water hexamer.}
+\path{scripts/crest_equal/run_panel.py} wrote \path{bench/crest-equal/rows.csv}
+on seeds 2000--2011, on one core of host \texttt{bench}.
+The seed picks the start geometry, which the arms share.
+This code runs at revision \texttt{723b7c23} with a budget of 4000 calls and
+is charged 3021 on every seed.
+CREST runs \texttt{-mquick} at a length of 0.90~ps and is charged 2510 to
+3531 calls.
+A CREST row is charged the calls the driver served; the driver ceiling was
+50000 calls, so the 4000 in the budget column of the CREST rows is a label.
+A hit is a \texttt{vtight} polish within \(10^{-7}\)~Eh of the prism
+reference, and seed 2001 of this code, whose polish did not converge, is a
+miss.
+Revision \texttt{723b7c23} contains commit \texttt{acf5f0aa}, which flipped
+the sign of the GFN2-xTB gradient before commit \texttt{94a37da7}, and the
+CREST wrapper at that revision negated the gradient it served, so the 1 of
+12 is the hit count on that reversed GFN2 slope and the 4 of 12 is the hit
+count on the GFN2 slope the wrapper put back, and the rows do not show
+whether reversing the O-H wall slope in the served file changed the 4 of 12.
+A CREST arm at 0.11~ps, the shortest length that finished, has a median of
+916.5 calls and hits 0 of 12 (\(p=1\) against this code); the table prints
+the 0.90~ps arm, whose calls are nearest those of this code.
+
+\emph{Ammonia octamer.}
+The rows are in \path{bench/nh3-octamer/}, seeds 17000--17005, serial on
+host \texttt{bench}.
+CREST runs on native xtb, and its rows are the \texttt{v4} rows of
+\path{results.csv}.
+The rows of this code are those of \path{ladder.csv} at the calls of each
+seed's CREST run, with the molecular preset; where a seed has two such rows,
+the later one is used.
+A hit is within \(10^{-6}\)~Eh of \(-35.470769324714\)~Eh, the lowest intact
+energy either arm found.
+The ladder rows name no revision.
+
+\emph{Carbon and silicon clusters.}
+The rows are in \path{bench/covalent-h2h/gfn2/}, at an electronic
+temperature of 3000~K.
+CREST runs \texttt{-{}-gfn2 -T 1 -{}-legacy -notopo -nocross -shake 0
+-tstep 2} from the start after one xtb optimization of it.
+This code runs the general configuration of
+\path{examples/h2h_covalent.rs} at \(10^{5}\) calls and stops at the
+reference.
+A hit is within \(10^{-3}\)~eV of the lowest minimum any run reached.
+On C\(_{10}\) both arms are the rows of \path{seeds.csv}, which name no
+revision.
+On Si\(_{10}\) the rows of this code are those of \path{rows.csv} at
+revision \texttt{f3d6a050}, run again beside the CREST runs, and the row
+that \path{false-hits.csv} names is a miss.
+The CREST rows are those of \path{seeds.csv} and of \path{rows.csv} at
+\texttt{e71e5de9}; on seed 2009 xtb's SCC did not converge on the start, so
+that CREST run made no call and is dropped.
+On C\(_{20}\) both arms are the rows of \path{rows.csv} at
+\texttt{5351f272}.
+
+\emph{Arms that the budget rule removes.}
+On (H\(_2\)O)\(_8\) and (NH\(_3\))\(_4\) the CREST medians are 127658.5
+and 146795 calls, against 4000 or 16000 calls for this code in
+\path{bench/h2o-octamer/} and 4000 in \path{bench/nh3-tetramer/}; the
+(NH\(_3\))\(_8\) rows of this code at 4000 and 16000 calls are removed in
+the same way.
+At the calls of each seed's CREST run, \path{bench/h2o-octamer/ladder.csv}
+holds two seeds, and this code hits 1 of 2 and CREST 2 of 2.
+The (H\(_2\)O)\(_{16}\) and (H\(_2\)O)\(_{20}\) records give no CREST call
+count, and the Si\(_{13}\) record has no valid reference.
+
 \section{Statistical methods}
 \label{sec:si-stats}
 Every test below is two-sided.
@@ -765,6 +853,17 @@ and reported outcomes reaching the shared cap are censored.
 The tables therefore report the hit counts, recorded caps, stop counts, and
 wall medians without a cross-arm Fisher test or interval
 \cite{fisherLogicInductiveInference1935}.
+
+\emph{Fisher exact test.}
+The CREST arms take no seed, so their hits are not paired with those of
+this code.
+With \(h_1\) hits in \(n_1\) runs and \(h_2\) in \(n_2\), the table is
+conditioned on \(h=h_1+h_2\), and the two-sided \(p\) sums the
+hypergeometric probabilities
+\(\binom{n_1}{k}\binom{n_2}{h-k}/\binom{n_1+n_2}{h}\) of every \(k\) whose
+probability is at most that of \(h_1\)
+\cite{fisherLogicInductiveInference1935}.
+No adjustment for multiple comparisons is made.
 
 \emph{Medians and quantiles.}
 Medians, interquartile ranges, and the bootstrap quantiles below are type-7

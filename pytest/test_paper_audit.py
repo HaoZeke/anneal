@@ -60,6 +60,7 @@ CHECKS = (
     audit_mod.supporting_numbers,
     audit_mod.crest_equal,
     audit_mod.crest_equal_bench,
+    audit_mod.crest_table,
     audit_mod.outside_session,
     audit_mod.g3_session,
     audit_mod.manuscript_new,
@@ -3984,12 +3985,14 @@ def test_a_stale_gmin_single_session_claim_is_reported():
     }
 
 
-def test_crest_outside_the_related_searches_is_reported():
+def test_a_drifted_crest_hexamer_count_is_reported():
     audit = audit_mod.Audit()
-    si = audit.text(audit_mod.SI)
-    audit.text_cache[audit_mod.SI] = si.replace("\\section{Statistical methods}", "CREST.\n\\section{Statistical methods}", 1)
-    audit_mod.withdrawn_benchmarks(audit)
-    assert [r[2] for r in audit.drifts()] == ["CREST is named only among the searches that report no comparable rate"]
+    tex = audit.text(audit_mod.TEX)
+    old = "CREST hits the water hexamer on 4 of 12 runs and this code"
+    assert audit_mod.collapse(tex).count(old) == 1
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("4 of 12", "3 of 12"))
+    audit_mod.crest_table(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
 
 
 def test_a_banned_word_is_reported():

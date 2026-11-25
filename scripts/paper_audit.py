@@ -3601,7 +3601,6 @@ def supporting_numbers(audit: Audit) -> None:
 # the submitted revision, and the strings that would print them again.
 WITHDRAWN = (
     ("the water hexamer against CREST", "121 of 192"),
-    ("the water hexamer against CREST", "\\label{sec:crest}"),
     ("the water hexamer against CREST", "\\label{sec:hexamer}"),
     ("the water hexamer against CREST", "tab:crest-counters"),
     ("the water hexamer against CREST", "tab:hexamer-gaps"),
@@ -3641,10 +3640,6 @@ def withdrawn_benchmarks(audit: Audit) -> None:
     stale_si = "same-session panel" in collapse(audit.text(SI))
     audit.record(not stale_si, SI, "no same-session panel claim in SI", "absent",
                  "present" if stale_si else "absent")
-    for path in (TEX, SI, COVER):
-        before = audit.text(path).split("\\section{Searches that report", 1)[0]
-        audit.record("CREST" not in before, path, "CREST is named only among the searches that report no comparable "
-                     "rate", "absent", "absent" if "CREST" not in before else "present")
 
 
 def supporting_information(audit: Audit) -> None:
@@ -5980,7 +5975,7 @@ def manuscript_new(audit: Audit) -> None:
     audit.said(TEX, "The rows of this code behind every table were recorded at revisions in the\n"
                     "history of the submitted revision, except the length-unit and move-choice\n"
                     "knockouts, which ran the submitted search source plus default-off knockout\n"
-                    "switches.")
+                    "switches, and Table~\\ref{tab:crest}.")
     audit.said(TEX, "The described submitted revision postdates the newest released tag,\n"
                     "v0.12.0, and is available at\n"
                     "\\url{https://github.com/HaoZeke/anneal/commit/"
@@ -6587,6 +6582,63 @@ def crest_equal(audit: Audit) -> None:
                             ("wall_s", "mannwhitney_wall_p"), ("outside_s", "mannwhitney_outside_p")):
             p = mann_whitney([float(r[key]) for r in a], [float(r[key]) for r in b], continuity=True)
             audit.cell(where, f"{arm} Mann-Whitney p on {key}", summary[arm][column], p)
+
+
+def crest_table(audit: Audit) -> None:
+    """tab:crest and its prose, recomputed from the GFN2-xTB rows; the hexamer counts from rows.csv directly."""
+    table = load_script("crest_table_audit", "paper/jctc/scripts/crest_table.py")
+    block = audit.text(TEX).split(table.MARKS[0], 1)[1].split(table.MARKS[1], 1)[0].strip("\n")
+    fresh = table.table()
+    audit.record(block == fresh, TEX, "tab:crest is the output of crest_table.py", "equal",
+                 "equal" if block == fresh else "differs")
+    pairs = {re.sub(r"\\[()]|[_{}\\]", "", p["system"]): p for p in table.pairs()}
+    audit.cell(TEX, "the clusters of tab:crest", "(H2O)6 (NH3)8 C10 Si10 C20", " ".join(pairs))
+
+    def counts(name: str) -> tuple[int, int, int, int]:
+        a, c = pairs[name]["anneal"], pairs[name]["crest"]
+        return table.hits(a), len(a), table.hits(c), len(c)
+
+    rows = audit.rows("bench/crest-equal/rows.csv")
+    revision = next(r["code_revision"] for r in reversed(rows) if r["arm"] == "anneal")
+    anneal = [r for r in rows if r["arm"] == "anneal" and r["code_revision"] == revision]
+    crest = [r for r in rows if r["arm"] == "crest"]
+    audit.cell(TEX, "hexamer hits of this code", f"{counts('(H2O)6')[0]}/{counts('(H2O)6')[1]}", frac(anneal))
+    audit.cell(TEX, "hexamer hits of CREST at 0.90 ps", f"{counts('(H2O)6')[2]}/{counts('(H2O)6')[3]}", frac(crest))
+    p = fisher(hits_of(anneal), len(anneal), hits_of(crest), len(crest))
+    charged = sorted({int(r["charged"]) for r in anneal})
+    middle = median([float(r["charged"]) for r in crest])
+    audit.cell(TEX, "hexamer Fisher p", "0.32", p)
+    audit.said(TEX, f"CREST hits the water hexamer on {hits_of(crest)} of {len(crest)} runs and this code on "
+                    f"{hits_of(anneal)} of {len(anneal)} (\\(p={p:.2f}\\)); this code is charged {charged[0]} calls on "
+                    f"every seed, and CREST a median of {middle:g}.")
+    audit.cell(TEX, "the hexamer charges one count", "1", float(len(charged)))
+    audit.said(TEX, f"On GFN2-xTB clusters CREST hits the water hexamer on {hits_of(crest)} of {len(crest)} runs "
+                    f"against {hits_of(anneal)} of {len(anneal)} for this code (\\(p={p:.2f}\\)) and the ammonia octamer "
+                    "on every run, while this code hits the C\\(_{10}\\) ring more often.")
+    nh3 = counts("(NH3)8")
+    words = {0: "none", 6: "all 6"}
+    audit.said(TEX, f"this code hits the ammonia octamer on {words[nh3[0]]} of {nh3[1]} seeds and CREST on "
+                    f"{words[nh3[2]]} (\\(p={table.pvalue(pairs['(NH3)8']['p']).strip(chr(92) + '()')}\\)).")
+    c10, si10, c20 = counts("C10"), counts("Si10"), counts("C20")
+    audit.said(TEX, f"This code hits the C\\(_{{10}}\\) ring on {c10[0]} of {c10[1]} seeds and CREST on {c10[2]} "
+                    f"(\\(p={table.pvalue(pairs['C10']['p']).strip(chr(92) + '()')}\\)).")
+    audit.said(TEX, f"On Si\\(_{{10}}\\) the counts are {si10[0]} of {si10[1]} and {si10[2]} of {si10[3]} "
+                    f"(\\(p={table.pvalue(pairs['Si10']['p'])}\\)), and neither code reaches the C\\(_{{20}}\\) cage.")
+    audit.cell(TEX, "C20 hits of both codes", "0 0", f"{c20[0]} {c20[2]}")
+    audit.said(TEX, "An aborted CREST run is dropped from its pair.")
+    audit.said(SI, "Revision \\texttt{723b7c23} contains commit \\texttt{acf5f0aa}, which flipped the sign of the "
+                   "GFN2-xTB gradient before commit \\texttt{94a37da7}, and the CREST wrapper at that revision negated "
+                   "the gradient it served, so the 1 of 12 is the hit count on that reversed GFN2 slope and the 4 of "
+                   "12 is the hit count on the GFN2 slope the wrapper put back, and the rows do not show whether "
+                   "reversing the O-H wall slope in the served file changed the 4 of 12.")
+    wall = [r for r in rows if r["arm"] == "crest-wall"]
+    audit.said(SI, f"has a median of {median([float(r['charged']) for r in wall]):g} calls and hits {hits_of(wall)} of "
+                   f"{len(wall)} (\\(p={table.pvalue(fisher(hits_of(anneal), len(anneal), hits_of(wall), len(wall)))}\\) "
+                   "against this code)")
+    for gone in ("next measurement", "void, not a miss", "Holm"):
+        for path in (TEX, SI, COVER):
+            found = gone.lower() in collapse(audit.text(path)).lower()
+            audit.record(not found, path, f"the text does not say {gone}", "absent", "present" if found else "absent")
 
 
 def manuscript_followups(audit: Audit) -> None:
@@ -7707,7 +7759,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         science_claims, rigid_stall, presets_and_templates, no_anneal_restart,
         hexamer_provenance, template_era, outside_session, morse_g1, gmin_sources,
         g3_session, no_move_choice_claim,
-        reproduction_records, sutton_chen, crest_equal, crest_equal_bench,
+        reproduction_records, sutton_chen, crest_equal, crest_equal_bench, crest_table,
         append_only_rows, tip4p_unscored, tip4p_r2_rows, pending_text, citation_metadata,
                   figure_source_scripts, bibliography_keys, conversion_literals,
                   own_references, build_receipts, selection_tables, gmin_panel_drivers, prior_switches,
