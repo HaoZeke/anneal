@@ -64,14 +64,8 @@ configured 80 steps continues until the record window. Au55 keeps the
 certificate at `record_gradient` and polishes below ten times that
 value. The 80-step preset already reaches it.
 
-The first openconf head-to-head cell is `rq3` in
-`bench/openconf-h2h/molecules.csv` line 2. Its anneal budget in
-`bench/openconf-h2h/budgets.csv` line 2 is 28457, the value
-`scripts/openconf_h2h/run_bench.py` `budgets` reads. That search
-evaluates MMFF94 through its Python driver. `run_ensemble` needs a
-Rust energy and gradient, and this crate has no MMFF evaluator.
-`python/anneal/device.py` `run_ensemble` is a batched device annealer,
-not `methods::ensemble::run_ensemble`. The ligand is not run.
+The openconf ligand is dropped from this panel.
+The openconf ligand (rq3) was not run: rgpot has no MMFF potential, and run_ensemble needs an energy and gradient.
 
 Au55 identity is the sorted pair-distance witness used when the shape
 matcher is not linked, with radius 0.02. TIP4P identity matches

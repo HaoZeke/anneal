@@ -22,5 +22,5 @@ against single. Both tests are two-sided.
 - au55 comm vs indep: Fisher p 1.0000, Mann-Whitney p 1.0000
 - au55 comm vs single: Fisher p 0.2174, Mann-Whitney p 0.0788
 
-Openconf cell rq3 is not in this table. The ensemble has no
-MMFF objective, so that ligand was not run.
+The openconf ligand is dropped from this panel.
+The openconf ligand (rq3) was not run: rgpot has no MMFF potential, and run_ensemble needs an energy and gradient.
