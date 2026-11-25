@@ -1404,6 +1404,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
+name = "maryada"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c771bcdd0648e4bf72e914f1717159aae96ec98cf05458675e96e8f16a12061a"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "matrixmultiply"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2271,18 +2280,18 @@ dependencies = [
 
 [[package]]
 name = "rgpot-core"
-version = "3.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df34626c5c9d888c234e6a0921e7e6c0335561ec50460fcf74e4b77772c89ede"
+version = "3.7.0"
+source = "git+https://github.com/OmniPotentRPC/rgpot?rev=3aa8f9caf87dce22a5e1d74f4a06c9779d0c2212#3aa8f9caf87dce22a5e1d74f4a06c9779d0c2212"
 dependencies = [
  "dlpk",
  "eindir-core",
+ "maryada",
 ]
 
 [[package]]
 name = "rgpot-pair"
 version = "3.7.0"
-source = "git+https://github.com/OmniPotentRPC/rgpot?rev=8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e#8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e"
+source = "git+https://github.com/OmniPotentRPC/rgpot?rev=3aa8f9caf87dce22a5e1d74f4a06c9779d0c2212#3aa8f9caf87dce22a5e1d74f4a06c9779d0c2212"
 dependencies = [
  "cc",
 ]

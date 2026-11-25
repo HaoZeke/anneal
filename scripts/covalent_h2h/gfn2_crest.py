@@ -30,10 +30,14 @@ any search. The (seed, code) pairs of a system run in a shuffled order.
 ``--codes``, ``--seeds`` and ``--crest-seeds`` select the arms and the
 seeds, each system's defaults being ``SEEDS`` and ``CREST_SEEDS``; a
 system without a reference is refused.
-Rows are appended to ``--rows`` with the anneal revision, the host and the
-binary hashes, and a file with another header is refused, never
-rewritten. ``--history`` names earlier rows files, such as ``seeds.csv``,
-read alongside it. ``--summary`` appends one line per system and code over
+Rows are appended to ``--rows`` with the anneal revision, the host, the
+binary hashes, and a content-addressed final XYZ under ``finals/`` beside
+the row file. The final is rescored by standalone xtb at the same settings;
+its SCC status, energy and minimum pair distance are recorded, and a hit
+whose standalone SCC did not converge is recorded as a miss. A file with
+another header is refused, never rewritten. ``--history`` names earlier
+rows files, such as ``seeds.csv``, read alongside it. ``--summary`` appends
+one line per system and code over
 all of them, with Fisher's exact test on hits and a two-sided Mann-Whitney
 on calls to the hit, with a miss ranked after every hit, both against
 anneal; alone when no binaries are given, over ``--systems``, and with
@@ -65,9 +69,11 @@ import math
 import os
 import random
 import re
+import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -123,6 +129,13 @@ ROW_FIELDS = [
     "best",
     "pot_s",
     "outside_s",
+    "scc_rejected",
+    "geometry_rejected",
+    "geometry",
+    "geometry_sha256",
+    "standalone_scc_converged",
+    "standalone_xtb_eV",
+    "min_distance_A",
 ]
 PROVENANCE_FIELDS = [
     "code_revision",
@@ -210,6 +223,9 @@ def run_anneal(binary: Path, system: str, seed: int, out: Path) -> dict:
         "best": float(row["best_eV"]),
         "pot_s": float(row["pot_s"]),
         "outside_s": float(row["outside_s"]),
+        "scc_rejected": int(row["scc_rejected"]),
+        "geometry_rejected": int(row["geometry_rejected"]),
+        "_geometry": out / "best.xyz",
     }
 
 
@@ -217,6 +233,107 @@ def first_frame_energy(path: Path) -> float:
     lines = path.read_text().splitlines()
     found = re.findall(r"[-+]?\d+\.\d+", lines[1])
     return float(found[0]) * AUTOEV
+
+
+def xyz_min_distance(path: Path) -> float:
+    lines = path.read_text().splitlines()
+    count = int(lines[0])
+    if len(lines) < count + 2:
+        raise ValueError(f"{path} has fewer than {count} atoms")
+    positions = [tuple(float(value) for value in line.split()[1:4]) for line in lines[2 : count + 2]]
+    if any(len(position) != 3 for position in positions):
+        raise ValueError(f"{path} has a malformed atom line")
+    return min(
+        math.dist(positions[left], positions[right])
+        for left in range(count)
+        for right in range(left + 1, count)
+    )
+
+
+def standalone_energy(text: str) -> float | None:
+    found = re.findall(
+        r"(?im)^\s*(?:(?:\*|::|\|)\s*)?total energy\s*:?\s*"
+        r"([-+]?(?:\d+\.\d*|\.\d+)(?:[eE][-+]?\d+)?)",
+        text,
+    )
+    return float(found[-1]) * AUTOEV if found else None
+
+
+def standalone_rescore(xtb: Path, geometry: Path) -> tuple[bool, float | None]:
+    with tempfile.TemporaryDirectory(prefix="gfn2-final-") as directory:
+        work = Path(directory)
+        local = work / "final.xyz"
+        shutil.copyfile(geometry, local)
+        proc = subprocess.run(
+            [
+                str(xtb.resolve()),
+                local.name,
+                "--gfn",
+                "2",
+                "--sp",
+                "--etemp",
+                str(ETEMP),
+                "--acc",
+                "0.01",
+                "--iterations",
+                "500",
+            ],
+            cwd=work,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        text = proc.stdout + "\n" + proc.stderr
+        failed = (
+            proc.returncode != 0
+            or (work / ".sccnotconverged").exists()
+            or re.search(r"(?i)(?:did not converge|not converged|cannot be satisfied)", text)
+            is not None
+        )
+        return not failed, standalone_energy(text)
+
+
+def record_final_geometry(
+    rows: Path,
+    row: dict,
+    source: Path,
+    xtb: Path,
+    revision: str,
+) -> dict[str, object]:
+    if not source.is_file():
+        raise RuntimeError(
+            f"{row['system']} {row['code']} seed {row['seed']} produced no final geometry"
+        )
+    digest = sha256(source)
+    name = f"{row['code']}-{row['seed']}-{revision[:12]}-{digest[:16]}.xyz"
+    relative = Path("finals") / row["system"] / name
+    destination = rows.parent / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file() and sha256(destination) != digest:
+        raise RuntimeError(f"refusing to replace {destination}")
+    if not destination.is_file():
+        shutil.copyfile(source, destination)
+    converged, energy = standalone_rescore(xtb, destination)
+    return {
+        "geometry": relative.as_posix(),
+        "geometry_sha256": digest,
+        "standalone_scc_converged": "true" if converged else "false",
+        "standalone_xtb_eV": "nan" if energy is None else f"{energy:.8f}",
+        "min_distance_A": f"{xyz_min_distance(destination):.8f}",
+    }
+
+
+def require_standalone_scc(row: dict, final: dict[str, object]) -> dict:
+    """A hit whose final geometry does not converge standalone is a miss.
+
+    The search saw an energy at that geometry, but a single point of the
+    same file at the same settings did not converge, so the energy is not
+    one xtb reproduces. The row is charged the full budget, as a false hit
+    is in ``false-hits.csv``, and ranks after every hit.
+    """
+    if row["hit"] == "true" and final["standalone_scc_converged"] != "true":
+        return dict(row, hit="false", evals_to_hit=row["budget"])
+    return row
 
 
 def run_crest(
@@ -276,6 +393,12 @@ def run_crest(
         calls += int(count)
     best_file = out / "crest_best.xyz"
     best = first_frame_energy(best_file) if best_file.is_file() else float("inf")
+    # A failed arm still records the last geometry it made available.
+    final_geometry = best_file
+    if not final_geometry.is_file():
+        final_geometry = out / "start.xyz"
+    if not final_geometry.is_file():
+        final_geometry = start
     hit = energy_hits(best, REFERENCE[system], HIT_TOL)
     return {
         "system": system,
@@ -289,6 +412,9 @@ def run_crest(
         "best": best,
         "pot_s": inside,
         "outside_s": max(wall - inside, 0.0),
+        "scc_rejected": "",
+        "geometry_rejected": "",
+        "_geometry": final_geometry,
     }
 
 
@@ -300,16 +426,20 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def append_rows(path: Path, fields: list[str], rows: list[dict]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    new = not path.is_file() or path.stat().st_size == 0
-    if not new:
+def require_append_schema(path: Path, fields: list[str]) -> None:
+    if path.is_file() and path.stat().st_size:
         with open(path, newline="") as handle:
             header = next(csv.reader(handle))
         if header != fields:
             raise SystemExit(
                 f"{path} has another header; rows are appended, never rewritten"
             )
+
+
+def append_rows(path: Path, fields: list[str], rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    new = not path.is_file() or path.stat().st_size == 0
+    require_append_schema(path, fields)
     with open(path, "a", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
         if new:
@@ -388,6 +518,7 @@ def main() -> None:
             raise SystemExit(f"{system} has no reference")
     if host != "bench":
         raise SystemExit("hostname is not bench")
+    require_append_schema(args.rows, [*ROW_FIELDS, *PROVENANCE_FIELDS])
     os.environ["RGPOT_XTB_ETEMP"] = f"{ETEMP}"
     os.environ["OMP_NUM_THREADS"] = "1"
     python = os.environ.get("PANEL_PYTHON", "/usr/bin/python3")
@@ -445,6 +576,16 @@ def main() -> None:
                 )
             else:
                 row = run_anneal(args.anneal, system, seed, where)
+            geometry = row.pop("_geometry")
+            final = record_final_geometry(
+                args.rows,
+                row,
+                geometry,
+                args.xtb,
+                revision,
+            )
+            row = require_standalone_scc(row, final)
+            row.update(final)
             row.update(pins, date=datetime.date.today().isoformat())
             append_rows(args.rows, ROW_FIELDS + PROVENANCE_FIELDS, [row])
             print(

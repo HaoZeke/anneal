@@ -30,6 +30,7 @@ fn main() {
     println!("cargo:rerun-if-changed=include/");
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rustc-check-cfg=cfg(anneal_packaged_without_rgpot_pair)");
+    println!("cargo:rustc-check-cfg=cfg(anneal_rgpot_git_scc)");
     let manifest_path =
         std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
             .join("Cargo.toml");
@@ -43,6 +44,12 @@ fn main() {
     });
     if !has_rgpot_pair {
         println!("cargo:rustc-cfg=anneal_packaged_without_rgpot_pair");
+    }
+    // `cargo package` keeps the version and drops the git source. The
+    // registry release has no SCC status, so only a manifest that still
+    // names the git source may refer to it.
+    if dependency_value_has_git(&manifest, "rgpot-core") {
+        println!("cargo:rustc-cfg=anneal_rgpot_git_scc");
     }
 
     // The `ira` feature links the IRA Fortran library. Its location is a build
@@ -178,6 +185,55 @@ print("1" if on(shared) or on(pyframework) else "0")
     if !framework.is_empty() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{framework}");
     }
+}
+
+/// True when the `name = ...` dependency still records a git source.
+///
+/// `cargo package` rewrites a versioned git dev-dependency to the version
+/// alone, so this is false in the published crate.
+fn dependency_value_has_git(manifest: &str, name: &str) -> bool {
+    let table_headers = [
+        format!("[dev-dependencies.{name}]"),
+        format!("[dependencies.{name}]"),
+    ];
+    let mut lines = manifest.lines();
+    while let Some(line) = lines.next() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        if table_headers.iter().any(|header| trimmed == header) {
+            for next in lines.by_ref() {
+                let field = next.trim();
+                if field.starts_with('[') {
+                    return false;
+                }
+                if field.starts_with("git ") || field.starts_with("git=") {
+                    return true;
+                }
+            }
+            return false;
+        }
+        let Some(rest) = trimmed.strip_prefix(name) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        if !rest.starts_with('=') {
+            continue;
+        }
+        let mut value = rest[1..].trim_start().to_string();
+        if value.starts_with('{') && !value.contains('}') {
+            for next in lines.by_ref() {
+                value.push('\n');
+                value.push_str(next);
+                if next.contains('}') {
+                    break;
+                }
+            }
+        }
+        return value.contains("git");
+    }
+    false
 }
 
 fn python_interpreter() -> String {

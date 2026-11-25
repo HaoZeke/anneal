@@ -364,6 +364,65 @@ def test_rescore_preserves_legacy_and_appends_v2_rows(tmp_path, monkeypatch):
     assert {row["code_revision"] for row in written} == {"0" * 40, "1" * 40}
 
 
+def test_gfn2_final_geometry_is_kept_beside_the_row(tmp_path, monkeypatch):
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_geometry", "scripts/covalent_h2h/gfn2_crest.py")
+    source = tmp_path / "run" / "best.xyz"
+    source.parent.mkdir()
+    source.write_text("2\nfinal\nSi 0 0 0\nSi 2.25 0 0\n")
+    monkeypatch.setattr(
+        crest, "standalone_rescore", lambda _xtb, _geometry: (True, -12.5)
+    )
+    rows = tmp_path / "results" / "rows-v2.csv"
+    row = {"system": "si20", "code": "anneal-general", "seed": 2000}
+    fields = crest.record_final_geometry(
+        rows, row, source, tmp_path / "xtb", "1" * 40
+    )
+    geometry = rows.parent / fields["geometry"]
+    assert geometry.read_bytes() == source.read_bytes()
+    assert fields["standalone_scc_converged"] == "true"
+    assert fields["standalone_xtb_eV"] == "-12.50000000"
+    assert fields["min_distance_A"] == "2.25000000"
+
+
+def test_a_hit_whose_standalone_scc_fails_is_recorded_as_a_miss(tmp_path, monkeypatch):
+    pytest.importorskip("scipy.stats")
+    crest = load("gfn2_standalone_gate", "scripts/covalent_h2h/gfn2_crest.py")
+    source = tmp_path / "run" / "best.xyz"
+    source.parent.mkdir()
+    source.write_text("2\nfinal\nSi 0 0 0\nSi 2.25 0 0\n")
+    rows = tmp_path / "results" / "rows-v2.csv"
+
+    def hit():
+        return {
+            "system": "si20",
+            "code": "anneal-general",
+            "seed": 2000,
+            "budget": 100000,
+            "hit": "true",
+            "evals_to_hit": 700,
+            "best": -922.98227162,
+        }
+
+    monkeypatch.setattr(crest, "standalone_rescore", lambda _xtb, _geometry: (False, None))
+    row = hit()
+    final = crest.record_final_geometry(rows, row, source, tmp_path / "xtb", "1" * 40)
+    assert final["standalone_scc_converged"] == "false"
+    gated = crest.require_standalone_scc(row, final)
+    assert gated["hit"] == "false"
+    assert gated["evals_to_hit"] == 100000
+    assert crest.ranked_calls([gated]) == [float("inf")]
+    assert row["hit"] == "true"
+
+    monkeypatch.setattr(crest, "standalone_rescore", lambda _xtb, _geometry: (True, -12.5))
+    row = hit()
+    final = crest.record_final_geometry(rows, row, source, tmp_path / "xtb", "1" * 40)
+    assert crest.require_standalone_scc(row, final) == hit()
+
+    miss = dict(hit(), hit="false", evals_to_hit=100000)
+    assert crest.require_standalone_scc(miss, {"standalone_scc_converged": "false"}) == miss
+
+
 def test_the_committed_panel_is_the_same_on_every_seed(capsys):
     pytest.importorskip("scipy.stats")
     arm_gate.summary(argparse.Namespace(rows=PANEL_ROWS, arms=["develop", "floor"]))

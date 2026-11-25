@@ -3790,6 +3790,88 @@ def gfn2_table(audit: Audit, path: str, rows: list[tuple[int, dict[str, str]]],
         audit.cell(where, "outside / call ms", row["outside / call"].split()[0], time_per_call("outside_s"))
 
 
+def gfn2_geometry_files(audit: Audit) -> None:
+    directory = Path("bench/covalent-h2h/gfn2")
+    for csv_path in sorted((ROOT / directory).glob("*.csv")):
+        path = csv_path.relative_to(ROOT).as_posix()
+        if path in audit.read:
+            rows = audit.rows(path)
+            if not any("geometry" in row for row in rows):
+                continue
+        else:
+            with csv_path.open(newline="") as handle:
+                lines = [
+                    line
+                    for line in handle
+                    if line.strip() and not line.startswith("#")
+                ]
+            header = next(csv.reader(lines), [])
+            if "geometry" not in header:
+                continue
+            rows = audit.rows(path)
+        for line, row in enumerate(rows, 2):
+            where = f"{path}:{line}"
+            shown = row["geometry"].strip()
+            geometry = ROOT / directory / shown
+            inside = (
+                bool(shown)
+                and not Path(shown).is_absolute()
+                and geometry.resolve().is_relative_to((ROOT / directory).resolve())
+            )
+            exists = inside and geometry.is_file()
+            audit.record(
+                exists,
+                where,
+                "final geometry file",
+                shown or "missing",
+                "existing tracked path",
+            )
+            if exists:
+                shown_digest = row.get("geometry_sha256", "").strip()
+                digest = hashlib.sha256(geometry.read_bytes()).hexdigest()
+                audit.record(
+                    shown_digest == digest,
+                    where,
+                    "final geometry sha256",
+                    shown_digest or "missing",
+                    digest,
+                )
+            converged = row.get("standalone_scc_converged", "").lower()
+            audit.record(
+                converged in ("true", "false"),
+                where,
+                "standalone SCC flag",
+                converged or "missing",
+                "true or false",
+            )
+            try:
+                energy = float(row.get("standalone_xtb_eV", ""))
+                energy_ok = math.isfinite(energy) or (
+                    math.isnan(energy) and converged == "false"
+                )
+            except ValueError:
+                energy_ok = False
+            audit.record(
+                energy_ok,
+                where,
+                "standalone energy",
+                row.get("standalone_xtb_eV", "missing"),
+                "numeric eV result",
+            )
+            try:
+                distance = float(row.get("min_distance_A", ""))
+                distance_ok = math.isfinite(distance) and distance > 0.0
+            except ValueError:
+                distance_ok = False
+            audit.record(
+                distance_ok,
+                where,
+                "minimum distance",
+                row.get("min_distance_A", "missing"),
+                "positive finite angstrom value",
+            )
+
+
 def covalent_gfn2(audit: Audit) -> None:
     """The GFN2 tables of the covalent README.
 
@@ -3800,6 +3882,7 @@ def covalent_gfn2(audit: Audit) -> None:
     """
     path = "bench/covalent-h2h/README.md"
     header = "system | code | hits | median calls | IQR | best / eV"
+    gfn2_geometry_files(audit)
     seeds = audit.rows("bench/covalent-h2h/gfn2/seeds.csv")
     rows = audit.rows("bench/covalent-h2h/gfn2/rows.csv")
     named = {(r["system"], r["code"], r["code_revision"], r["seed"]): r

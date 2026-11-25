@@ -18,9 +18,11 @@
 //! 2^(1/6) and the well depth against two atoms at 20 angstrom. The dimer
 //! probe runs on a two-atom handle and is charged to the same ledger. There
 //! is no pair-range cut, because dispersion has no finite reach.
-//! The call floor is the handle's 0.90 Å, raised pair by pair to
-//! `element_call_floor` of the atomic numbers: 1.55 Å for Si–Si and 1.06 Å
-//! for C–C.
+//! The element floors are 0.70 of the summed covalent radii: 1.554 Å for
+//! Si–Si, 1.064 Å for C–C and 0.434 Å for H–H. The radii set the floor. A
+//! blanket 0.90 Å absolute would sit past a physical H–H bond at 0.741 Å.
+//! The handle's guard and the search's sanity check use that floor, so a
+//! pair the search has opened is never refused.
 //!
 //! The start is a random cluster in the scaled start radius from
 //! `StdRng::seed_from_u64(seed)`. `H2H_START_ONLY=1` writes it to
@@ -104,8 +106,15 @@ fn evaluate(pot: &RgpotObjective, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
 /// The handle's answer to a geometry it refuses, without charging for it.
 ///
 /// A line search reads the non-finite value as an uphill step and shortens it.
-fn refused(x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
-    rgpot_eindir::refuses_geometry(&x.to_vec()).then(|| (f64::NAN, Array1::zeros(x.len())))
+fn refused(pot: &RgpotObjective, x: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+    geometry_is_refused(pot, x).then(|| (f64::NAN, Array1::zeros(x.len())))
+}
+
+fn geometry_is_refused(pot: &RgpotObjective, x: ArrayView1<f64>) -> bool {
+    match x.as_slice() {
+        Some(coordinates) => pot.refuses_geometry(coordinates),
+        None => pot.refuses_geometry(&x.iter().copied().collect::<Vec<_>>()),
+    }
 }
 
 /// Bond length over 2^(1/6) and well depth of the homonuclear dimer.
@@ -124,7 +133,7 @@ fn dimer_scales(z: i32, mut charge: impl FnMut() -> bool) -> Option<(f64, f64)> 
     };
     let mut probe = |r: f64| charge().then(|| at(r));
     let far = probe(FAR_A)?.0;
-    let mut r = 1.0_f64;
+    let mut r = rgpot_eindir::dimer_scan_start(z);
     let mut before = probe(r)?;
     let (mut lo, mut hi, mut slope_lo, mut slope_hi) = loop {
         let next = 1.05 * r;
@@ -260,24 +269,21 @@ fn main() {
     let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
         optimiser.forget();
         let (value, relaxed, _) = optimiser.minimize(x, iterations, |v| {
-            if let Some(refused) = refused(v) {
+            let pot = pot.lock().expect("pot");
+            if let Some(refused) = refused(&pot, v) {
                 return Some(refused);
             }
             if !led.charge() {
                 return None;
             }
-            Some(evaluate(&pot.lock().expect("pot"), v))
+            Some(evaluate(&pot, v))
         });
         (value, relaxed)
     };
     let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
-        if let Some((_, gradient)) = refused(v) {
-            return Some(gradient);
-        }
-        if !led.charge() {
-            return None;
-        }
-        Some(evaluate(&pot.lock().expect("pot"), v).1)
+        let pot = pot.lock().expect("pot");
+        let refused = geometry_is_refused(&pot, v);
+        rgpot_eindir::certified_gradient(refused, || led.charge(), || evaluate(&pot, v))
     };
     let outcome: Outcome = run_with_gradient(
         &cfg,

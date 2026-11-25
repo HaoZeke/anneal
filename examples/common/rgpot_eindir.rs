@@ -15,8 +15,11 @@
 use anneal_core::catalog::FreshEvaluation;
 use anneal_core::catalog::molecular::{GFN2_ACCURACY, GFN2_MAX_ITERATIONS, RGPOT_XTB_ENGINE_REV};
 use anneal_core::compatibility::{AbiStamp, EngineDescriptor, ProtocolVersion};
+use anneal_core::methods::cluster_hopping::{OVERLAP_CALL_LIMIT, element_call_floor};
+use eindir_core::Bounds;
 use eindir_core::ffi::{EindirObjectiveWrapper, eindir_core_abi_compatible, eindir_objective_t};
-use eindir_core::gradient::DifferentiableObjective;
+use eindir_core::gradient::{DifferentiableObjective, Gradient};
+use eindir_core::objective::Objective;
 use libloading::{Library, Symbol};
 use rgpot_core::eindir::{
     rgpot_eindir_abi_stamp, rgpot_potential_free_eindir, rgpot_potential_new_eindir,
@@ -35,7 +38,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub(crate) const OVERLAP_SEPARATION_A: f64 = 0.35;
 /// Same gate as `OVERLAP_CALL_LIMIT`. Below a covalent O–H, above the shell
 /// where xtb's SCC fails.
-pub(crate) const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
+pub(crate) const OVERLAP_CALL_LIMIT_A: f64 = OVERLAP_CALL_LIMIT;
 
 static SCC_REJECTED: AtomicUsize = AtomicUsize::new(0);
 static GEOMETRY_REJECTED: AtomicUsize = AtomicUsize::new(0);
@@ -50,7 +53,8 @@ pub(crate) fn geometry_rejected_count() -> usize {
     GEOMETRY_REJECTED.load(Ordering::Relaxed)
 }
 
-fn note_scc_rejected(min_pair_a: f64) {
+fn note_scc_rejected(instance_count: &mut usize, min_pair_a: f64) {
+    *instance_count += 1;
     let n = SCC_REJECTED.fetch_add(1, Ordering::Relaxed) + 1;
     eprintln!("scc_rejected {n} min_pair_A {min_pair_a:.6}");
     let _ = io::stderr().flush();
@@ -66,8 +70,51 @@ fn note_geometry_rejected(min_pair_a: f64) {
 ///
 /// A caller that charges per call asks this first, so a geometry the handle
 /// will not evaluate costs nothing.
-pub(crate) fn refuses_geometry(positions: &[f64]) -> bool {
-    min_pair_distance_a(positions) <= OVERLAP_CALL_LIMIT_A
+pub(crate) fn refuses_geometry(positions: &[f64], atomic_numbers: &[i32]) -> bool {
+    geometry_has_short_pair(positions, atomic_numbers, OVERLAP_CALL_LIMIT_A)
+}
+
+fn geometry_has_short_pair(positions: &[f64], atomic_numbers: &[i32], absolute: f64) -> bool {
+    let n = positions.len() / 3;
+    if atomic_numbers.len() < n {
+        return min_pair_distance_a(positions) <= absolute;
+    }
+    (0..n).any(|a| {
+        ((a + 1)..n).any(|b| {
+            let za = u32::try_from(atomic_numbers[a]).unwrap_or(0);
+            let zb = u32::try_from(atomic_numbers[b]).unwrap_or(0);
+            let floor = element_call_floor(za, zb, absolute);
+            pair_distance_a(positions, a, b) <= floor
+        })
+    })
+}
+
+/// Bond length at which a dimer scan of element `z` starts.
+///
+/// One scan step past the pair's call floor, so the first probe is a call
+/// the handle makes. A fixed start inside that floor, 1.0 A for Si, is
+/// refused as NaN and ends the scan before it begins.
+pub(crate) fn dimer_scan_start(z: i32) -> f64 {
+    let z = u32::try_from(z).unwrap_or(0);
+    1.05 * element_call_floor(z, z, OVERLAP_CALL_LIMIT_A)
+}
+
+/// The gradient a search may certify an answer with, or `None`.
+///
+/// A geometry the handle refuses, a call the budget cannot pay for and an
+/// evaluation with a non-finite energy or gradient give no gradient. A
+/// zero vector in their place would read as a converged stationary point.
+/// `refused` and `charge` run first, and `evaluate` only when both allow it.
+pub(crate) fn certified_gradient(
+    refused: bool,
+    charge: impl FnOnce() -> bool,
+    evaluate: impl FnOnce() -> (f64, ndarray::Array1<f64>),
+) -> Option<ndarray::Array1<f64>> {
+    if refused || !charge() {
+        return None;
+    }
+    let (energy, gradient) = evaluate();
+    (energy.is_finite() && gradient.iter().all(|value| value.is_finite())).then_some(gradient)
 }
 
 fn min_pair_distance_a(positions: &[f64]) -> f64 {
@@ -78,20 +125,166 @@ fn min_pair_distance_a(positions: &[f64]) -> f64 {
     let mut best = f64::INFINITY;
     for i in 0..n {
         for j in (i + 1)..n {
-            let dx = positions[3 * i] - positions[3 * j];
-            let dy = positions[3 * i + 1] - positions[3 * j + 1];
-            let dz = positions[3 * i + 2] - positions[3 * j + 2];
-            best = best.min((dx * dx + dy * dy + dz * dz).sqrt());
+            best = best.min(pair_distance_a(positions, i, j));
         }
     }
     best
 }
 
+fn pair_distance_a(positions: &[f64], a: usize, b: usize) -> f64 {
+    let dx = positions[3 * a] - positions[3 * b];
+    let dy = positions[3 * a + 1] - positions[3 * b + 1];
+    let dz = positions[3 * a + 2] - positions[3 * b + 2];
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
 const GFN2: i32 = 3;
+const RGPOT_XTB_RC_SCC_NOT_CONVERGED: i32 = -4;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    unsafe extern "C" fn scc_failure(
+        _pot: *mut c_void,
+        _n: i64,
+        _positions: *const f64,
+        _atomic_numbers: *const i32,
+        _gradient: *mut f64,
+        _energy: *mut f64,
+        _variance: *mut f64,
+        _cell: *const f64,
+    ) -> i32 {
+        RGPOT_XTB_RC_SCC_NOT_CONVERGED
+    }
+
+    unsafe extern "C" fn scc_failure_with_stale_answer(
+        _pot: *mut c_void,
+        n: i64,
+        _positions: *const f64,
+        _atomic_numbers: *const i32,
+        gradient: *mut f64,
+        energy: *mut f64,
+        variance: *mut f64,
+        _cell: *const f64,
+    ) -> i32 {
+        unsafe {
+            *energy = -475.186;
+            *variance = 0.0;
+            std::slice::from_raw_parts_mut(gradient, 3 * n as usize).fill(0.0);
+        }
+        RGPOT_XTB_RC_SCC_NOT_CONVERGED
+    }
+
+    unsafe extern "C" fn reset_noop(_pot: *mut c_void) {}
+
+    unsafe extern "C" fn engine_rejected(
+        _pot: *mut c_void,
+        _n: i64,
+        _positions: *const f64,
+        _atomic_numbers: *const i32,
+        _gradient: *mut f64,
+        energy: *mut f64,
+        _variance: *mut f64,
+        _cell: *const f64,
+    ) -> i32 {
+        unsafe { *energy = -1.0 };
+        -2
+    }
+
+    unsafe extern "C" fn engine_dies(
+        _pot: *mut c_void,
+        _n: i64,
+        _positions: *const f64,
+        _atomic_numbers: *const i32,
+        _gradient: *mut f64,
+        _energy: *mut f64,
+        _variance: *mut f64,
+        _cell: *const f64,
+    ) -> i32 {
+        unsafe { _exit(1) }
+    }
+
+    fn pair_call(force: XtbForce) -> (Result<(f64, f64), rgpot_status_t>, usize, Vec<f64>) {
+        let mut worker = XtbWorker::spawn(force, reset_noop, std::ptr::null_mut());
+        let mut forces = vec![0.0; 6];
+        let mut counted = 0;
+        let evaluation = worker.evaluate(
+            2,
+            &[0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+            &[14, 14],
+            &[0.0; 9],
+            &mut forces,
+        );
+        let answer = answer_or_reject(evaluation, &mut forces, 2.0, &mut counted);
+        worker.shutdown();
+        (answer, counted, forces)
+    }
+
+    #[test]
+    fn every_engine_failure_is_counted_and_returns_no_energy() {
+        for (name, force) in [
+            ("not converged, rc -4", scc_failure as XtbForce),
+            ("rejected, rc -2", engine_rejected as XtbForce),
+            ("dead worker", engine_dies as XtbForce),
+        ] {
+            let (answer, counted, forces) = pair_call(force);
+            assert!(answer.is_err(), "{name} returned an energy");
+            assert_eq!(counted, 1, "{name} was not counted in scc_rejected");
+            assert!(forces.iter().all(|value| value.is_nan()), "{name}");
+        }
+    }
+
+    #[test]
+    fn stale_scc_outputs_do_not_cross_the_objective_boundary() {
+        use eindir_core::gradient::DifferentiableObjective;
+
+        let objective = RgpotObjective::xtb_from_symbols(
+            &[14, 14],
+            [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0],
+            OVERLAP_CALL_LIMIT_A,
+            None,
+            std::ptr::null_mut(),
+            scc_failure_with_stale_answer,
+            reset_noop,
+            reset_noop,
+        );
+        let coordinates = ndarray::Array1::from(vec![0.0, 0.0, 0.0, 2.3, 0.0, 0.0]);
+        let (energy, gradient) = objective.wrapper().value_and_gradient(coordinates.view());
+
+        assert!(!energy.is_finite());
+        assert!(gradient.iter().all(|value| !value.is_finite()));
+        assert_eq!(objective.scc_rejected_count(), 1);
+    }
+
+    // The registry release has no SCC status. This assertion compiles only
+    // while Cargo.toml still pins rgpot-core from git. The published crate
+    // drops that source and does not compile this test.
+    #[cfg(anneal_rgpot_git_scc)]
+    #[test]
+    fn an_unconverged_scc_is_its_own_status_and_other_failures_are_not() {
+        for (name, force, expected) in [
+            (
+                "not converged, rc -4",
+                scc_failure as XtbForce,
+                rgpot_status_t::RGPOT_SCC_NOT_CONVERGED,
+            ),
+            (
+                "rejected, rc -2",
+                engine_rejected as XtbForce,
+                rgpot_status_t::RGPOT_INTERNAL_ERROR,
+            ),
+            (
+                "dead worker",
+                engine_dies as XtbForce,
+                rgpot_status_t::RGPOT_INTERNAL_ERROR,
+            ),
+        ] {
+            let (answer, counted, _) = pair_call(force);
+            assert_eq!(answer, Err(expected), "{name}");
+            assert_eq!(counted, 1, "{name} was not counted in scc_rejected");
+        }
+    }
 
     #[test]
     fn descriptor_maps_the_eindir_stamp_and_optional_build_identity() {
@@ -115,6 +308,139 @@ mod tests {
         assert_eq!(descriptor.abi.dlpack_minor, 4);
         assert_eq!(descriptor.abi.features, 0b101);
         assert_eq!(descriptor.build_identity.as_deref(), Some("rgpot@abc123"));
+    }
+
+    #[test]
+    fn species_guard_uses_covalent_radii() {
+        let compressed_si = [0.0, 0.0, 0.0, 1.40, 0.0, 0.0];
+        let at_floor_si = [0.0, 0.0, 0.0, 1.60, 0.0, 0.0];
+        let physical_si = [0.0, 0.0, 0.0, 2.20, 0.0, 0.0];
+        assert!(refuses_geometry(&compressed_si, &[14, 14]));
+        assert!(!refuses_geometry(&at_floor_si, &[14, 14]));
+        assert!(!refuses_geometry(&physical_si, &[14, 14]));
+
+        let carbon_triple_bond = [0.0, 0.0, 0.0, 1.20, 0.0, 0.0];
+        assert!(!refuses_geometry(&carbon_triple_bond, &[6, 6]));
+    }
+
+    #[test]
+    fn a_physical_h2_is_called_and_a_collapsed_pair_is_not() {
+        let physical = [0.0, 0.0, 0.0, 0.741, 0.0, 0.0];
+        let collapsed = [0.0, 0.0, 0.0, 0.20, 0.0, 0.0];
+        assert!(!refuses_geometry(&physical, &[1, 1]));
+        assert!(refuses_geometry(&collapsed, &[1, 1]));
+        assert!(element_call_floor(1, 1, OVERLAP_CALL_LIMIT_A) < 0.741);
+        assert!(0.20 <= element_call_floor(1, 1, 0.0));
+    }
+
+    #[test]
+    fn water_driver_guard_refuses_a_pair_below_its_declared_limit() {
+        let water = [0.0, 0.0, 0.0, 0.957, 0.0, 0.0, 1.297, 0.0, 0.0];
+        assert!(geometry_has_short_pair(
+            &water,
+            &[8, 1, 1],
+            OVERLAP_SEPARATION_A
+        ));
+    }
+
+    #[test]
+    fn a_physical_water_bond_is_called_and_a_collapsed_pair_is_not() {
+        let water = [8, 1, 1];
+        let bond = |oh: f64| [0.0, 0.0, 0.0, oh, 0.0, 0.0, -0.24, 0.93, 0.0];
+        assert!(!refuses_geometry(&bond(0.957), &water));
+        assert!(!refuses_geometry(&bond(0.97), &water));
+        assert!(!refuses_geometry(&bond(0.85), &water));
+        assert!(refuses_geometry(&bond(0.60), &water));
+
+        let collapsed_oo = [0.0, 0.0, 0.0, 0.9, 0.0, 0.0];
+        assert!(refuses_geometry(&collapsed_oo, &[8, 8]));
+    }
+
+    #[test]
+    fn a_geometry_the_call_floor_opened_is_not_refused() {
+        use anneal_core::methods::cluster_hopping::CallFloor;
+        for elements in [vec![14u32; 3], vec![6; 3], vec![8, 1, 1]] {
+            let floor = CallFloor {
+                absolute: OVERLAP_CALL_LIMIT_A,
+                elements: Some(&elements),
+            };
+            let mut x = ndarray::Array1::from(vec![0.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.1, 0.15, 0.0]);
+            let numbers: Vec<i32> = elements.iter().map(|&z| z as i32).collect();
+            assert!(refuses_geometry(x.as_slice().unwrap(), &numbers));
+            assert!(floor.open(&mut x, None));
+            assert!(
+                !refuses_geometry(x.as_slice().unwrap(), &numbers),
+                "{elements:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_dimer_scan_starts_outside_the_call_floor() {
+        for z in [1, 6, 7, 8, 14, 16, 29] {
+            let start = dimer_scan_start(z);
+            let dimer = [0.0, 0.0, 0.0, start, 0.0, 0.0];
+            assert!(!refuses_geometry(&dimer, &[z, z]), "z = {z} at {start}");
+            let floor = element_call_floor(z as u32, z as u32, OVERLAP_CALL_LIMIT_A);
+            assert!(start > floor, "z = {z}");
+        }
+        assert!(refuses_geometry(&[0.0, 0.0, 0.0, 1.0, 0.0, 0.0], &[14, 14]));
+        assert!(dimer_scan_start(14) > 1.55);
+    }
+
+    #[test]
+    fn a_refused_or_nan_call_gives_no_gradient() {
+        use ndarray::Array1;
+        let finite = || (-1.0, Array1::from(vec![0.1, -0.2]));
+        let answer = certified_gradient(false, || true, finite);
+        assert_eq!(answer, Some(Array1::from(vec![0.1, -0.2])));
+
+        let mut charged = false;
+        let mut evaluated = false;
+        let refused = certified_gradient(
+            true,
+            || {
+                charged = true;
+                true
+            },
+            || {
+                evaluated = true;
+                finite()
+            },
+        );
+        assert!(refused.is_none() && !charged && !evaluated);
+
+        let mut evaluated = false;
+        let unpaid = certified_gradient(
+            false,
+            || false,
+            || {
+                evaluated = true;
+                finite()
+            },
+        );
+        assert!(unpaid.is_none() && !evaluated);
+
+        let nan_energy = certified_gradient(false, || true, || (f64::NAN, Array1::zeros(2)));
+        assert!(nan_energy.is_none());
+        let nan_gradient =
+            certified_gradient(false, || true, || (-1.0, Array1::from(vec![f64::NAN, 0.0])));
+        assert!(nan_gradient.is_none());
+    }
+
+    #[test]
+    fn worker_rejects_a_reported_scc_failure() {
+        let mut worker = XtbWorker::spawn(scc_failure, reset_noop, std::ptr::null_mut());
+        let mut gradient = [0.0; 6];
+        let result = worker.evaluate(
+            2,
+            &[0.0, 0.0, 0.0, 2.0, 0.0, 0.0],
+            &[14, 14],
+            &[0.0; 9],
+            &mut gradient,
+        );
+        assert!(matches!(result, Err(WorkerFail::SccNotConverged)));
+        worker.shutdown();
     }
 }
 
@@ -266,6 +592,7 @@ unsafe fn xtb_worker_main(
 
 enum WorkerFail {
     Dead,
+    SccNotConverged,
     Rejected,
 }
 
@@ -338,6 +665,7 @@ impl XtbWorker {
     ) -> Result<(f64, f64), WorkerFail> {
         match self.exchange(n, positions, atomic_numbers, cell, forces) {
             Ok(answer) => Ok(answer),
+            Err(WorkerFail::SccNotConverged) => Err(WorkerFail::SccNotConverged),
             Err(WorkerFail::Rejected) => Err(WorkerFail::Rejected),
             Err(WorkerFail::Dead) => {
                 let force = self.force;
@@ -390,6 +718,9 @@ impl XtbWorker {
         if !read_full(self.from_child, force_bytes) {
             return Err(WorkerFail::Dead);
         }
+        if rc == RGPOT_XTB_RC_SCC_NOT_CONVERGED {
+            return Err(WorkerFail::SccNotConverged);
+        }
         if rc != 0 || !energy.is_finite() || forces.iter().any(|value| !value.is_finite()) {
             return Err(WorkerFail::Rejected);
         }
@@ -413,6 +744,8 @@ struct XtbKernel {
     destroy: XtbDestroy,
     worker: XtbWorker,
     evaluations: usize,
+    scc_rejected: usize,
+    atomic_numbers: Vec<i32>,
     /// Calls with a pair at or inside this distance are refused before xtb.
     overlap_limit_a: f64,
     /// Force buffer reused across calls. The owned DLPack tensor copies
@@ -476,6 +809,48 @@ fn first_existing(cands: &[PathBuf]) -> PathBuf {
         .unwrap_or_else(|| cands[cands.len() - 1].clone())
 }
 
+/// Status of an unconverged SCC.
+///
+/// The git pin defines `RGPOT_SCC_NOT_CONVERGED`. The registry release
+/// does not, so a build whose manifest has no git source reports
+/// `RGPOT_INTERNAL_ERROR` for the same failure.
+fn scc_failure_status() -> rgpot_status_t {
+    #[cfg(anneal_rgpot_git_scc)]
+    {
+        rgpot_status_t::RGPOT_SCC_NOT_CONVERGED
+    }
+    #[cfg(not(anneal_rgpot_git_scc))]
+    {
+        rgpot_status_t::RGPOT_INTERNAL_ERROR
+    }
+}
+
+/// The worker's answer, or the status of an evaluation that gave no energy.
+///
+/// An unconverged SCC, a rejected answer and a dead worker are the same to
+/// the search: the call was charged and returned nothing, so each is counted
+/// as an SCC rejection and leaves no force behind. Only the status differs.
+/// An unconverged SCC is [`scc_failure_status`]; the other two are
+/// `RGPOT_INTERNAL_ERROR`.
+fn answer_or_reject(
+    evaluation: Result<(f64, f64), WorkerFail>,
+    scratch: &mut [f64],
+    min_pair_a: f64,
+    scc_rejected: &mut usize,
+) -> Result<(f64, f64), rgpot_status_t> {
+    match evaluation {
+        Ok(answer) => Ok(answer),
+        Err(failure) => {
+            note_scc_rejected(scc_rejected, min_pair_a);
+            scratch.fill(f64::NAN);
+            Err(match failure {
+                WorkerFail::SccNotConverged => scc_failure_status(),
+                WorkerFail::Dead | WorkerFail::Rejected => rgpot_status_t::RGPOT_INTERNAL_ERROR,
+            })
+        }
+    }
+}
+
 unsafe extern "C" fn xtb_callback(
     user: *mut c_void,
     input: *const rgpot_force_input_t,
@@ -503,7 +878,7 @@ unsafe extern "C" fn xtb_callback(
     let atomic_numbers = unsafe { std::slice::from_raw_parts(z, n) };
     let cell = unsafe { std::slice::from_raw_parts(boxp, 9) };
     let min_pair = min_pair_distance_a(positions);
-    if min_pair <= kernel.overlap_limit_a {
+    if geometry_has_short_pair(positions, atomic_numbers, kernel.overlap_limit_a) {
         // xtb's SCC aborts when a trial step stacks two atoms. That geometry
         // is not an energy the search can record. The caller turns the error
         // into an uphill step and shortens it, so a finite quench stays eligible.
@@ -526,18 +901,25 @@ unsafe extern "C" fn xtb_callback(
             );
         }
     }
-    let (energy, var) =
-        match kernel
+    let evaluation =
+        kernel
             .worker
-            .evaluate(n, positions, atomic_numbers, cell, &mut kernel.scratch)
-        {
-            Ok(answer) => answer,
-            Err(_) => {
-                note_scc_rejected(min_pair);
-                kernel.scratch.fill(f64::NAN);
-                return rgpot_status_t::RGPOT_INTERNAL_ERROR;
-            }
-        };
+            .evaluate(n, positions, atomic_numbers, cell, &mut kernel.scratch);
+    let (energy, var) = match answer_or_reject(
+        evaluation,
+        &mut kernel.scratch,
+        min_pair,
+        &mut kernel.scc_rejected,
+    ) {
+        Ok(answer) => answer,
+        Err(status) => {
+            out.energy = f64::NAN;
+            out.variance = f64::NAN;
+            out.forces =
+                unsafe { rgpot_tensor_owned_cpu_f64_2d(kernel.scratch.as_ptr(), n as i64, 3) };
+            return status;
+        }
+    };
     out.energy = energy;
     out.variance = var;
     out.forces = unsafe { rgpot_tensor_owned_cpu_f64_2d(kernel.scratch.as_ptr(), n as i64, 3) };
@@ -598,6 +980,48 @@ pub(crate) struct RgpotObjective {
 // potential Send. Callers serialize evaluation because the handle is not Sync.
 unsafe impl Send for RgpotObjective {}
 
+pub(crate) struct CheckedObjective<'a> {
+    inner: EindirObjectiveWrapper<'a>,
+}
+
+impl Objective<f64> for CheckedObjective<'_> {
+    fn dim(&self) -> usize {
+        Objective::dim(&self.inner)
+    }
+
+    fn bounds(&self) -> &Bounds<f64> {
+        self.inner.bounds()
+    }
+
+    fn eval(&self, x: ndarray::ArrayView1<f64>) -> f64 {
+        self.inner.eval(x)
+    }
+}
+
+impl Gradient<f64> for CheckedObjective<'_> {
+    fn dim(&self) -> usize {
+        Gradient::dim(&self.inner)
+    }
+
+    fn grad(&self, x: ndarray::ArrayView1<f64>) -> ndarray::Array1<f64> {
+        self.value_and_gradient(x).1
+    }
+}
+
+impl DifferentiableObjective<f64> for CheckedObjective<'_> {
+    fn value_and_gradient(&self, x: ndarray::ArrayView1<f64>) -> (f64, ndarray::Array1<f64>) {
+        let energy = self.inner.eval(x);
+        if !energy.is_finite() {
+            return (f64::NAN, ndarray::Array1::from_elem(x.len(), f64::NAN));
+        }
+        let gradient = self.inner.grad(x);
+        if gradient.len() != x.len() || gradient.iter().any(|value| !value.is_finite()) {
+            return (f64::NAN, ndarray::Array1::from_elem(x.len(), f64::NAN));
+        }
+        (energy, gradient)
+    }
+}
+
 impl Drop for RgpotObjective {
     fn drop(&mut self) {
         unsafe { rgpot_potential_free_eindir(self.pot) };
@@ -605,7 +1029,28 @@ impl Drop for RgpotObjective {
 }
 
 impl RgpotObjective {
-    pub(crate) fn wrapper(&self) -> EindirObjectiveWrapper<'_> {
+    /// How many xtb calls on this objective failed to return a finite SCC result.
+    pub(crate) fn scc_rejected_count(&self) -> usize {
+        if self.xtb.is_null() {
+            return 0;
+        }
+        unsafe { (*self.xtb).scc_rejected }
+    }
+
+    pub(crate) fn refuses_geometry(&self, coordinates: &[f64]) -> bool {
+        if self.xtb.is_null() {
+            return false;
+        }
+        let kernel = unsafe { &*self.xtb };
+        let refused =
+            geometry_has_short_pair(coordinates, &kernel.atomic_numbers, kernel.overlap_limit_a);
+        if refused {
+            note_geometry_rejected(min_pair_distance_a(coordinates));
+        }
+        refused
+    }
+
+    pub(crate) fn wrapper(&self) -> CheckedObjective<'_> {
         let stamp = rgpot_eindir_abi_stamp();
         assert_eq!(
             unsafe { eindir_core_abi_compatible(&stamp) },
@@ -613,7 +1058,9 @@ impl RgpotObjective {
             "rgpot/eindir ABI stamp is incompatible with anneal's eindir boundary"
         );
         let obj = unsafe { &*(self.pot as *const eindir_objective_t) };
-        unsafe { EindirObjectiveWrapper::new(obj) }
+        CheckedObjective {
+            inner: unsafe { EindirObjectiveWrapper::new(obj) },
+        }
     }
 
     pub(crate) fn fresh_evaluation(&self, coordinates: &[f64]) -> Result<FreshEvaluation, String> {
@@ -749,6 +1196,8 @@ impl RgpotObjective {
             destroy: destroy_fn,
             worker,
             evaluations: 0,
+            scc_rejected: 0,
+            atomic_numbers: atmnrs.to_vec(),
             overlap_limit_a,
             scratch: Vec::new(),
         });

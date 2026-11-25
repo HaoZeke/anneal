@@ -23,4 +23,4 @@ python = []
 anneal-core = { version = "0.12.0", path = "../..", features = ["python-host"] }
 # [[[end]]]
 pyo3 = { version = "0.26", features = ["extension-module", "abi3-py310"] }
-rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }
+rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "3aa8f9caf87dce22a5e1d74f4a06c9779d0c2212" }

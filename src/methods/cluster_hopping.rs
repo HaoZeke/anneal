@@ -1641,31 +1641,65 @@ pub fn structure_is_sane(x: ArrayView1<f64>, min_sep: f64) -> bool {
     x.iter().all(|value| value.is_finite()) && min_pair_distance(x) >= min_sep
 }
 
+/// Whether every pair clears the shortest bond its atomic numbers permit.
+///
+/// The bound is [`element_call_floor`], the one [`CallFloor`] applies, so a
+/// pair the search opens to its floor is never refused here. It is
+/// [`COVALENT_CALL_FRACTION`] of the summed covalent radii, below every
+/// bond order and below a physical O–H and H–H. An element with no radius
+/// falls back to `absolute`.
+pub fn clears_species_sanity(x: ArrayView1<f64>, elements: &[u32], absolute: f64) -> bool {
+    let n = x.len() / 3;
+    x.len() == 3 * elements.len()
+        && x.iter().all(|value| value.is_finite())
+        && (0..n).all(|a| {
+            ((a + 1)..n).all(|b| {
+                let floor = element_call_floor(elements[a], elements[b], absolute);
+                pair_distance(x, a, b) > floor
+            })
+        })
+}
+
+/// Whether one covalent cluster remains connected under its atomic radii.
+///
+/// Molecular move libraries may intentionally contain several declared
+/// fragments, so their per-fragment bond checks remain separate. Atomic
+/// covalent searches, however, must not rank a finite energy for a cluster
+/// that has split into disconnected components.
+fn covalent_cluster_is_connected(cfg: &Config, x: ArrayView1<f64>, elements: &[u32]) -> bool {
+    matches!(cfg.move_library, MoveLibrary::Molecular { .. })
+        || (x.len() == 3 * elements.len()
+            && connectivity_groups_z(x, elements, cfg.bond_tolerance).len() == 1)
+}
+
 /// Whether every coordinate is finite and every pair lies past `floor`.
 pub fn clears_call_floor(x: ArrayView1<f64>, floor: f64) -> bool {
     x.iter().all(|value| value.is_finite()) && min_pair_distance(x) > floor
 }
 
 /// Distance at or below which a pair of elements `za` and `zb` is not
-/// handed to an objective that refuses every pair at or inside `absolute`.
+/// handed to an objective.
 ///
-/// [`COVALENT_CALL_FRACTION`] of the summed covalent radii, the floor a
-/// declared bond has in [`molecular_call_floor`], below the shortest bond
-/// of any order, and never below `absolute`: Si–Si 1.55 Å, C–C 1.06 Å, and
-/// any pair with hydrogen stays at `absolute`. A trial that stacks two
-/// heavy atoms at `absolute` is a geometry the potential's SCC cannot
-/// converge, and each line-search probe there is a charged call that fails.
+/// [`COVALENT_CALL_FRACTION`] of the summed covalent radii: Si–Si 1.55 Å,
+/// C–C 1.06 Å, H–H 0.434 Å. The radii set that floor. Raising it to a
+/// blanket 0.90 Å refuses a physical H–H bond at 0.741 Å. An element with
+/// no radius keeps `absolute`.
 pub fn element_call_floor(za: u32, zb: u32, absolute: f64) -> f64 {
-    let sum = moves::covalent_radius(za) + moves::covalent_radius(zb);
-    (COVALENT_CALL_FRACTION * sum).max(absolute)
+    let radius_a = moves::covalent_radius(za);
+    let radius_b = moves::covalent_radius(zb);
+    if radius_a > 0.0 && radius_b > 0.0 {
+        COVALENT_CALL_FRACTION * (radius_a + radius_b)
+    } else {
+        absolute
+    }
 }
 
 /// The pair distances at or below which the objective is not called.
 ///
-/// [`Config::call_floor`] for every pair, raised pair by pair to
-/// [`element_call_floor`] where [`Config::call_floor_elements`] names the
-/// atoms. Without elements it is the single floor, and every test and
-/// opening is the one [`clears_call_floor`] and [`open_call_floor`] make.
+/// [`Config::call_floor`] for every pair, and [`element_call_floor`] where
+/// [`Config::call_floor_elements`] names the atoms. Without elements it is
+/// the single floor, and every test and opening is the one
+/// [`clears_call_floor`] and [`open_call_floor`] make.
 #[derive(Debug, Clone, Copy)]
 pub struct CallFloor<'a> {
     /// The floor every pair keeps, [`Config::call_floor`].
@@ -2514,7 +2548,13 @@ pub(crate) fn separate_contacts(
     x.iter().all(|value| value.is_finite()) && min_pair_distance(x.view()) >= min_sep
 }
 
-fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
+pub(crate) fn quench_is_sane(cfg: &Config, energy: f64, x: ArrayView1<f64>) -> bool {
+    if let Some(elements) = cfg.call_floor_elements.as_deref()
+        && (!clears_species_sanity(x, elements, cfg.call_floor.unwrap_or(OVERLAP_CALL_LIMIT))
+            || !covalent_cluster_is_connected(cfg, x, elements))
+    {
+        return false;
+    }
     let minimum = if cfg.species.is_some() {
         OVERLAP_SEPARATION
     } else {
@@ -8811,6 +8851,8 @@ where
             // run computed. The same predicate records an auxiliary quench.
             if answer_is_recordable(cfg, ledger, e_screen, x_screen.view(), true, true, false) {
                 ledger.record(e_screen, x_screen.view());
+            } else {
+                unconverged_records += 1;
             }
             break HopStop::of_closed(ledger);
         }
@@ -9000,6 +9042,8 @@ where
             // hop quench returned is the answer, gradient or not.
             if answer_is_recordable(cfg, ledger, e_new, x_new.view(), false, true, false) {
                 ledger.record(e_new, x_new.view());
+            } else {
+                unconverged_records += 1;
             }
             break HopStop::of_closed(ledger);
         }
@@ -16331,6 +16375,68 @@ mod call_floor_tests {
     }
 
     #[test]
+    fn a_result_that_arrives_after_the_stop_is_recorded_only_when_it_is_sane() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        const ATOMS: usize = 4;
+        const COLLAPSED_ENERGY: f64 = -1000.0;
+        let tetrahedron = |edge: f64| {
+            let a = edge / (2.0 * 2.0_f64.sqrt());
+            Array1::from(vec![a, a, a, a, -a, -a, -a, a, -a, -a, -a, a])
+        };
+        let sane = tetrahedron(1.6);
+        assert!(min_pair_distance(sane.view()) > 1.064);
+        let mut collapsed = sane.clone();
+        for axis in 0..3 {
+            collapsed[3 + axis] = collapsed[axis] + if axis == 0 { 0.1 } else { 0.0 };
+        }
+
+        let mut stopped_runs = 0;
+        for stop_call in 2..=6usize {
+            let mut cfg = Config::for_cluster(ATOMS);
+            cfg.call_floor = Some(FLOOR);
+            cfg.call_floor_elements = Some(vec![6; ATOMS]);
+            assert!(quench_is_sane(&cfg, -1.0, sane.view()));
+            assert!(!quench_is_sane(&cfg, COLLAPSED_ENERGY, collapsed.view()));
+
+            let flag = Arc::new(AtomicBool::new(false));
+            let calls = AtomicUsize::new(0);
+            let stopper = flag.clone();
+            let mut relax = |_: &mut Ledger, _: ArrayView1<f64>, _: usize| {
+                let call = calls.fetch_add(1, Ordering::Relaxed) + 1;
+                if call == stop_call {
+                    stopper.store(true, Ordering::Relaxed);
+                    (COLLAPSED_ENERGY, collapsed.clone())
+                } else {
+                    (-1.0 - 0.01 * call as f64, sane.clone())
+                }
+            };
+            let mut ledger = Ledger::with_stop(1_000_000, flag.clone());
+            let mut rng = StdRng::seed_from_u64(5);
+            let outcome =
+                run(&cfg, sane.view(), &mut ledger, &mut relax, &mut rng).expect("finite start");
+            if !flag.load(Ordering::Relaxed) {
+                continue;
+            }
+            stopped_runs += 1;
+            assert!(
+                ledger.best > COLLAPSED_ENERGY / 2.0,
+                "stop at call {stop_call} recorded the collapsed geometry: {}",
+                ledger.best
+            );
+            assert!(
+                outcome.unconverged_records >= 1,
+                "stop at call {stop_call} barred nothing"
+            );
+        }
+        assert!(
+            stopped_runs >= 2,
+            "the stop was reached on {stopped_runs} runs"
+        );
+    }
+
+    #[test]
     fn a_zero_step_read_inside_the_floor_is_refused_where_it_stands() {
         let mut cfg = Config::for_cluster(2);
         cfg.call_floor = Some(FLOOR);
@@ -16416,20 +16522,143 @@ mod call_floor_tests {
     }
 
     #[test]
-    fn an_element_floor_sits_between_the_absolute_floor_and_any_bond() {
+    fn an_element_floor_is_the_scaled_covalent_radii() {
         assert!((element_call_floor(14, 14, FLOOR) - 0.70 * 2.22).abs() < 1.0e-12);
         assert!((element_call_floor(6, 6, FLOOR) - 0.70 * 1.52).abs() < 1.0e-12);
-        assert_eq!(element_call_floor(1, 1, FLOOR), FLOOR);
-        assert_eq!(element_call_floor(6, 1, FLOOR), FLOOR);
+        assert!((element_call_floor(1, 1, FLOOR) - 0.70 * 0.62).abs() < 1.0e-12);
+        assert!((element_call_floor(6, 1, FLOOR) - 0.70 * (0.76 + 0.31)).abs() < 1.0e-12);
         for za in 0..=96 {
             for zb in za..=96 {
                 let floor = element_call_floor(za, zb, FLOOR);
-                assert!(floor >= FLOOR, "{za}-{zb}");
+                let radius_a = super::moves::covalent_radius(za);
+                let radius_b = super::moves::covalent_radius(zb);
+                if radius_a > 0.0 && radius_b > 0.0 {
+                    let from_radii = COVALENT_CALL_FRACTION * (radius_a + radius_b);
+                    assert!(
+                        (floor - from_radii).abs() < 1.0e-12,
+                        "{za}-{zb} floor {floor} was raised above {from_radii}"
+                    );
+                } else {
+                    assert_eq!(floor, FLOOR, "{za}-{zb}");
+                }
                 let shortest = shortest_bond_length(za, zb);
-                if za > 1 && shortest > FLOOR {
+                if shortest > floor {
                     assert!(floor < shortest, "{za}-{zb}");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn a_physical_h2_clears_the_radius_floor_and_a_collapsed_pair_does_not() {
+        let absolute = OVERLAP_CALL_LIMIT;
+        let floor = element_call_floor(1, 1, absolute);
+        assert!((floor - 0.70 * 0.62).abs() < 1.0e-12);
+        assert!(floor < 0.741);
+        let elements = [1u32, 1];
+        let call = CallFloor {
+            absolute,
+            elements: Some(&elements),
+        };
+        let physical = Array1::from(vec![0.0, 0.0, 0.0, 0.741, 0.0, 0.0]);
+        let collapsed = Array1::from(vec![0.0, 0.0, 0.0, 0.20, 0.0, 0.0]);
+        assert!(call.clears(physical.view()));
+        assert!(clears_species_sanity(physical.view(), &elements, absolute));
+        assert!(!call.clears(collapsed.view()));
+        assert!(!clears_species_sanity(
+            collapsed.view(),
+            &elements,
+            absolute
+        ));
+        assert!(0.20 <= element_call_floor(1, 1, 0.0));
+    }
+
+    #[test]
+    fn species_sanity_rejects_compression_but_keeps_multiple_bonds() {
+        let silicon = [14, 14];
+        let compressed = Array1::from(vec![0.0, 0.0, 0.0, 1.40, 0.0, 0.0]);
+        let at_floor = Array1::from(vec![0.0, 0.0, 0.0, 1.60, 0.0, 0.0]);
+        let physical = Array1::from(vec![0.0, 0.0, 0.0, 2.20, 0.0, 0.0]);
+        assert!(!clears_species_sanity(compressed.view(), &silicon, FLOOR));
+        assert!(clears_species_sanity(at_floor.view(), &silicon, FLOOR));
+        assert!(clears_species_sanity(physical.view(), &silicon, FLOOR));
+
+        let carbon = [6, 6];
+        let triple = Array1::from(vec![0.0, 0.0, 0.0, 1.20, 0.0, 0.0]);
+        assert!(clears_species_sanity(triple.view(), &carbon, FLOOR));
+    }
+
+    #[test]
+    fn a_detached_covalent_atom_is_not_a_recordable_minimum() {
+        let mut cfg = Config::for_cluster(3);
+        cfg.call_floor = Some(FLOOR);
+        cfg.call_floor_elements = Some(vec![14; 3]);
+        let connected = Array1::from(vec![0.0, 0.0, 0.0, 2.3, 0.0, 0.0, 4.6, 0.0, 0.0]);
+        let detached = Array1::from(vec![0.0, 0.0, 0.0, 2.3, 0.0, 0.0, 6.8, 0.0, 0.0]);
+
+        assert!(quench_is_sane(&cfg, -1.0, connected.view()));
+        assert!(clears_species_sanity(
+            detached.view(),
+            cfg.call_floor_elements.as_deref().unwrap(),
+            FLOOR
+        ));
+        assert!(!quench_is_sane(&cfg, -2.0, detached.view()));
+    }
+
+    #[test]
+    fn species_sanity_accepts_a_physical_water_bond_and_refuses_a_collapsed_pair() {
+        let water = [8, 1, 1];
+        let at = |oh: f64| Array1::from(vec![0.0, 0.0, 0.0, oh, 0.0, 0.0, -0.24, 0.93, 0.0]);
+        assert!(clears_species_sanity(at(0.957).view(), &water, FLOOR));
+        assert!(clears_species_sanity(at(0.97).view(), &water, FLOOR));
+        assert!(clears_species_sanity(at(0.85).view(), &water, FLOOR));
+        assert!(!clears_species_sanity(at(0.60).view(), &water, FLOOR));
+
+        let mut cfg = Config::for_cluster(3);
+        cfg.call_floor = Some(FLOOR);
+        cfg.call_floor_elements = Some(water.to_vec());
+        assert!(quench_is_sane(&cfg, -1.0, at(0.957).view()));
+        assert!(!quench_is_sane(&cfg, -1.0, at(0.60).view()));
+    }
+
+    #[test]
+    fn no_pair_is_floored_above_a_physical_bond_for_its_elements() {
+        for (za, zb, length) in [
+            (8u32, 1u32, 0.957),
+            (1, 1, 0.741),
+            (7, 1, 1.012),
+            (9, 1, 0.917),
+            (6, 6, 1.20),
+            (14, 14, 2.20),
+        ] {
+            assert!(element_call_floor(za, zb, 0.0) < length, "{za}-{zb}");
+            assert!(
+                element_call_floor(za, zb, OVERLAP_CALL_LIMIT) < length,
+                "{za}-{zb} at the 0.90 A absolute"
+            );
+        }
+        assert!(element_call_floor(8, 1, FLOOR) < 0.957);
+    }
+
+    #[test]
+    fn a_geometry_the_call_floor_opened_is_sane_for_the_species_check() {
+        for elements in [vec![14u32; 3], vec![6; 3], vec![8, 1, 1]] {
+            let floor = CallFloor {
+                absolute: FLOOR,
+                elements: Some(&elements),
+            };
+            let mut x = Array1::from(vec![0.0, 0.0, 0.0, 0.2, 0.0, 0.0, 0.1, 0.15, 0.0]);
+            assert!(!floor.clears(x.view()));
+            assert!(!clears_species_sanity(x.view(), &elements, FLOOR));
+            assert!(floor.open(&mut x, None));
+            assert!(
+                clears_species_sanity(x.view(), &elements, FLOOR),
+                "{elements:?}"
+            );
+            let mut cfg = Config::for_cluster(3);
+            cfg.call_floor = Some(FLOOR);
+            cfg.call_floor_elements = Some(elements.clone());
+            assert!(quench_is_sane(&cfg, -1.0, x.view()), "{elements:?}");
         }
     }
 
