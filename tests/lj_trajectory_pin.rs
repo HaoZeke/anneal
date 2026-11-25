@@ -108,10 +108,18 @@ fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
 /// unscreened probe pinned `c9b6d7d6…`. The refusals are audited before
 /// the next hop, and their calls move the walk again; with the audit
 /// never scheduled the hash is the screened probe's `63c2f410…`.
+///
+/// The hop 2 audit runs out of its budget with two refusals waiting, one
+/// of them cut. Both stay deferred, and the audit at hop 4 relaxes the
+/// untried one for 332 calls and is cut again. The walk that dropped them
+/// pinned `9a965dcd…`. The first six accepted transitions are unchanged;
+/// with 332 fewer calls the walk's hop 8 quench ends on the budget before
+/// its convergence check, 6.5e-11 above the energy it reached there, and
+/// the walk makes 8 hops where it made 9, at the same best and charge.
 #[test]
 fn recommended_lj98_seed_2000_with_the_probe_at_hop_zero_keeps_its_trajectory() {
     anneal_core::install_rgpot_kernels!();
     let hash = trajectory_hash(Some(0));
-    let expected = "9a965dcdca003e2105864026f3e76cd63a78dcd665e32ab4cae4e5673878d02f";
+    let expected = "c3a567652305c127e07504471e07471e4d2d9414d5b52d9183706a0f15d76e02";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }
