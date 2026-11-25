@@ -547,63 +547,101 @@ def test_early_return_does_not_call_ar_and_keeps_the_default(
     _assert_zero_owners(opt_out)
 
 
+def _real_ar_accepts_d(tmp_path: Path) -> bool:
+    """Probe ``/usr/bin/ar`` for ``D`` without going through the build script."""
+    member = tmp_path / "probe-member"
+    member.write_bytes(b"member\n")
+    archive = tmp_path / "probe.a"
+    archive.unlink(missing_ok=True)
+    result = subprocess.run(
+        ["/usr/bin/ar", "rcD", str(archive), str(member)],
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0 and archive.is_file()
+
+
+def _assemble_object(tmp_path: Path) -> Path:
+    obj = tmp_path / "foo.o"
+    source = tmp_path / "foo.s"
+    source.write_text(".globl foo\nfoo:\nret\n", encoding="utf-8")
+    # Apple's `as` is clang and does not read assembly from stdin.
+    subprocess.check_call(["as", "-o", str(obj), str(source)], cwd=tmp_path)
+    return obj
+
+
+def _shipped_calls(log: Path, out: Path) -> list[list[str]]:
+    invocations = [ast.literal_eval(line) for line in log.read_text(encoding="utf-8").splitlines()]
+    final = [args for args in invocations if str(out) in args]
+    assert final, invocations
+    return final
+
+
 def test_stamping_shim_is_cleared_only_on_the_shipped_archive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``ar`` on PATH writes a real mtime and uid. Opt-in zeros the archive that ships.
 
     ``ar sD`` before ``ld -r`` does not: the shim stamps the final ``ar crs``
-    write, and that is the archive a consumer links.
+    write, and that is the archive a consumer links. This shim forwards to
+    ``/usr/bin/ar``, so ``D`` is passed exactly when that archiver accepts it.
+    GNU ar does. Apple ar rejects ``D`` and takes the plain ``crs`` path.
+    """
+    if not Path("/usr/bin/ar").is_file() or shutil.which("as") is None:
+        pytest.skip("needs /usr/bin/ar and as")
+    accepts_d = _real_ar_accepts_d(tmp_path)
+    if sys.platform.startswith("linux"):
+        assert accepts_d, "GNU ar accepts D"
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir()
+    log = tmp_path / "ar.log"
+    shim = _write_shim(shim_dir / "ar", reject_d=False)
+    monkeypatch.setenv("PATH", str(shim_dir) + os.pathsep + os.environ.get("PATH", ""))
+    monkeypatch.setenv("ANNEAL_TEST_AR_LOG", str(log))
+    monkeypatch.delenv("AR", raising=False)
+    obj = _assemble_object(tmp_path)
+    out = tmp_path / "lib.a"
+    MODULE._AR_SUPPORTS_D.clear()
+    MODULE.pack_deterministic_archive(str(shim), str(out), [str(obj)])
+    assert MODULE.archiver_supports_deterministic(str(shim)) is accepts_d
+    _assert_zero_owners(out)
+    subprocess.check_call(["/usr/bin/ar", "t", str(out)], stdout=subprocess.DEVNULL)
+    final = _shipped_calls(log, out)
+    if accepts_d:
+        assert any("D" in args[1] for args in final), final
+    else:
+        assert all("D" not in args[1] for args in final), final
+
+
+def test_archiver_rejecting_d_packs_the_shipped_archive_without_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An archiver that rejects ``D`` ships a zeroed archive packed with plain ``crs``.
+
+    The shim rejects ``D`` on every platform, so this is the Apple ar branch
+    exercised on Linux as well. The stamped mtime and uid it writes after the
+    pack are cleared by the header rewrite.
     """
     if not Path("/usr/bin/ar").is_file() or shutil.which("as") is None:
         pytest.skip("needs /usr/bin/ar and as")
     shim_dir = tmp_path / "bin"
     shim_dir.mkdir()
     log = tmp_path / "ar.log"
-    _write_shim(shim_dir / "ar", reject_d=False)
+    shim = _write_shim(shim_dir / "ar", reject_d=True)
     monkeypatch.setenv("PATH", str(shim_dir) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setenv("ANNEAL_TEST_AR_LOG", str(log))
     monkeypatch.delenv("AR", raising=False)
-    obj = tmp_path / "foo.o"
-    source = tmp_path / "foo.s"
-    source.write_text(".globl foo\nfoo:\nret\n", encoding="utf-8")
-    # Apple's `as` is clang and does not read assembly from stdin.
-    subprocess.check_call(["as", "-o", str(obj), str(source)], cwd=tmp_path)
+    obj = _assemble_object(tmp_path)
     out = tmp_path / "lib.a"
     MODULE._AR_SUPPORTS_D.clear()
-    MODULE.pack_deterministic_archive(str(shim_dir / "ar"), str(out), [str(obj)])
+    assert MODULE.archiver_supports_deterministic(str(shim)) is False
+    MODULE._AR_SUPPORTS_D.clear()
+    MODULE.pack_deterministic_archive(str(shim), str(out), [str(obj)])
     _assert_zero_owners(out)
     subprocess.check_call(["/usr/bin/ar", "t", str(out)], stdout=subprocess.DEVNULL)
-    invocations = [ast.literal_eval(line) for line in log.read_text(encoding="utf-8").splitlines()]
-    final = [args for args in invocations if str(out) in args]
-    assert final, invocations
-    assert any("D" in args[1] for args in final), final
-
-    log.write_text("", encoding="utf-8")
-    reject_dir = tmp_path / "reject"
-    reject_dir.mkdir()
-    reject = _write_shim(reject_dir / "ar", reject_d=True)
-    reject_out = tmp_path / "reject.a"
-    MODULE._AR_SUPPORTS_D.clear()
-    MODULE.pack_deterministic_archive(str(reject), str(reject_out), [str(obj)])
-    _assert_zero_owners(reject_out)
-    assert MODULE.archiver_supports_deterministic(str(reject)) is False
-    reject_log = tmp_path / "reject.log"
-    # The pack above did not set a log. Re-run against a logged shim path.
-    logged = tmp_path / "logged-reject"
-    logged.mkdir()
-    logged_shim = _write_shim(logged / "ar", reject_d=True)
-    monkeypatch.setenv("ANNEAL_TEST_AR_LOG", str(reject_log))
-    logged_out = tmp_path / "logged-reject.a"
-    MODULE._AR_SUPPORTS_D.clear()
-    MODULE.pack_deterministic_archive(str(logged_shim), str(logged_out), [str(obj)])
-    _assert_zero_owners(logged_out)
-    logged_calls = [
-        ast.literal_eval(line) for line in reject_log.read_text(encoding="utf-8").splitlines()
-    ]
-    shipped = [args for args in logged_calls if str(logged_out) in args]
-    assert shipped, logged_calls
-    assert all("D" not in args[1] for args in shipped), shipped
+    final = _shipped_calls(log, out)
+    assert any(args[1] == "crs" for args in final), final
+    assert all("D" not in args[1] for args in final), final
 
 
 def test_linux_shim_on_path_and_merged_rustflags(

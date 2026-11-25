@@ -4,7 +4,9 @@ matches its committed rows, and the audit notices a drifted cell."""
 
 import importlib.util
 import math
+import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -14,6 +16,9 @@ ROOT = Path(__file__).resolve().parent.parent
 SPEC = importlib.util.spec_from_file_location("paper_audit", ROOT / "scripts" / "paper_audit.py")
 audit_mod = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(audit_mod)
+# The suite checks origin record refs. main() leaves the fetch off unless
+# --fetch-records is passed; tests that call the functions set it here.
+audit_mod._FETCH_RECORDS = True
 
 CHECKS = (
     audit_mod.manuscript_ablation,
@@ -51,6 +56,7 @@ CHECKS = (
     audit_mod.rerun_claims,
     audit_mod.rerun_check,
     audit_mod.revision_map,
+    audit_mod.all_revision_provenance,
 )
 
 
@@ -230,6 +236,70 @@ def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_pa
     assert not with_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
 
 
+@pytest.mark.parametrize(
+    ("branch", "revision"),
+    [
+        ("fix/morse-gmin", "0ef6ba4e39e7a8f2812b75a8e02fcd75a12e19e2"),
+        ("fix/sc-portfolio", "17210f1b11c25e1c2031cdb33c4f1cccfb7cc807"),
+        ("bench/ptcu-gupta", "55fde657c867f1220a2b6a9792338c67421ebd68"),
+    ],
+)
+def test_optional_remote_branches_join_the_remote_closure(branch, revision):
+    assert branch in audit_mod.AUDIT_OPTIONAL_REMOTES
+    ref = f"refs/remotes/origin/{branch}"
+    if git("show-ref", "--verify", "--quiet", ref).returncode != 0:
+        pytest.skip(f"optional remote {ref} is not fetched in this clone")
+    index = audit_mod.RevisionIndex((revision,), (), (), ())
+    assert index.audited_exists(revision)
+    assert index.on_remote(revision)
+
+
+def test_a_verified_record_ref_joins_the_audited_closure(tmp_path, monkeypatch):
+    """A commit only a verified record ref holds is in the audited and remote closures; unverified, it is not."""
+    repo = tmp_path / "clone"
+    repo.mkdir()
+
+    def run_git(*args):
+        done = subprocess.run(
+            ["git", "-c", "user.name=audit", "-c", "user.email=audit@example.invalid",
+             "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", *args],
+            cwd=repo, capture_output=True, text=True, check=True)
+        return done.stdout.strip()
+
+    run_git("init", "--quiet")
+    run_git("commit", "--allow-empty", "-m", "root")
+    root = run_git("rev-parse", "HEAD")
+    run_git("update-ref", "refs/remotes/origin/develop", root)
+    run_git("checkout", "--quiet", "--detach")
+    run_git("commit", "--allow-empty", "-m", "record")
+    record = run_git("rev-parse", "HEAD")
+    run_git("checkout", "--quiet", "--detach", root)
+    monkeypatch.setattr(audit_mod, "ROOT", repo)
+
+    monkeypatch.setattr(audit_mod, "_verified_record_refs", lambda: ())
+    unverified = audit_mod.RevisionIndex((root, record), (), (), ())
+    assert not unverified.audited_exists(record)
+    assert not unverified.on_remote(record)
+
+    monkeypatch.setattr(audit_mod, "_verified_record_refs", lambda: (record,))
+    verified = audit_mod.RevisionIndex((root, record), (), (), ())
+    assert verified.audited_exists(record)
+    assert verified.on_remote(record)
+    assert verified.on_remote(root)
+
+
+def test_the_sc_h2h_harness_is_pushed_through_its_record_ref(tmp_path, monkeypatch):
+    need_origin()
+    harness = "d59b0b6cf02fc300ff618f79d65da365128eed5a"
+    audit_mod.revision_index.cache_clear()
+    index = audit_mod.alias_index([harness], [])
+    assert index.audited_exists(harness) and index.on_remote(harness)
+    registry(tmp_path, monkeypatch, [])
+    audit_mod.revision_index.cache_clear()
+    index = audit_mod.alias_index([harness], [])
+    assert not index.audited_exists(harness) and not index.on_remote(harness)
+
+
 def test_a_drifted_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
@@ -241,8 +311,8 @@ def test_a_drifted_table_cell_is_reported():
 def test_a_drifted_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 246.5 & 10/12 & 0/12 & 0/12 & 0 & 12 &"
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 246.5 & 11/12 & 0/12 & 0/12 & 0 & 12 &")
+    old = "& 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 &"
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 289.0 & 8/12 & 0/12 & 0/12 & 0 & 12 &")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
     assert sorted(r[2] for r in audit.drifts()) == ["recommended hits", "tab:ase is the summariser's block"]
@@ -291,6 +361,21 @@ def test_an_uncharged_gmin_panel_miss_is_reported():
     miss["charged"] = "50000"
     audit_mod.manuscript_gmin(audit)
     assert "row invariants" in {r[2] for r in audit.drifts()}
+
+
+def test_a_stale_gmin_single_session_claim_is_reported():
+    audit = audit_mod.Audit()
+    audit.text_cache[audit_mod.COVER] = (
+        audit.text(audit_mod.COVER)
+        + "\n% check\nthirteen Lennard-Jones, Gupta, and Morse clusters in one session.\n"
+    )
+    audit.text_cache[audit_mod.SI] = audit.text(audit_mod.SI) + "\nThe same-session panel of the main text.\n"
+    audit_mod.manuscript_gmin(audit)
+    audit_mod.supporting_gmin(audit)
+    assert {(r[1], r[2]) for r in audit.drifts()} == {
+        (audit_mod.COVER, "no whole-table single-session claim"),
+        (audit_mod.SI, "no same-session panel claim in SI"),
+    }
 
 
 def test_a_stale_gmin_panel_source_patch_digest_is_reported():
@@ -342,39 +427,218 @@ def test_a_retired_rerun_sentence_is_reported():
     assert [r[2] for r in audit.drifts()] == ["retired claim"]
 
 
+def sc_code_revisions(audit, path, system, arm, label="code revision"):
+    """Values shown on the passing revision checks of one printed Sutton-Chen row."""
+    return [r[3] for r in audit.results
+            if r[0] == "OK" and r[2] == label and r[1].startswith(f"{path}:") and r[1].endswith(f" {system} {arm}")]
+
+
 def test_an_old_sutton_chen_gmin_cell_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| sc126-38 | gmin | f9d1ac05 | 12/12 |", "| sc126-38 | gmin | f9d1ac05 | 1/12 |")
+    audit.text_cache[SC_N12] = text.replace("| sc126-38 | gmin | 9cbec1a4 | 12/12 |", "| sc126-38 | gmin | 9cbec1a4 | 1/12 |")
     audit_mod.head_to_head(audit)
-    assert [(r[1].split()[-3:], r[2]) for r in audit.drifts()] == [(["sc126-38", "gmin", "f9d1ac05"], "hits")]
+    assert [(r[1].split()[-2:], r[2], r[3], r[4]) for r in audit.drifts()] == [(["sc126-38", "gmin"], "hits", "1/12", "12/12")]
+    assert sc_code_revisions(audit, SC_N12, "sc126-38", "gmin", "gmin pin") == ["9cbec1a4"]
 
 
 def test_a_dropped_sutton_chen_rerun_row_is_reported():
+    kept = audit_mod.Audit()
+    audit_mod.head_to_head(kept)
+    assert sc_code_revisions(kept, SC_N12, "sc108-38", "gmin", "gmin pin") == ["9cbec1a4"]
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| sc108-38 | gmin | f9d1ac05 | 0/12 | 400000 | 4.305 |\n", "")
+    old = "| sc108-38 | gmin | 9cbec1a4 | 3/12 | 400000 |  |  |\n"
+    assert old in text
+    audit.text_cache[SC_N12] = text.replace(old, "")
     audit_mod.head_to_head(audit)
-    assert [r[2] for r in audit.drifts()] == ["table row sc108-38 gmin f9d1ac05"]
+    assert [(r[1], r[2], r[3], r[4]) for r in audit.drifts()] == [(SC_N12, "table row sc108-38 gmin", "missing", "shown")]
+    assert sc_code_revisions(audit, SC_N12, "sc108-38", "gmin", "gmin pin") == []
+
+
+def test_a_sutton_chen_harness_blob_off_its_revision_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(SC_RERUN_ROWS)
+    rows[0]["harness_blob"] = "0" * 40
+    audit_mod.sc_h2h_harness_blob(audit)
+    drifted = [(r[2], r[3], r[4]) for r in audit.drifts()]
+    assert len(drifted) == 1
+    assert drifted[0][0] == "harness_blob"
+    assert "0" * 40 in drifted[0][1]
+    assert drifted[0][2] == "ac6b3c85b4eb435c4787a8a7425ab7e6858f9b34"
+
+
+def test_a_different_sutton_chen_relabel_is_rejected(monkeypatch):
+    parent = "3f759aa8409fb49ad09e2b45d143dab2d21ae53c"
+    monkeypatch.setattr(audit_mod, "SC_H2H_RELABEL", parent)
+    audit = audit_mod.Audit()
+    audit_mod.sc_h2h_code_relabel(audit)
+    drifts = {r[2] for r in audit.drifts()}
+    assert "relabel commit" in drifts
+    assert "gmin code_revision relabel" in drifts
+    shown = [r for r in audit.drifts() if r[2] == "gmin code_revision relabel"]
+    assert shown[0][4] == audit_mod.SC_H2H_GMIN_PIN
+
+
+def test_a_new_sutton_chen_rows_blob_is_rejected(monkeypatch):
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        if args and args[0] == "hash-object":
+            done = real(*args, **kwargs)
+            done.stdout = "f" * 40 + "\n"
+            return done
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    audit = audit_mod.Audit()
+    audit_mod.sc_h2h_code_relabel(audit)
+    drifts = {r[2]: r for r in audit.drifts()}
+    assert drifts["rows blob"][3] == "f" * 40
+    assert drifts["gmin code_revision relabel"][4] == audit_mod.SC_H2H_GMIN_PIN
+
+
+def test_an_edited_sutton_chen_gmin_code_revision_is_rejected():
+    audit = audit_mod.Audit()
+    row = next(r for r in audit.rows(SC_RERUN_ROWS) if r["arm"] == "gmin")
+    row["code_revision"] = "0" * 40
+    audit_mod.sc_h2h_code_relabel(audit)
+    drifts = [r for r in audit.drifts() if r[2] == "gmin code_revision relabel"]
+    assert len(drifts) == 1
+    assert "0" * 40 in drifts[0][3]
+    assert not any(r[2] == "rows blob" for r in audit.drifts())
+    assert not any(r[2] == "relabel commit" for r in audit.drifts())
+
+
+def test_the_sutton_chen_harness_blob_matches_the_cited_harness():
+    audit = audit_mod.Audit()
+    audit_mod.sc_h2h_harness_blob(audit)
+    assert audit.drifts() == []
+    assert any(r[2] == "harness_blob" and r[3] == "ac6b3c85b4eb435c4787a8a7425ab7e6858f9b34" for r in audit.results)
+
+
+def test_the_printed_sutton_chen_gmin_rows_have_one_harness():
+    # The printed GMIN rows no longer name their harness; the stored rows
+    # give it, and with it the GMIN data file of scripts/metal_h2h/run_sc.py.
+    rows = audit_mod.Audit().rows("bench/paper-rerun/sc-h2h/rows.csv")
+    assert {(r["harness_revision"], r["harness_blob"], r["gmin_pin"]) for r in rows if r["arm"] == "gmin"} == {
+        ("d59b0b6cf02fc300ff618f79d65da365128eed5a", "ac6b3c85b4eb435c4787a8a7425ab7e6858f9b34",
+         "9cbec1a446352bc9ef064bd2b1a5767194655919")}
 
 
 def test_a_rerun_missing_from_the_sutton_chen_readme_is_reported():
+    # The rerun summary holds one row per system and arm, and sc96-55 gmin is
+    # already printed; sc96-99 is a system the rerun never ran.
+    audit = audit_mod.Audit()
+    summary = audit.rows(audit_mod.SC_RERUN_SUMMARY)
+    summary.append({**summary[0], "system": "sc96-99", "arm": "gmin", "hits_over_n": "0/12"})
+    audit_mod.head_to_head(audit)
+    assert sorted((r[1], r[2], r[3], r[4]) for r in audit.drifts()) == [
+        (SC_N12, "table row sc96-99 gmin", "missing", "shown"),
+        ("bench/paper-rerun/sc-h2h/README.md", "table row sc96-99 gmin", "missing", "shown"),
+        (f"{audit_mod.SC_RERUN_SUMMARY} sc96-99 gmin", "summary row", "shown", "no rows"),
+    ]
+
+
+def test_an_sc_n12_gmin_rerun_without_its_seed_rows_is_reported():
+    # The sc-n12 README no longer prints harness revisions, a test table or a
+    # rerun sentence, so the stored rows must still back every summary line.
     audit = audit_mod.Audit()
     summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
     row = dict([r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"][-1])
     summary.append({**row, "harness_revision": "0" * 40})
     audit_mod.head_to_head(audit)
-    labels = {r[2] for r in audit.drifts() if r[1] == SC_N12}
-    assert {"table row sc96-55 gmin 00000000", "test row sc96-55", "prose"} <= labels
+    assert [(r[1], r[2], r[3], r[4]) for r in audit.drifts()] == [
+        ("bench/metal-cluster-h2h/sc-n12/results.csv sc96-55 gmin 00000000", "per-seed rows", "12", "0")]
 
 
 def test_a_rerun_without_its_tests_is_reported():
     audit = audit_mod.Audit()
-    summary = audit.rows("bench/metal-cluster-h2h/sc-n12/results.csv")
-    row = [r for r in summary if r["system"] == "sc96-55" and r["arm"] == "gmin"][-1]
+    summary = audit.rows(audit_mod.SC_RERUN_SUMMARY)
+    row = next(r for r in summary if r["system"] == "sc126-38" and r["arm"] == "anneal")
     row["fisher_p_vs_gmin"] = ""
     audit_mod.head_to_head(audit)
     assert ("Fisher p", "1") in [(r[2], r[3]) for r in audit.drifts()]
+
+
+SC_RERUN_ROWS = "bench/paper-rerun/sc-h2h/rows.csv"
+SIDE_COMMIT = "e3ed7dadfce4f0c0aa3b9616f6f07dd9b3171e0a"
+
+
+def test_a_sutton_chen_summary_off_its_rows_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(SC_RERUN_ROWS)
+    for row in rows:
+        if row["system"] == "sc126-38" and row["arm"] == "anneal" and row["hit"] == "1":
+            row["evals_to_hit"] = str(int(row["evals_to_hit"]) + 400)
+    audit_mod.head_to_head(audit)
+    drifted = {(r[1], r[2]) for r in audit.drifts()}
+    assert (f"{audit_mod.SC_RERUN_SUMMARY} sc126-38 anneal", "calls_median") in drifted
+
+
+def test_a_sutton_chen_summary_cell_off_its_rows_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(SC_RERUN_ROWS)
+    row = next(r for r in rows if r["system"] == "sc108-38" and r["arm"] == "gmin" and r["hit"] == "0")
+    row["hit"] = "1"
+    audit_mod.head_to_head(audit)
+    drifted = {(r[1], r[2]) for r in audit.drifts()}
+    assert {(f"{audit_mod.SC_RERUN_SUMMARY} sc108-38 gmin", "hits"),
+            (f"{audit_mod.SC_RERUN_SUMMARY} sc108-38 anneal", "fisher_p_vs_gmin")} <= drifted
+
+
+def test_a_missing_sutton_chen_rerun_row_is_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(SC_RERUN_ROWS)
+    assert len(rows) == 216
+    dropped = rows.pop(5)
+    audit_mod.head_to_head(audit)
+    drifted = {(r[2], r[3]) for r in audit.drifts()}
+    assert ("rows", "215") in drifted
+    assert (f"manifest cell {dropped['system']} {dropped['arm']} {dropped['seed']}", "0") in drifted
+
+
+def test_the_sutton_chen_code_revision_comes_from_the_rows():
+    audit = audit_mod.Audit()
+    for row in audit.rows(SC_RERUN_ROWS):
+        row["code_revision"] = SIDE_COMMIT
+    audit_mod.head_to_head(audit)
+    labels = [r[2] for r in audit.drifts()]
+    assert "the rerun code revision is an ancestor of HEAD" in labels
+    # Anneal rows name code_revision. GMIN rows name gmin_pin, so a rewritten
+    # code_revision drifts the nine anneal rows in each of the two READMEs.
+    assert labels.count("code revision") == 18
+    assert "gmin pin" not in labels
+
+
+def test_a_wrong_printed_gmin_pin_is_reported():
+    audit = audit_mod.Audit()
+    for path in (SC_N12, "bench/paper-rerun/sc-h2h/README.md"):
+        audit.text_cache[path] = audit.text(path).replace("| gmin | 9cbec1a4 |", "| gmin | 61fa67cf |")
+    audit_mod.head_to_head(audit)
+    pins = [r for r in audit.drifts() if r[2] == "gmin pin"]
+    assert len(pins) == 18
+    assert {r[3] for r in pins} == {"61fa67cf"}
+    assert {r[4] for r in pins} == {"9cbec1a4"}
+
+
+@pytest.mark.parametrize("shown", ["61fa67cfNOT_A_COMMIT", "61fa67cf0", "61fa", "develop"])
+def test_a_sutton_chen_code_revision_must_name_the_commit(shown):
+    audit = audit_mod.Audit()
+    path = "bench/paper-rerun/sc-h2h/README.md"
+    audit.text_cache[path] = audit.text(path).replace("| sc126-38 | anneal | 61fa67cf |", f"| sc126-38 | anneal | {shown} |")
+    audit_mod.head_to_head(audit)
+    assert [(r[1], r[2], r[3]) for r in audit.drifts()] == [(f"{path}:21 sc126-38 anneal", "code revision", shown)]
+
+
+def test_the_sutton_chen_rerun_rows_are_provenance_checked():
+    audit = audit_mod.Audit()
+    audit_mod.head_to_head(audit)
+    assert SC_RERUN_ROWS in audit.read
+    audit.read[SC_RERUN_ROWS][7]["harness_revision"] = "0" * 40
+    gaps = audit_mod.provenance(audit)
+    assert "revision 00000000 is not in this repository" in gaps[SC_RERUN_ROWS]
+    assert ("unpushed revision 00000000", "not listed") in {(r[2], r[3]) for r in audit.drifts()}
 
 
 def test_a_gmin_row_left_on_the_old_file_is_reported():
@@ -390,9 +654,10 @@ def test_a_gmin_row_left_on_the_old_file_is_reported():
 def test_a_gmin_lead_must_be_stated_as_the_rows_give_it():
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
-    audit.text_cache[SC_N12] = text.replace("| 0.113 | tie | GMIN, n.s. | GMIN |", "| 0.113 | tie | GMIN, n.s. | anneal |")
+    audit.text_cache[SC_N12] = text.replace("| sc126-55 | anneal | 61fa67cf | 12/12 | 25529 |",
+                                            "| sc126-55 | anneal | 61fa67cf | 12/12 | 25530 |")
     audit_mod.head_to_head(audit)
-    assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
+    assert [r[2] for r in audit.drifts()] == ["calls median"]
 
 
 def test_a_drifted_readme_p_value_is_reported():
@@ -414,12 +679,12 @@ def test_a_drifted_gfn2_paper_cell_is_reported():
     assert [r[2] for r in audit.drifts()] == ["median calls"]
 
 
-def test_a_drifted_gfn2_revision_table_cell_is_reported():
+def test_a_drifted_gfn2_c20_revision_table_cell_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(GFN2_README)
-    old = "| Si13 | anneal G, `c1c02d16` | 6/6 | 1,974.5 |"
+    old = "| C20 | anneal G, `5351f272` | 0/12 | 100,000 |"
     assert old in text
-    audit.text_cache[GFN2_README] = text.replace(old, "| Si13 | anneal G, `c1c02d16` | 6/6 | 1,975.5 |")
+    audit.text_cache[GFN2_README] = text.replace(old, "| C20 | anneal G, `5351f272` | 0/12 | 99,999 |")
     audit_mod.covalent_gfn2(audit)
     assert [r[2] for r in audit.drifts()] == ["median calls"]
 
@@ -431,18 +696,18 @@ def test_a_gfn2_revision_table_the_audit_cannot_find_is_reported():
     end = text.index("\n", start)
     audit.text_cache[GFN2_README] = text[:start] + text[start:end].replace("best / eV", "best (eV)") + text[end:]
     audit_mod.covalent_gfn2(audit)
-    assert sorted((r[1].split()[-2], r[2]) for r in audit.drifts()) == [("C20", "GFN2 table row"),
-                                                                        ("Si13", "GFN2 table row")]
+    assert [(r[1].split()[-2], r[2]) for r in audit.drifts()] == [("C20", "GFN2 table row")]
 
 
-def test_a_gfn2_sentence_count_follows_the_rows():
-    # The latest CREST hit moves, and no table cell or p value with it.
+def test_voided_si13_rows_are_not_audited_as_valid_results():
     audit = audit_mod.Audit()
     rows = audit.rows("bench/covalent-h2h/gfn2/rows.csv")
     row = next(r for r in rows if r["system"] == "si13" and r["code"] == "crest" and r["evals_to_hit"] == "143630")
     row["evals_to_hit"] = "150000"
     audit_mod.covalent_gfn2(audit)
-    assert [(r[2], "143,630" in r[3]) for r in audit.drifts()] == [("prose", False)]
+    assert "Si13" not in audit_mod.GFN2_SYSTEMS
+    assert all(test[0] != "Si13" for test in audit_mod.GFN2_REVISION_TESTS)
+    assert not audit.drifts()
 
 
 def test_an_unnamed_gfn2_false_hit_is_reported():
@@ -502,6 +767,80 @@ def test_an_unpushed_revision_needs_a_reason(tmp_path, monkeypatch):
     assert [(r[2], r[3], r[4]) for r in audit.drifts()] == [
         ("unpushed revision bf09f7a2", "not listed", "no pushed equivalent"),
         ("unpushed revision e09e0487", "listed although its alias holds", "resolved"),
+    ]
+
+
+def test_an_unmapped_revision_in_any_benchmark_table_fails(monkeypatch):
+    tables = audit_mod.revision_row_tables()
+    path = "bench/ase-nonlj/summary.csv"
+    altered = []
+    for table_path, rows in tables:
+        if table_path == path:
+            rows = [dict(row) for row in rows]
+            rows[0]["code_revision"] = "0" * 40
+        altered.append((table_path, rows))
+    monkeypatch.setattr(audit_mod, "revision_row_tables", lambda: altered)
+    audit = audit_mod.Audit()
+    audit_mod.all_revision_provenance(audit)
+    assert [row[2] for row in audit.drifts() if row[1] == path] == [
+        "row revision 00000000 is reachable or mapped"
+    ]
+
+
+def test_recorded_revision_cell_gaps_match_the_tree():
+    assert audit_mod.revision_cell_gaps() == audit_mod.RECORDED_REVISION_CELL_GAPS
+
+
+def test_a_malformed_revision_cell_is_rejected():
+    tables = [("bench/example/rows.csv", [{"code_revision": "not-a-sha"}])]
+    assert audit_mod.revision_cell_gaps(tables) == {
+        ("bench/example/rows.csv", "code_revision", "not-a-sha"): 1
+    }
+    short = [("bench/example/rows.csv", [{"code_revision": "abc123"}])]
+    assert audit_mod.revision_cell_gaps(short) == {
+        ("bench/example/rows.csv", "code_revision", "abc123"): 1
+    }
+    upper = [("bench/example/rows.csv", [{"code_revision": "A" * 40}])]
+    assert ("bench/example/rows.csv", "code_revision", "A" * 40) in audit_mod.revision_cell_gaps(upper)
+
+
+def test_an_empty_required_revision_cell_is_rejected():
+    tables = [("bench/example/rows.csv", [{"code_revision": "", "harness_revision": "", "head": "unknown"}])]
+    assert audit_mod.revision_cell_gaps(tables) == {
+        ("bench/example/rows.csv", "code_revision", ""): 1,
+        ("bench/example/rows.csv", "head", "unknown"): 1,
+    }
+
+
+def test_an_empty_harness_revision_is_allowed():
+    tables = [("bench/example/rows.csv", [{"harness_revision": "  "}])]
+    assert audit_mod.revision_cell_gaps(tables) == {}
+
+
+def test_a_new_malformed_revision_cell_fails_the_audit(monkeypatch):
+    tables = audit_mod.revision_row_tables()
+    altered = []
+    for path, rows in tables:
+        if path == "bench/ase-nonlj/summary.csv":
+            rows = [dict(row) for row in rows]
+            rows[0]["code_revision"] = "not-a-sha"
+        altered.append((path, rows))
+    monkeypatch.setattr(audit_mod, "revision_row_tables", lambda: altered)
+    audit = audit_mod.Audit()
+    audit_mod.all_revision_provenance(audit)
+    assert [row[2] for row in audit.drifts() if row[1] == "revision cells"] == [
+        "malformed and required-empty revision cells match the record"
+    ]
+
+
+def test_an_uncited_unpushed_revision_is_reported(monkeypatch):
+    unpushed = dict(audit_mod.UNPUSHED)
+    unpushed["f" * 40] = "not cited anywhere"
+    monkeypatch.setattr(audit_mod, "UNPUSHED", unpushed)
+    audit = audit_mod.Audit()
+    audit_mod.all_revision_provenance(audit)
+    assert [row[2] for row in audit.drifts() if row[1] == audit_mod.REVISION_MAP] == [
+        "mapped revision ffffffff is cited"
     ]
 
 
@@ -888,8 +1227,514 @@ def test_a_conf_miss4_run_order_claim_is_checked_against_the_schedule():
     )
     audit_mod.conf_miss4(audit)
     assert [r[2] for r in audit.drifts()] == ["prose"]
+IPI_FORM = "https://github.com/afiorent/i-pi.git@4e86f5fdc1583ef21f105fc2bed96a279b2430c1"
 
 
+def test_a_side_branch_revision_is_not_an_ancestor():
+    assert audit_mod.git("cat-file", "-t", "e3ed7dad").stdout.strip() == "commit"
+    assert not audit_mod.ancestor_of_head("e3ed7dad")
+    assert not audit_mod.harness_reachable("e3ed7dad")
+
+
+def test_the_develop_revision_is_an_ancestor():
+    assert audit_mod.ancestor_of_head("61fa67cf")
+    assert audit_mod.harness_reachable("61fa67cf")
+
+
+def test_a_qualified_external_revision_is_a_repo_url_and_a_full_sha():
+    assert audit_mod.external_form(IPI_FORM) is True
+    assert audit_mod.external_form("https://github.com/afiorent/i-pi.git@4e86f5fd") is False
+    assert audit_mod.external_form("4e86f5fd") is None
+    assert not audit_mod.harness_reachable("4e86f5fd")
+    assert audit_mod.harness_reachable(IPI_FORM)
+    assert audit_mod.external_pin("aac1548a")
+    assert audit_mod.harness_reachable("aac1548a")
+
+
+IPI_PIN = IPI_FORM.split("@")[1]
+
+
+@pytest.mark.parametrize("form", [
+    "https://example.com/fake/code.git@" + "0" * 40,
+    "https://github.com/afiorent/i-pi.git@" + "0" * 40,
+    "https://github.com/someone/i-pi.git@" + IPI_PIN,
+])
+def test_an_unpinned_external_revision_is_rejected(form):
+    assert audit_mod.external_form(form) is False
+    assert not audit_mod.harness_reachable(form)
+    audit = audit_mod.Audit()
+    path = "bench/pimc-lj38/README.md"
+    audit.text_cache[path] = audit.text(path).replace(IPI_FORM, form)
+    audit_mod.printed_harnesses(audit)
+    assert ("qualified external revision", form) in {(r[2], r[3]) for r in audit.drifts()}
+
+
+def test_a_41_digit_external_revision_is_rejected():
+    long = IPI_FORM + "0"
+    assert audit_mod.external_form(long) is False
+    audit = audit_mod.Audit()
+    path = "bench/pimc-lj38/README.md"
+    audit.text_cache[path] = audit.text(path).replace(IPI_FORM, long)
+    audit_mod.printed_harnesses(audit)
+    assert ("qualified external revision", long) in {(r[2], r[3]) for r in audit.drifts()}
+    assert not [r for r in audit.results if r[1].startswith(path) and r[2] == "qualified external revision" and r[0] == "OK"]
+
+
+def clear_audit_caches():
+    for value in vars(audit_mod).values():
+        if callable(getattr(value, "cache_clear", None)):
+            value.cache_clear()
+    audit_mod._ANCESTOR_OF_HEAD.clear()
+
+
+def isolated_readme(request, tmp_path, monkeypatch, path, text):
+    """A root whose bench holds this one README, an empty record-ref registry and no unverifiable rows, with the
+    scripts the revision checks read and git on this repository.
+
+    The audit's caches are cleared on the way in and out, so no result crosses between this root and the real one.
+    """
+    clear_audit_caches()
+    request.addfinalizer(clear_audit_caches)
+    for name in (audit_mod.ALIASES, *audit_mod.EXTERNAL_FORM_SOURCES, *audit_mod.EXTERNAL_PIN_SOURCES):
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, tmp_path / name)
+    (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+    (tmp_path / path).write_text(text)
+    (tmp_path / audit_mod.RECORD_REFS).write_text("ref,sha,tree\n")
+    git_dir = subprocess.run(["git", "rev-parse", "--absolute-git-dir"], cwd=ROOT, capture_output=True, text=True,
+                             check=True).stdout.strip()
+    monkeypatch.setenv("GIT_DIR", git_dir)
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    monkeypatch.setattr(audit_mod, "UNVERIFIABLE", [])
+
+
+def test_an_inline_external_revision_is_stripped_from_prose(request, tmp_path, monkeypatch):
+    line = f"Rows at `{IPI_FORM}` hit at a median of 12 calls."
+    assert IPI_PIN not in audit_mod._EXTERNAL_FORM.sub(" ", line)
+    path = "bench/pimc-lj38/README.md"
+    text = (ROOT / path).read_text() + f"\n{line}\n"
+    isolated_readme(request, tmp_path, monkeypatch, path, text)
+    audit = audit_mod.Audit()
+    audit_mod.printed_harnesses(audit)
+    assert audit.drifts() == []
+    assert ("OK", f"{path}:{len(text.splitlines())}", "qualified external revision", IPI_FORM) in {r[:4] for r in audit.results}
+
+
+def prose_flags(extra):
+    audit = audit_mod.Audit()
+    path = "bench/pimc-lj38/README.md"
+    text = audit.text(path)
+    audit.text_cache[path] = text + "\n" + extra + "\n"
+    first = text.count("\n") + 2
+    audit_mod.printed_harnesses(audit)
+    return sorted((int(r[1].rsplit(":", 1)[1]) - first, r[4]) for r in audit.drifts() if r[1].startswith(f"{path}:"))
+
+
+@pytest.mark.parametrize("word", ["acceded", "defaced", "effaced", "deedeed", "Bacceded"])
+def test_a_hex_letter_word_is_not_a_revision(word):
+    assert prose_flags(f"The request {word} at a median of 12 calls.") == []
+
+
+def test_a_revision_wrapped_onto_the_next_line_reaches_its_number():
+    assert prose_flags("Rows at e3ed7dad\nreach a median of 400 calls.") == [(0, "e3ed7dad 400")]
+
+
+def test_a_revision_carries_through_its_paragraph():
+    flags = prose_flags("Rows at e3ed7dad hit 3 of 12 seeds. The anneal arm\nhits 5 of 12 at a median of 400 calls.")
+    assert flags == [(0, "e3ed7dad 400"), (0, "e3ed7dad 5 of 12")]
+
+
+def test_a_revision_does_not_carry_past_its_paragraph():
+    assert prose_flags("Rows at e3ed7dad.\n\nAnneal reaches a median of 400 calls.") == []
+
+
+def test_a_reachable_revision_ends_the_carry():
+    assert prose_flags("Rows at e3ed7dad. Rows at 61fa67cf reach a median of 9 calls.") == []
+
+
+def bench_flags(tmp_path, monkeypatch, files):
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    monkeypatch.setattr(audit_mod, "_verified_aliases", lambda: (), raising=False)
+    monkeypatch.setattr(audit_mod, "_verified_record_refs", lambda: (), raising=False)
+    return sorted((w.split(":")[0], rev, number) for w, rev, number in
+                  audit_mod._printed_readme_numbers(audit_mod.Audit(), []))
+
+
+UNREACHABLE_ROW = "| lj38 | anneal at `0badc0de51` (rerun) | 3/12 | 812 |"
+
+
+def harness_results(tmp_path, monkeypatch, files, listed):
+    bench_flags(tmp_path, monkeypatch, files)
+    monkeypatch.setattr(audit_mod, "record_ref_checks", lambda audit: None)
+    monkeypatch.setattr(audit_mod, "EXTERNAL_FORM_SOURCES", ())
+    monkeypatch.setattr(audit_mod, "UNVERIFIABLE", listed, raising=False)
+    audit = audit_mod.Audit()
+    audit_mod.printed_harnesses(audit)
+    return audit
+
+
+def unverifiable_readme():
+    return {"bench/x/README.md": f"| System | Code | Hits | Calls median |\n|---|---|---|---|\n{UNREACHABLE_ROW}\n"}
+
+
+def test_a_listed_unverifiable_row_is_still_checked_and_passes(tmp_path, monkeypatch):
+    listed = [("bench/x/README.md", UNREACHABLE_ROW, ("0badc0de51",), "no ref holds it; no paper number reads it")]
+    audit = harness_results(tmp_path, monkeypatch, unverifiable_readme(), listed)
+    assert audit.drifts() == []
+    marked = [r for r in audit.results if r[2] == "a printed number comes from a reachable revision"]
+    assert [(r[0], r[1], r[3], r[4]) for r in marked] == [
+        ("OK", "bench/x/README.md:3", "unverifiable: no ref holds it; no paper number reads it", "0badc0de51 lj38 Hits=3/12"),
+        ("OK", "bench/x/README.md:3", "unverifiable: no ref holds it; no paper number reads it",
+         "0badc0de51 lj38 Calls median=812"),
+    ]
+
+
+def test_an_unlisted_unverifiable_row_still_drifts(tmp_path, monkeypatch):
+    audit = harness_results(tmp_path, monkeypatch, unverifiable_readme(), [])
+    assert sorted(r[4] for r in audit.drifts()) == ["0badc0de51 lj38 Calls median=812", "0badc0de51 lj38 Hits=3/12"]
+
+
+def test_an_unverifiable_entry_on_another_revision_clears_nothing(tmp_path, monkeypatch):
+    listed = [("bench/x/README.md", UNREACHABLE_ROW, ("0badc0de99",), "another revision")]
+    audit = harness_results(tmp_path, monkeypatch, unverifiable_readme(), listed)
+    assert sorted(r[2] for r in audit.drifts()) == ["a printed number comes from a reachable revision"] * 2 + [
+        "an unverifiable row is still printed and flagged"]
+
+
+def test_a_stale_unverifiable_entry_is_flagged(tmp_path, monkeypatch):
+    listed = [("bench/x/README.md", "| lj38 | anneal at `0badc0de51` (rerun) | 4/12 | 812 |", ("0badc0de51",), "edited")]
+    audit = harness_results(tmp_path, monkeypatch, unverifiable_readme(), listed)
+    assert ("bench/x/README.md", "an unverifiable row is still printed and flagged") in {(r[1], r[2]) for r in audit.drifts()}
+    assert len(audit.drifts()) == 3
+
+
+# README rows whose numbers the manuscript prints: tab:ase (manuscript.tex 1233-1238) reads the recommended, basin
+# hopping and minima hopping rows and the comparisons of recommended with each ASE arm; tab:gmin (1149-1150) and the
+# Au55 prose read the Au55 rows of the GMIN panel, which bench/occat-h2h repeats.
+def paper_printed_row(path, row):
+    cells = [c.strip() for c in row.strip().strip("|").split("|")]
+    if re.fullmatch(r"bench/ase-(lj38|lj55|lj98|lj104|lj150|au55)/README\.md", path):
+        return cells[0] in ("recommended", "basin hopping", "minima hopping") or cells[0].startswith("recommended against")
+    if path in ("bench/gmin-panel/README.md", "bench/occat-h2h/README.md"):
+        return "au55" in row.lower() or (path == "bench/gmin-panel/README.md" and cells[:2] == ["", ""])
+    return False
+
+
+def test_no_row_the_paper_prints_is_listed_unverifiable():
+    listed = [(path, row) for path, row, _revs, _why in audit_mod.UNVERIFIABLE]
+    assert listed
+    assert [item for item in listed if paper_printed_row(*item)] == []
+
+
+def test_every_unverifiable_entry_names_a_revision_and_a_reason():
+    for path, row, revisions, why in audit_mod.UNVERIFIABLE:
+        assert path.startswith("bench/") and path.endswith("README.md")
+        assert row in [line.strip() for line in (ROOT / path).read_text().splitlines()]
+        assert revisions and all(re.fullmatch(r"[0-9a-f]{7,40}", r) for r in revisions)
+        assert len(why) > 20
+
+
+def test_a_revision_inside_a_table_cell_is_read(tmp_path, monkeypatch):
+    readme = "| System | Code | Hits | Calls median |\n|---|---|---|---|\n| lj38 | anneal at `0badc0de51` (rerun) | 3/12 | 812 |\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": readme}) == [
+        ("bench/x/README.md", "0badc0de51", "lj38 Calls median=812"),
+        ("bench/x/README.md", "0badc0de51", "lj38 Hits=3/12"),
+    ]
+
+
+@pytest.mark.parametrize("shown", ["1,974.5", "2.5 s", "18.4 µs", "−13.79658 eV", "**12/12**", "41%"])
+def test_a_number_with_commas_or_units_is_read(tmp_path, monkeypatch, shown):
+    readme = f"| System | Harness | Calls median |\n|---|---|---|\n| lj38 | 0badc0de52 | {shown} |\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": readme}) == [
+        ("bench/x/README.md", "0badc0de52", f"lj38 Calls median={shown}")]
+
+
+CSV_README = "Rows are in `rows.csv`.\n\n| System | Arm | Hits |\n|---|---|---|\n| LJ38 | anneal | 3/12 |\n|  | GMIN | 1/12 |\n"
+
+
+@pytest.mark.parametrize("field", ["code_revision", "anneal_head", "anneal_revision", "release_revision"])
+def test_a_csv_revision_reaches_its_readme_table(tmp_path, monkeypatch, field):
+    rows = f"system,arm,hits,{field}\nlj38,anneal,3,0badc0de53\nlj38,gmin,1,0badc0de54\nlj55,anneal,1,0badc0de55\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": CSV_README, "bench/x/rows.csv": rows}) == [
+        ("bench/x/README.md", "0badc0de53", "LJ38 anneal Hits=3/12"),
+        ("bench/x/README.md", "0badc0de54", "GMIN Hits=1/12"),
+    ]
+
+
+def test_a_table_without_a_system_column_reaches_its_csv(tmp_path, monkeypatch):
+    readme = "| arm | hits | median wall s |\n| --- | --- | --- |\n| anneal | 10/12 | 0.98 |\n| basin hopping | 0/12 | 4.65 |\n"
+    rows = "system,arm,hit,code_revision\nlj38,anneal,1,0badc0de56\nlj38,ase_bh,0,0badc0de57\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": readme, "bench/x/rows.csv": rows}) == [
+        ("bench/x/README.md", "0badc0de56", "anneal hits=10/12"),
+        ("bench/x/README.md", "0badc0de56", "anneal median wall s=0.98"),
+        ("bench/x/README.md", "0badc0de56", "basin hopping hits=0/12"),
+        ("bench/x/README.md", "0badc0de56", "basin hopping median wall s=4.65"),
+        ("bench/x/README.md", "0badc0de57", "basin hopping hits=0/12"),
+        ("bench/x/README.md", "0badc0de57", "basin hopping median wall s=4.65"),
+    ]
+
+
+def test_a_csv_in_a_subdirectory_reaches_its_readme_table(tmp_path, monkeypatch):
+    readme = "Rows are in `gfn2/rows.csv`.\n\n| system | code | hits |\n|---|---|---|\n| Si10 | anneal G | 6/6 |\n"
+    rows = "system,code,hit,code_revision\nsi10,anneal G,1,0badc0de58\nsi13,anneal G,1,0badc0de59\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": readme, "bench/x/gfn2/rows.csv": rows}) == [
+        ("bench/x/README.md", "0badc0de58", "Si10 anneal G hits=6/6")]
+
+
+def test_a_csv_backs_only_the_tables_of_its_section(tmp_path, monkeypatch):
+    readme = ("## Before\n\n| system | code | hits |\n|---|---|---|\n| Si10 | anneal G | 6/6 |\n\n"
+              "## Gate\n\nRows are in `gate.csv`.\n\n| system | code | hits |\n|---|---|---|\n| Si10 | anneal G | 5/6 |\n")
+    rows = "system,code,hit,code_revision\nsi10,anneal G,1,0badc0de5a\n"
+    assert bench_flags(tmp_path, monkeypatch, {"bench/x/README.md": readme, "bench/x/gate.csv": rows}) == [
+        ("bench/x/README.md", "0badc0de5a", "Si10 anneal G hits=5/6")]
+
+
+def readme_revisions():
+    found = audit_mod._printed_readme_numbers(audit_mod.Audit(), [])
+    return {(where.split(":")[0], revision[:8]) for where, revision, _number in found}
+
+
+def test_unreachable_revisions_in_the_bench_readmes_are_found():
+    found = readme_revisions()
+    assert {
+        ("bench/agox-lj75/README.md", "ccc22cee"),
+        ("bench/ase-lj75/README.md", "162d2307"),
+        ("bench/ase-lj75/README.md", "8173c5e2"),
+        ("bench/ase-nonlj/README.md", "90b88235"),
+        ("bench/covalent-h2h/README.md", "ce1e7a46"),
+        ("bench/covalent-h2h/README.md", "eb7f8999"),
+        ("bench/covalent-h2h/README.md", "a52726af"),
+    } <= found
+    reruns = {f"bench/ase-{s}/README.md" for s in ("lj38", "lj55", "lj98", "lj104", "lj150", "au55")}
+    assert not (reruns & {path for path, _ in found})
+
+
+def test_openconf_local_revisions_are_read_through_their_aliases(monkeypatch):
+    local = {("bench/openconf-h2h/conf-fix3/README.md", "cf660e19"),
+             ("bench/openconf-h2h/conf-fix4/README.md", "2a5b4553"),
+             ("bench/openconf-h2h/paired/README.md", "d178bd15")}
+    assert not local & readme_revisions()
+    monkeypatch.setattr(audit_mod, "_verified_aliases", lambda: (), raising=False)
+    assert local <= readme_revisions()
+
+
+REPRO_PIN = "9a30f3190b3bb7040c675a904f8388eb68224151"
+
+
+def need_origin():
+    """The record tests read origin. Off CI an unreachable origin skips them; on CI it fails them."""
+    out = git("ls-remote", "origin", "refs/heads/record/repro-pin")
+    if out.returncode != 0 or not out.stdout.strip():
+        if os.environ.get("CI"):
+            pytest.fail(f"origin is unreachable on CI: {out.stderr.strip()}")
+        pytest.skip("origin is unreachable")
+
+
+def registry(tmp_path, monkeypatch, rows):
+    path = tmp_path / "record-refs.csv"
+    path.write_text("ref,sha,tree\n" + "".join(f"{ref},{sha},{tree}\n" for ref, sha, tree in rows))
+    monkeypatch.setattr(audit_mod, "RECORD_REFS", str(path), raising=False)
+
+
+def record_drifts():
+    audit = audit_mod.Audit()
+    audit_mod.printed_harnesses(audit)
+    return {r[2] for r in audit.drifts() if r[1].endswith("record-refs.csv")}
+
+
+def test_a_revision_on_a_registered_record_ref_is_reachable(tmp_path, monkeypatch):
+    need_origin()
+    assert git("merge-base", "--is-ancestor", REPRO_PIN, "HEAD").returncode == 1
+    assert audit_mod.harness_reachable("9a30f319")
+    registry(tmp_path, monkeypatch, [])
+    assert not audit_mod.harness_reachable("9a30f319")
+
+
+def test_a_revision_on_the_cov_floor2_record_ref_is_reachable(tmp_path, monkeypatch):
+    need_origin()
+    assert git("merge-base", "--is-ancestor", "c1c02d1646a7", "HEAD").returncode == 1
+    assert audit_mod.harness_reachable("c1c02d1646a7")
+    registry(tmp_path, monkeypatch, [])
+    assert not audit_mod.harness_reachable("c1c02d1646a7")
+
+
+@pytest.mark.parametrize("revision", [SIDE_COMMIT, "b7e90ce985ff"])
+def test_a_revision_on_no_registered_record_ref_is_flagged(revision):
+    # e3ed7dad is on origin/record/bench-sc-h2h-n12, which is not registered;
+    # b7e90ce9 is only on origin/bench/cov-floor2, which is not a record ref.
+    need_origin()
+    assert audit_mod.commit_of(revision)
+    assert not audit_mod.harness_reachable(revision)
+
+
+def test_a_registry_row_off_origin_is_flagged(tmp_path, monkeypatch):
+    need_origin()
+    parent = git("rev-parse", f"{REPRO_PIN}^").stdout.strip()
+    tree = git("rev-parse", f"{parent}^{{tree}}").stdout.strip()
+    registry(tmp_path, monkeypatch, [("record/repro-pin", parent, tree)])
+    # The fetch lands on refs/audit/record/fetched, which is the branch tip,
+    # not this parent. A local copy of the parent is not a successful fetch.
+    assert record_drifts() == {
+        f"record/repro-pin is on origin at {parent[:8]}",
+        "record/repro-pin fetches",
+    }
+    assert not audit_mod.harness_reachable("9a30f319")
+
+
+def test_a_registry_row_with_another_tree_is_flagged(tmp_path, monkeypatch):
+    need_origin()
+    registry(tmp_path, monkeypatch, [("record/repro-pin", REPRO_PIN, "0" * 40)])
+    assert record_drifts() == {"record/repro-pin has tree 00000000"}
+    assert not audit_mod.harness_reachable("9a30f319")
+
+
+def test_a_registry_row_origin_does_not_hold_is_flagged(tmp_path, monkeypatch):
+    need_origin()
+    registry(tmp_path, monkeypatch, [("record/no-such-ref-r184", "1" * 40, "2" * 40)])
+    assert record_drifts() == {"record/no-such-ref-r184 is on origin at 11111111", "record/no-such-ref-r184 fetches",
+                               "record/no-such-ref-r184 has tree 22222222"}
+
+
+def test_record_refs_are_not_fetched_unless_asked(tmp_path, monkeypatch):
+    calls = []
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", False)
+    audit_mod._record_ref_status.cache_clear()
+    audit_mod.origin_record_heads.cache_clear()
+    registry(tmp_path, monkeypatch, [("record/repro-pin", REPRO_PIN, "0" * 40)])
+    assert "record/repro-pin fetches" in record_drifts()
+    assert "record/repro-pin is on origin at " + REPRO_PIN[:8] in record_drifts()
+    assert not any(args and args[0] in {"fetch", "ls-remote"} for args in calls)
+
+
+def test_a_record_ref_is_fetched_into_the_audit_namespace(tmp_path, monkeypatch):
+    need_origin()
+    seen = []
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        seen.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", True)
+    audit_mod._record_ref_status.cache_clear()
+    tree = git("rev-parse", f"{REPRO_PIN}^{{tree}}").stdout.strip()
+    registry(tmp_path, monkeypatch, [("record/repro-pin", REPRO_PIN, tree)])
+    assert record_drifts() == set()
+    fetches = [args for args in seen if args and args[0] == "fetch"]
+    assert len(fetches) == 1
+    assert fetches[0][-1] == "+refs/heads/record/repro-pin:refs/audit/record/fetched"
+    assert fetches[0][-2] == "--"
+
+
+def test_the_gmin_record_is_fetched_by_its_ref(tmp_path, monkeypatch):
+    need_origin()
+    seen = []
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        seen.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", True)
+    audit_mod._record_ref_status.cache_clear()
+    audit_mod.origin_record_heads.cache_clear()
+    audit_mod.origin_audit_record_refs.cache_clear()
+    registry(tmp_path, monkeypatch, [(audit_mod.GMIN_RECORD_REF, audit_mod.GMIN_RECORD_SHA, audit_mod.GMIN_RECORD_TREE)])
+    assert record_drifts() == set()
+    fetches = [args for args in seen if args and args[0] == "fetch"]
+    assert fetches == [("fetch", "--quiet", "--no-tags", "origin", "refs/audit/record/gmin-184")]
+    registry_text = (ROOT / "bench/record-refs.csv").read_text()
+    assert "\nrecord/gmin-184," not in registry_text
+
+
+def test_a_record_ref_cannot_choose_its_fetch_destination(tmp_path, monkeypatch):
+    calls = []
+    real = audit_mod.git
+
+    def wrapped(*args, **kwargs):
+        calls.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(audit_mod, "git", wrapped)
+    monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", True)
+    audit_mod._record_ref_status.cache_clear()
+    for ref in (
+        "record/repro-pin:refs/heads/main",
+        "record/../main",
+        "--upload-pack=touch",
+        "record/repro-pin.lock",
+    ):
+        calls.clear()
+        registry(tmp_path, monkeypatch, [(ref, REPRO_PIN, "0" * 40)])
+        audit_mod._record_ref_status.cache_clear()
+        assert f"{ref} is a record ref with a full SHA" in record_drifts()
+        assert not any(args and args[0] == "fetch" for args in calls)
+
+
+def test_a_registry_row_that_is_not_a_record_ref_is_flagged(tmp_path, monkeypatch):
+    need_origin()
+    head = git("rev-parse", "origin/develop").stdout.strip()
+    registry(tmp_path, monkeypatch, [("develop", head, git("rev-parse", f"{head}^{{tree}}").stdout.strip())])
+    assert "develop is a record ref with a full SHA" in record_drifts()
+
+
+def test_printed_revisions_are_ancestors_or_qualified():
+    audit = audit_mod.Audit()
+    audit_mod.printed_harnesses(audit)
+    assert audit.drifts() == []
+    assert any(row[2] == "qualified external revision" and row[3] == IPI_FORM for row in audit.results)
+    assert any(row[1] == "scripts/pimc_lj38/run_campaign.py" for row in audit.results)
+
+
+def test_the_gmin_panel_session_rows_keep_their_harness():
+    rows = audit_mod.Audit().rows("bench/gmin-panel/rows.csv")
+    session = [r for r in rows if r["harness_revision"] == audit_mod.GMIN_PANEL_SESSION]
+    assert len(session) == 120
+    assert sum(r["code"] == "gmin" for r in session) == 60
+    registry = (ROOT / audit_mod.RECORD_REFS).read_text()
+    assert f"{audit_mod.GMIN_RECORD_REF},{audit_mod.GMIN_RECORD_SHA},{audit_mod.GMIN_RECORD_TREE}" in registry
+    assert "\nrecord/gmin-184," not in registry
+
+
+def test_a_short_external_revision_is_reported():
+    audit = audit_mod.Audit()
+    path = "bench/pimc-lj38/README.md"
+    text = audit.text(path)
+    short = "https://github.com/afiorent/i-pi.git@4e86f5fd"
+    audit.text_cache[path] = text.replace(IPI_FORM, short)
+    audit_mod.printed_harnesses(audit)
+    assert any(row[2] == "qualified external revision" and row[3] == short for row in audit.drifts())
+
+
+def test_a_best_column_is_checked_with_its_revision():
+    header = ["System", "Code revision", "Best", "Note"]
+    rows = [(4, ["lj38", "e3ed7dad", "-1.50", "kept"])]
+    flagged = audit_mod._table_revision_flags("bench/x/README.md", header, rows, [])
+    assert flagged is not None
+    assert any(item[1] == "e3ed7dad" and "Best=-1.50" in item[2] for item in flagged)
+    reached = [(4, ["lj38", "61fa67cf", "-1.50", "kept"])]
+    assert audit_mod._table_revision_flags("bench/x/README.md", header, reached, []) == []
+
+
+def test_an_unreachable_printed_revision_is_reported():
+    audit = audit_mod.Audit()
+    path = "bench/metal-cluster-h2h/sc-n12/README.md"
+    text = audit.text(path)
+    audit.text_cache[path] = text.replace("| sc126-38 | anneal | 61fa67cf |", "| sc126-38 | anneal | e3ed7dad |")
+    audit_mod.printed_harnesses(audit)
+    assert any(row[4].startswith("e3ed7dad") for row in audit.drifts())
 def _cap_turn_copies():
     audit = audit_mod.Audit()
     rows = [dict(row) for row in audit.rows(audit_mod.CAP_TURN_ROWS)]
@@ -968,6 +1813,26 @@ def test_a_cap_turn_ratio_that_disagrees_with_the_rows_is_reported():
     assert len(drift) == 1
     assert drift[0][3] == "0.998"
     assert drift[0][4] != "0.998"
+
+
+def test_cap_turn_ratio_rounds_once_from_full_precision():
+    assert audit_mod.cap_turn_ratio_text(0.992484) == "0.992"
+    assert audit_mod.cap_turn_ratio_text(1.002459) == "1.002"
+    assert audit_mod.cap_turn_ratio_text(0.993487) == "0.993"
+    assert audit_mod.cap_turn_ratio_text(0.9925) == "0.993"
+
+    audit = audit_mod.Audit()
+    text = audit.text(audit_mod.CAP_TURN_README)
+    audit.text_cache[audit_mod.CAP_TURN_README] = text.replace(
+        "| m55r14 | 18/24 | 18/24 | 1 | 5 | 5 | 0.992 |",
+        "| m55r14 | 18/24 | 18/24 | 1 | 5 | 5 | 0.993 |",
+        1,
+    )
+    audit_mod.cap_turn_campaign(audit)
+    drift = [row for row in audit.drifts() if row[2] == "m55r14 outside/call ratio matches the rows"]
+    assert len(drift) == 1
+    assert drift[0][3] == "0.993"
+    assert drift[0][4] == "0.992"
 
 
 def _flag_off_drift(mutate):

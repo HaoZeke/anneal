@@ -95,3 +95,31 @@ def test_au_length_comes_from_the_evaluator(monkeypatch):
         2.057976038904,
     )
     assert '"length"' not in RUNNER_PATH.read_text()
+
+
+def test_wall_cap_call_ranges_report_wall_stops_only():
+    _summary, report = SUMMARY.render("lj55")
+    grouped = SUMMARY.load("lj55")
+    wall_calls = [int(row["charged"]) for row in grouped["ase_bh"] if row["stop"] == "wall"]
+    assert len(wall_calls) == 11
+    assert (
+        f"Basin hopping stopped at the wall cap on 11/12 seeds; "
+        f"those rows charged {min(wall_calls):,}-{max(wall_calls):,} calls."
+    ) in report
+
+
+def test_load_rejects_crlf_rows_csv(tmp_path, monkeypatch):
+    bench_dir = tmp_path / "bench" / "ase-lj38"
+    bench_dir.mkdir(parents=True)
+    header = ",".join(SUMMARY.ROW_FIELDS)
+    (bench_dir / "rows.csv").write_bytes(f"{header}\r\n".encode("ascii"))
+    monkeypatch.setattr(SUMMARY, "ROOT", tmp_path)
+    with pytest.raises(SystemExit, match="contains CR"):
+        SUMMARY.load("lj38")
+
+    au_dir = tmp_path / "bench" / "ase-au55"
+    au_dir.mkdir(parents=True)
+    (au_dir / "rows.csv").write_bytes(f"{header}\n".encode("ascii"))
+    (au_dir / "rows-for-cluster.csv").write_bytes(f"{header}\r\n".encode("ascii"))
+    with pytest.raises(SystemExit, match="contains CR"):
+        SUMMARY.load("au55")

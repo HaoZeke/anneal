@@ -44,12 +44,15 @@ jobs:
             macos-python:
               - 'src/**'
               - 'python/**'
+              - 'pytest/**'
+              - 'scripts/meson_cargo_build.py'
               - 'Cargo.*'
               - 'pyproject.toml'
               - '.github/workflows/ci.yml'
 
       # Linux runs the Python matrix for every change. The macOS cells only
-      # cover native/Python build inputs, so unrelated changes must not wait
+      # cover native/Python build inputs and the pytest suite, with the one
+      # script it runs against Apple tools. Unrelated changes must not wait
       # for scarce macOS runners.
       - name: Build runner matrix
         id: matrix
@@ -284,7 +287,10 @@ jobs:
       # needs the full history and every branch the alias table names. A
       # branch that cannot be fetched fails here; the audit itself refuses a
       # shallow clone or a missing alias commit with exit status 2, and any
-      # drift or unlisted unpushed revision with exit status 1.
+      # drift or unlisted unpushed revision with exit status 1. Record
+      # branches are fetched only with --fetch-records, into
+      # refs/audit/record/fetched. refs/audit/record/gmin-184 is a ref,
+      # and that one is fetched by its name.
       - name: Paper audit
         if: ${{ !cancelled() }}
         run: |
@@ -297,7 +303,7 @@ jobs:
               exit 1
             }
           done
-          python3 scripts/paper_audit.py
+          python3 scripts/paper_audit.py --fetch-records
 
   test:
     name: Test (${{ matrix.os }}, py ${{ matrix.python-version }})
@@ -546,8 +552,7 @@ jobs:
       - name: pytest against the installed sdist
         shell: bash
         run: |
-          test "$(.sdist-venv/bin/python -c 'import anneal, os; print(os.path.relpath(anneal.__file__))')" \
-            != python/anneal/__init__.py
+          .sdist-venv/bin/python scripts/check_installed_anneal.py .sdist-venv
           .sdist-venv/bin/python -m pytest pytest/test_cluster_search.py
 
   ffi-smoke:

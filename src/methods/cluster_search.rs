@@ -725,6 +725,33 @@ where
     Some(answered)
 }
 
+/// A caller stop keeps the lowest physical point this descent paid for,
+/// when that point is below the solver's last accepted state.
+///
+/// The stop can land on the line search, on the convergence check, or on
+/// a continuation round. Each of those returns the solver's accepted
+/// point, which can be higher than an evaluation already charged. The
+/// same swap is applied wherever the quench returns.
+fn lowest_stopped_answer(
+    led: &mut Ledger,
+    energy: f64,
+    state: Array1<f64>,
+    best_physical: &RefCell<Option<(f64, Array1<f64>)>>,
+) -> (f64, Array1<f64>, bool) {
+    if !led.stopped() {
+        return (energy, state, false);
+    }
+    let Some((held_energy, held_state)) = best_physical.borrow().clone() else {
+        return (energy, state, false);
+    };
+    if held_energy < energy && held_state.iter().all(|value| value.is_finite()) {
+        led.record(held_energy, held_state.view());
+        (held_energy, held_state, true)
+    } else {
+        (energy, state, false)
+    }
+}
+
 /// The relaxation [`search`] and [`search_from`] hand to the chain.
 ///
 /// It reads the preset: the surface portfolio or `two_phase` first, then the
@@ -1181,17 +1208,9 @@ where
         };
         // The call that raises the stop has already been paid. If it is
         // below the solver's accepted point, that point is the best state
-        // the run found.
-        let (f, xr) = if led.stopped()
-            && let Some((energy, state)) = best_physical.borrow().clone()
-            && energy < f
-            && state.iter().all(|value| value.is_finite())
-        {
-            led.record(energy, state.view());
-            (energy, state)
-        } else {
-            (f, xr)
-        };
+        // the run found. Applied again after the convergence check, which
+        // can be the call that raises the stop.
+        let (f, xr, _) = lowest_stopped_answer(led, f, xr, &best_physical);
         if let Some(portfolio) = surfaces.as_mut() {
             portfolio.observe(screening, f, target);
         }
@@ -1327,6 +1346,13 @@ where
             stats.converged += 1;
         } else {
             stats.capped += 1;
+            validated = None;
+        }
+        // The convergence check is itself an evaluation and can raise the
+        // stop after the descent has returned. The gradient just computed
+        // belongs to the solver's point, not to the lower one we keep.
+        let (f, xr, kept_lower) = lowest_stopped_answer(led, f, xr, &best_physical);
+        if kept_lower {
             validated = None;
         }
         // Good-Turing retires from the checkpoint's quench list. Leaving this
@@ -4695,5 +4721,236 @@ mod tests {
             "the quench stayed on the gate at {:.4} Å",
             min_pair_distance(geometry.view())
         );
+    }
+
+    /// Evaluations the potential performed, counted apart from the ledger.
+    struct Tally {
+        inner: PairPotential,
+        calls: std::sync::atomic::AtomicUsize,
+        stop_after: usize,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl eindir_core::Objective<f64> for Tally {
+        fn dim(&self) -> usize {
+            eindir_core::Objective::dim(&self.inner)
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            self.inner.bounds()
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.value_and_gradient(x).0
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for Tally {
+        fn dim(&self) -> usize {
+            eindir_core::Objective::dim(self)
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+    }
+
+    impl DifferentiableObjective<f64> for Tally {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            use std::sync::atomic::Ordering;
+            let made = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if made >= self.stop_after {
+                self.stop.store(true, Ordering::SeqCst);
+            }
+            self.inner.value_and_gradient(x)
+        }
+    }
+
+    /// Charged calls and potential evaluations of one search.
+    fn charged_and_evaluated(
+        energy_lattice: bool,
+        budget: usize,
+        stop_after: usize,
+        seed: u64,
+    ) -> (usize, usize) {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let mut cfg = Config::recommended(38);
+        cfg.energy_lattice = energy_lattice;
+        let stop = Arc::new(AtomicBool::new(false));
+        let objective = Tally {
+            inner: PairPotential::lennard_jones(cfg.n_points),
+            calls: AtomicUsize::new(0),
+            stop_after,
+            stop: Arc::clone(&stop),
+        };
+        let mut ledger = Ledger::with_stop(budget, stop);
+        search(&objective, &cfg, &mut ledger, seed).expect("finite start");
+        (ledger.spent(), objective.calls.load(Ordering::SeqCst))
+    }
+
+    /// Every charge is an evaluation unless the energy lattice is on. That
+    /// kernel sums pair rows itself and charges them as the fraction of one
+    /// full evaluation they cost, a documented unit, so with it on the ledger
+    /// reads at least the potential's own call count.
+    #[test]
+    fn charged_calls_are_potential_evaluations_apart_from_lattice_pair_sums() {
+        for seed in [2000, 2001, 2002] {
+            let (spent, calls) = charged_and_evaluated(false, 6_000, usize::MAX, seed);
+            assert_eq!(spent, calls, "seed {seed}: budget run");
+            assert_eq!(spent, 6_000, "seed {seed}: the budget was not spent");
+            let (spent, calls) = charged_and_evaluated(false, 400_000, 2_500, seed);
+            assert_eq!(spent, calls, "seed {seed}: run closed by a caller stop");
+            assert_eq!(spent, 2_500, "seed {seed}: the stop did not close the run");
+        }
+        let (spent, calls) = charged_and_evaluated(true, 30_000, usize::MAX, 2001);
+        assert!(
+            spent > calls,
+            "the lattice kernel's pair sums were not charged: {spent} against {calls}"
+        );
+        assert_eq!(spent, 30_000);
+    }
+
+    /// Potential that counts its own calls, raises a caller stop, and keeps
+    /// the lowest finite evaluation apart from the ledger.
+    struct TrackingTally {
+        inner: PairPotential,
+        calls: std::sync::atomic::AtomicUsize,
+        stop_after: usize,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        lowest: std::sync::Mutex<(f64, Array1<f64>)>,
+    }
+
+    impl eindir_core::Objective<f64> for TrackingTally {
+        fn dim(&self) -> usize {
+            eindir_core::Objective::dim(&self.inner)
+        }
+        fn bounds(&self) -> &eindir_core::Bounds<f64> {
+            self.inner.bounds()
+        }
+        fn eval(&self, x: ArrayView1<f64>) -> f64 {
+            self.value_and_gradient(x).0
+        }
+    }
+
+    impl eindir_core::Gradient<f64> for TrackingTally {
+        fn dim(&self) -> usize {
+            eindir_core::Objective::dim(self)
+        }
+        fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
+            self.value_and_gradient(x).1
+        }
+    }
+
+    impl DifferentiableObjective<f64> for TrackingTally {
+        fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+            use std::sync::atomic::Ordering;
+            let made = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if made >= self.stop_after {
+                self.stop.store(true, Ordering::SeqCst);
+            }
+            let answer = self.inner.value_and_gradient(x);
+            if answer.0.is_finite() {
+                let mut lowest = self.lowest.lock().expect("lowest");
+                if answer.0 < lowest.0 {
+                    *lowest = (answer.0, x.to_owned());
+                }
+            }
+            answer
+        }
+    }
+
+    /// A caller stop inside a later hop's quench keeps that quench's lowest
+    /// evaluated state.
+    ///
+    /// Recommended LJ13, seed 2000, energy lattice off. Call 458 is inside
+    /// the hop quench that starts after 451 evaluations. The solver's
+    /// accepted point there sits above the lowest evaluation that quench
+    /// already paid for, and above the incumbent. The run's record has to
+    /// be that lower state.
+    #[test]
+    fn a_caller_stop_inside_a_hop_quench_keeps_its_lowest_state() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let mut cfg = Config::recommended(13);
+        cfg.energy_lattice = false;
+        let stop = Arc::new(AtomicBool::new(false));
+        let objective = TrackingTally {
+            inner: PairPotential::lennard_jones(13),
+            calls: AtomicUsize::new(0),
+            stop_after: 458,
+            stop: Arc::clone(&stop),
+            lowest: std::sync::Mutex::new((f64::INFINITY, Array1::zeros(0))),
+        };
+        let mut ledger = Ledger::with_stop(20_000, stop);
+        let (outcome, _) = search(&objective, &cfg, &mut ledger, 2000).expect("search");
+        let (energy, state) = objective.lowest.lock().expect("lowest").clone();
+        assert!(
+            outcome.hops >= 1,
+            "the stop has to land after the opening quench"
+        );
+        assert_eq!(
+            outcome.stop,
+            Some(crate::methods::cluster_hopping::HopStop::CallerStop)
+        );
+        assert_eq!(outcome.charged, 458);
+        assert_eq!(objective.calls.load(Ordering::SeqCst), 458);
+        assert_eq!(outcome.best, energy);
+        assert_eq!(outcome.best_state.as_ref(), Some(&state));
+    }
+
+    /// A caller stop after the stall probe has started still charges every
+    /// evaluation once.
+    ///
+    /// Recommended LJ38, seed 2000, energy lattice off. That probe occupies
+    /// the calls after parent spent 7341 and settles thirty of them through
+    /// its side ledger. Stopping at 7350 is inside the probe, so the
+    /// settlement runs with the caller stop already raised.
+    #[test]
+    fn a_stop_inside_the_stall_probe_settles_each_side_call_once() {
+        let (spent, calls) = charged_and_evaluated(false, 400_000, 7_350, 2000);
+        assert_eq!(calls, 7_350, "the stop did not close the run");
+        assert_eq!(
+            spent, calls,
+            "a stopped side ledger dropped or double-counted a call"
+        );
+    }
+
+    /// An unstopped run is unchanged by recording a stopped quench.
+    ///
+    /// Recommended LJ13, seed 2000, energy lattice off, budget 1500. The
+    /// hash is that run's record: best, hops, charged calls, final energy,
+    /// best geometry, accepted transitions, and improvements.
+    #[test]
+    fn an_unstopped_run_matches_the_recorded_search() {
+        let mut cfg = Config::recommended(13);
+        cfg.energy_lattice = false;
+        let potential = PairPotential::lennard_jones(13);
+        let mut ledger = Ledger::new(1_500);
+        let (out, _) = search_lennard_jones(&potential, &cfg, &mut ledger, 2000).expect("search");
+        let mut state = 0xcbf29ce484222325u64;
+        let mut mix = |bytes: &[u8]| {
+            for byte in bytes {
+                state ^= *byte as u64;
+                state = state.wrapping_mul(0x100000001b3);
+            }
+        };
+        mix(&out.best.to_bits().to_le_bytes());
+        mix(&(out.hops as u64).to_le_bytes());
+        mix(&(out.charged as u64).to_le_bytes());
+        mix(&out.final_energy.to_bits().to_le_bytes());
+        if let Some(geometry) = out.best_state.as_ref() {
+            for value in geometry.iter() {
+                mix(&value.to_bits().to_le_bytes());
+            }
+        }
+        for edge in &out.accepted_transitions {
+            mix(&edge.hop.to_le_bytes());
+            mix(edge.action.as_bytes());
+            mix(&edge.from_energy.to_bits().to_le_bytes());
+            mix(&edge.to_energy.to_bits().to_le_bytes());
+        }
+        for (_, spent, _, energy) in &out.improvements {
+            mix(&(*spent as u64).to_le_bytes());
+            mix(&energy.to_bits().to_le_bytes());
+        }
+        assert_eq!(state, 0x8ecb3cb05e092433);
     }
 }

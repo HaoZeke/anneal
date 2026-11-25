@@ -89,7 +89,7 @@ Its call PAR-2 median is 158540.5 and its type-7 interquartile range is
 201463.5.
 Those GMIN rows use seeds 0--63, the starts of that campaign, and a
 ceiling of 1000000 calls.
-They are not the same-session panel of the main text, where GMIN hits
+They are not the GMIN panel of the main text, where GMIN hits
 LJ\(_{98}\) on 0 of 12 seeds at \(4\times 10^{6}\) calls.~\rerun{5}
 \path{logs/paired_bootstrap_lj98.txt} records the paired-bootstrap
 interval of the median ratio for the 24-of-64 hop, 12.62 with endpoints
@@ -101,6 +101,42 @@ OGOLEM, cited as Dieterich and Hartke, is in the campaign file at 6 of
 file.
 \cite{zhang2015} The seed file is the record of those LJ\(_{98}\)
 medians.
+
+\section{GMIN panel sessions and revisions}
+\path{bench/gmin-panel/rows.csv} stores the GMIN panel of the main text.
+For each of the 13 clusters, both arms ran in one serial session on one
+core (\texttt{taskset -c 0}, one thread) across seeds 2000--2011 from
+the start that this code writes for the seed, and each cluster's median
+wall compares the two arms within its own session.
+The table reads the latest stored row of each seed and combines two
+sessions and two \texttt{anneal} revisions.
+The eight Lennard-Jones clusters (LJ\(_{38}\), LJ\(_{55}\), LJ\(_{75}\),
+LJ\(_{98}\), LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\))
+come from session \texttt{20261117T035457Z} (2026-11-17) on host
+\texttt{bench}, running \texttt{anneal} commit
+\texttt{\seqsplit{c2de652dca0bc75e2b0cb4afffac91fd656404e4}}
+(\texttt{h2h\_gmin\_proof}, with \path{bench/paper-0120/lj103-table.patch}
+adding the LJ\(_{103}\) reference energy and \(4\times 10^{6}\) budget
+as \texttt{h2h\_gmin\_proof+lj103}) against GMIN at Wales revision
+\texttt{\seqsplit{aac1548a8aec13b53ad12a8d6904625081685d2e}} (tarball
+SHA-256
+\texttt{\seqsplit{a972c29b081a74235286bf3e8755c8811da2f7e2a4faab81ffb41570d6d2fe05}}),
+ordered \texttt{anneal} then GMIN on each seed.
+Au\(_{55}\) and the four Morse clusters (M\(_{55}\) and M\(_{80}\) at
+\(\rho=6\) and \(14\)) come from session \texttt{20261121T133601Z}
+(2026-11-21, \path{record/gmin-184/rows.csv}) on machine ID SHA-256
+\texttt{\seqsplit{3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873}},
+running \texttt{anneal} commit
+\texttt{\seqsplit{9837358ae1027067ff654fac8b48969020853452}} (tree
+\texttt{\seqsplit{15032ef401fb681e230d27c7b315d89f7ac53e4e}}, examples
+\texttt{h2h\_metal} and \texttt{h2h\_morse}) against the
+\texttt{2026-11-21T03:01:22Z} GMIN source tarball (SHA-256
+\texttt{\seqsplit{0d9917600ecda72b2176253d0e838bcb58ec6e38902ef7d0affc7e7e7eba8f39}}),
+ordered ABBA across seeds 2000--2011.
+Earlier 2026-11-17 Au\(_{55}\) and Morse rows from sessions
+\texttt{20261117T035457Z} and \texttt{20261117T152941Z} remain in
+\path{bench/gmin-panel/rows.csv} and are superseded by session
+\texttt{20261121T133601Z}.
 
 \section{Hardware and reproduction}
 We keep the LJ75 receipt in \path{logs/lj75-hardware-receipt.txt}.
@@ -126,7 +162,7 @@ The panel prints that run's PAR-2 values.
 Figure~\ref{fig:si-lj75-ecdf} draws it.
 Its GMIN arm ran the published LJ\(_{75}\) input with symmetrization, from
 the OptBench starts, and hit on 200 of 200 seeds.
-The same-session panel of the main text hit LJ\(_{75}\) on 0 of 12 seeds
+The GMIN panel of the main text hit LJ\(_{75}\) on 0 of 12 seeds
 with one input at every size and the start that this code writes.~\rerun{5}
 We keep the source archive at \path{logs/lj75-source-37535ec1.tar.xz}.
 It includes \texttt{LICENSE.txt}.
