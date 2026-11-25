@@ -1,4 +1,5 @@
 ``cluster_search`` returns a ``ledger`` dict that says where the search's budget went.
 It splits the charged evaluations into ``spent``, ``screen``, ``full`` and ``check``, and counts the relaxations that ``converged`` or were ``capped``, the trials the screen dropped (``screened_out``) or the return test sent home (``returned``), the fresh-start branches run (``branch_draws``), their charged evaluations (``branch_spent``), the line-search geometries refused for overlap (``overlap_rejected``) and the ``basins`` registered.
 On archive searches, the public ``charged`` and ``ledger.spent`` values count every Python potential callback, including both energy and gradient callbacks, while the phase fields classify those calls by the phase that requested the relaxation. Archive searches now report their real ``screened_out``, ``branch_draws`` and ``branch_spent`` values instead of unavailable placeholders.
+The Python entry point accepts ``branch_on_stall=True`` to run and report the fresh-start branch path.
 The openconf pairing job (``scripts/openconf_h2h/h2h_job.py``) writes the ledger of each run into its ``job.json``.

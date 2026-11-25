@@ -400,7 +400,10 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert all(isinstance(value, int) and value >= 0 for value in phases)
     assert sum(phases) <= out["ledger"]["spent"]
     screened_out = out["ledger"]["screened_out"]
-    assert isinstance(screened_out, int) and screened_out >= 0
+    assert (
+        isinstance(screened_out, int)
+        and 0 <= screened_out <= out["ledger"]["screen"]
+    )
     assert out["branch_on_stall"] is False
     assert out["ledger"]["branch_draws"] == 0
     assert out["ledger"]["branch_spent"] == 0
@@ -432,6 +435,37 @@ def test_cluster_search_ras_true_uses_archive_outcome():
         polished_split["screen"] + polished_split["full"] + polished_split["check"]
         <= polished_split["spent"]
     )
+
+
+def test_cluster_search_ras_reports_nonzero_branch_counters():
+    from anneal._core import cluster_search as core_cluster_search
+
+    def energy(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.sum((x**2 - 1.0) ** 2))
+
+    def gradient(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 4.0 * x * (x**2 - 1.0)
+
+    try:
+        out = core_cluster_search(
+            energy,
+            gradient,
+            3,
+            50_000,
+            seed=0,
+            ras=True,
+            branch_on_stall=True,
+        )
+    except ValueError as exc:
+        assert "graphkey" in str(exc)
+        return
+    ledger = out["ledger"]
+    assert out["branch_on_stall"] is True
+    assert ledger["branch_draws"] > 0
+    assert ledger["branch_spent"] > 0
+    assert 0 < ledger["screened_out"] <= ledger["screen"]
 
 
 def flexible_water(x: np.ndarray, molecules: int):

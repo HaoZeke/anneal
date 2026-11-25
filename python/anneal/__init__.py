@@ -250,6 +250,7 @@ def cluster_search(
     communicating: bool = False,
     *,
     ras: bool = False,
+    branch_on_stall: bool = False,
     start=None,
     length_scale: float | None = None,
     species=None,
@@ -282,6 +283,7 @@ def cluster_search(
       derived: ``Config.derived(n)``; overrides ``recommended``.
       communicating: ``Config.communicating(n)``; overrides both.
       ras: residual archive search on the recommended preset.
+      branch_on_stall: run fresh-start branches after the main walk stalls.
       start: optional flat start. Cartesian length is ``3n``. A rigid or
         water start is ``6n``. When set, hops use ``search_from`` instead of
         a random compact cluster.
@@ -393,7 +395,12 @@ def cluster_search(
         bool(derived),
         bool(communicating),
     )
-    kwargs = {"ras": bool(ras), "rigid": bool(rigid), "layout": str(layout)}
+    kwargs = {
+        "ras": bool(ras),
+        "branch_on_stall": bool(branch_on_stall),
+        "rigid": bool(rigid),
+        "layout": str(layout),
+    }
     if start_arr is not None:
         kwargs["start"] = start_arr
     if length_scale is not None:

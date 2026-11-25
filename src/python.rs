@@ -3597,6 +3597,7 @@ fn rigid_probe(
 ///     `derived` when true. Not `Config.recommended`.
 ///   ras: residual archive search on the recommended preset. Keyword-only;
 ///     default false. Does not change `Config.recommended`.
+///   branch_on_stall: run fresh-start branches after the main walk stalls.
 ///   start: optional flat start. Cartesian length is `3n`. A rigid or water
 ///     start is `6n`, block Rodrigues unless `layout` is `interleaved`.
 ///   length_scale: optional physical length. When set with the recommended
@@ -3674,6 +3675,7 @@ fn rigid_probe(
     communicating = false,
     *,
     ras = false,
+    branch_on_stall = false,
     start = None,
     length_scale = None,
     species = None,
@@ -3700,6 +3702,7 @@ fn cluster_search(
     derived: bool,
     communicating: bool,
     ras: bool,
+    branch_on_stall: bool,
     start: Option<PyReadonlyArray1<'_, f64>>,
     length_scale: Option<f64>,
     species: Option<Vec<u32>>,
@@ -3930,6 +3933,7 @@ fn cluster_search(
             cfg = cfg.with_species(labels, sigmas);
         }
     }
+    cfg.branch_on_stall = branch_on_stall;
     let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let mut ledger =
