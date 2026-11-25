@@ -41,7 +41,7 @@ The potential is the rgpot GFN2 handle, `libxtb_engine.so` at rgpot
 `8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e`, linked to xtb 6.7.1
 (`edcfbbe`). Energies from the handle are eV. The hartree factor is
 27.211386245988, the factor in that engine and in
-`src/catalog/molecular.rs`.
+`src/catalog/molecular.rs:95`.
 
 The stop threshold is the reference plus the tolerance, in eV:
 
@@ -54,7 +54,9 @@ first objective evaluation at or below it. A miss is stored as
 budget + 1, which is 151739.
 
 Seeds are 2000–2011, twelve starts, one process at a time, pinned to
-one core. One thread is used inside the potential.
+one core. One thread is used inside the potential. This execution
+finished 2000–2007 and did not start 2008–2011. `REPORT.md` records
+why, and applies the comparisons below to those eight seeds.
 
 ## Comparison
 
@@ -64,7 +66,12 @@ with a miss at budget + 1, use a two-sided exact Mann–Whitney test:
 midranks, and the probability of a rank sum at least as far from the
 null mean as the one observed.
 
-The anneal hit rate has a Wilson 95% interval. The median of the twelve
+The anneal hit rate has a Wilson 95% interval. The median of the finished
 calls-to-hit has a bootstrap 95% interval: 10000 resamples with
 replacement, generator seed 20261123, and the order statistics at
 2.5% and 97.5% of the sorted medians.
+
+The CREST call counts also define two earlier marks: the minimum and
+the median of the six recorded counts. The report gives the fraction
+of anneal seeds whose calls-to-hit are at or below each mark. A miss,
+stored as budget + 1, is above both marks.

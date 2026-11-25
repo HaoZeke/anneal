@@ -301,7 +301,7 @@ def write_report(
     anneal: list[dict[str, str]],
     revision: str,
 ) -> None:
-    crest_calls = [int(row["crest_calls"]) for row in crest]
+    crest_calls = sorted(int(row["crest_calls"]) for row in crest)
     anneal_hits = sum(row["hit"] == "1" for row in anneal)
     crest_hits = sum(row["hit"] == "1" for row in crest)
     n_a, n_c = len(anneal), len(crest)
@@ -312,6 +312,12 @@ def write_report(
     blo, bhi = bootstrap_median_ci(anneal_calls)
     fisher = fisher_exact(anneal_hits, n_a, crest_hits, n_c)
     mann = mann_whitney_exact(anneal_calls, crest_call_values)
+    crest_min = crest_calls[0]
+    crest_med = median([float(v) for v in crest_calls])
+    within_min = sum(value <= crest_min for value in anneal_calls)
+    within_med = sum(value <= crest_med for value in anneal_calls)
+    min_lo, min_hi = wilson(within_min, n_a)
+    med_lo, med_hi = wilson(within_med, n_a)
     lines = [
         "# (H2O)8 matched budget",
         "",
@@ -330,7 +336,8 @@ def write_report(
         )
     lines += [
         "",
-        f"Median of the six CREST call counts: {median([float(v) for v in crest_calls]):.1f}.",
+        "CREST seeds 17000-17005, taken from bench/h2o-octamer/results.csv.",
+        f"Minimum of those call counts: {crest_min}. Median: {crest_med:.1f}.",
         f"Maximum, used as the anneal budget: {budget}.",
         "",
         "## Anneal seeds 2000-2011",
@@ -355,6 +362,14 @@ def write_report(
         f"CREST hits {crest_hits}/{n_c}.",
         f"Fisher exact two-sided p on the hit counts: {fisher:.6g}.",
         f"Mann-Whitney exact two-sided p on calls to the hit: {mann:.6g}.",
+        "",
+        f"Anneal seeds whose call count is at or below the CREST minimum "
+        f"({crest_min}): {within_min}/{n_a}. Wilson 95% interval "
+        f"[{min_lo:.4f}, {min_hi:.4f}].",
+        f"Anneal seeds whose call count is at or below the CREST median "
+        f"({crest_med:.1f}): {within_med}/{n_a}. Wilson 95% interval "
+        f"[{med_lo:.4f}, {med_hi:.4f}].",
+        "A miss is stored above both of those call counts.",
         "",
         "The anneal seeds and the CREST seeds are different samples.",
         "The tests are unpaired. Each CREST row keeps that seed's own call count.",
