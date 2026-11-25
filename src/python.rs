@@ -3203,17 +3203,18 @@ impl eindir_core::gradient::DifferentiableObjective<f64> for CallableDiffObjecti
     }
 }
 
-/// `callbacks + internal == spent + split extras`.
+/// `callbacks + internal + probe_unbacked == spent + split extras`.
 ///
 /// Each term is counted on its own. `internal` is the lattice, reoccupy,
-/// quench and settle charges plus probe charges that had no callback.
-/// `extras` is the number of `value_and_gradient` entries. A residual
-/// would make this hold by arithmetic; these counters do not.
+/// quench and settle charges. `probe_unbacked` is the probe charges that
+/// had no callback. `extras` is the number of `value_and_gradient` entries.
+/// A residual would make this hold by arithmetic; these counters do not.
 fn set_charge_fields(
     _py: Python<'_>,
     ledger_split: &pyo3::Bound<'_, PyDict>,
     ledger: &crate::methods::cluster_hopping::Ledger,
     calls: &PythonCallCounts,
+    probe_unbacked: usize,
 ) -> PyResult<()> {
     let charges = ledger.charges();
     ledger_split.set_item("spent", ledger.spent())?;
@@ -3226,6 +3227,7 @@ fn set_charge_fields(
     ledger_split.set_item("lattice", charges.lattice)?;
     ledger_split.set_item("reoccupy", charges.reoccupy)?;
     ledger_split.set_item("probe", charges.probe)?;
+    ledger_split.set_item("probe_unbacked", probe_unbacked)?;
     ledger_split.set_item("callbacks", PythonCallCounts::load(&calls.total))?;
     ledger_split.set_item("split_extras", PythonCallCounts::load(&calls.split_pairs))?;
     Ok(())
@@ -3235,7 +3237,7 @@ fn reconcile_python_charges(
     calls: &PythonCallCounts,
     ledger: &crate::methods::cluster_hopping::Ledger,
     probe_unbacked: usize,
-) {
+) -> PyResult<()> {
     use crate::methods::cluster_hopping::ChargeSplit;
     let callbacks = PythonCallCounts::load(&calls.total);
     let extras = PythonCallCounts::load(&calls.split_pairs);
@@ -3248,7 +3250,10 @@ fn reconcile_python_charges(
         ledger.spent(),
         charges
     );
-    ledger.assert_named_charges();
+    ledger
+        .assert_named_charges()
+        .map_err(|err| pyo3::exceptions::PyRuntimeError::new_err(err.to_string()))?;
+    Ok(())
 }
 
 fn cluster_gradient_scale(
@@ -3396,6 +3401,7 @@ fn cluster_archive_search(
     ledger: &mut crate::methods::cluster_hopping::Ledger,
     calls: &PythonCallCounts,
     seed: u64,
+    probe_unbacked: usize,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::archive_search::{Archive, archive_search};
     use crate::methods::cluster_hopping::random_cluster_in_radius;
@@ -3452,7 +3458,7 @@ fn cluster_archive_search(
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
     dict.set_item("branch_on_stall", cfg.branch_on_stall)?;
     let ledger_split = PyDict::new(py);
-    set_charge_fields(py, &ledger_split, ledger, calls)?;
+    set_charge_fields(py, &ledger_split, ledger, calls, probe_unbacked)?;
     ledger_split.set_item("quenches", stats.total())?;
     ledger_split.set_item("converged", stats.converged)?;
     ledger_split.set_item("capped", stats.capped)?;
@@ -3463,6 +3469,7 @@ fn cluster_archive_search(
     ledger_split.set_item("overlap_rejected", stats.overlap_rejected)?;
     ledger_split.set_item("basins", out.floors)?;
     dict.set_item("ledger", ledger_split)?;
+    reconcile_python_charges(calls, ledger, probe_unbacked)?;
     Ok(dict.into())
 }
 
@@ -3471,10 +3478,12 @@ fn cluster_archive_search(
     _py: Python<'_>,
     _obj: &CallableDiffObjective,
     _cfg: &crate::methods::cluster_hopping::Config,
-    _ledger: &mut crate::methods::cluster_hopping::Ledger,
-    _calls: &PythonCallCounts,
+    ledger: &mut crate::methods::cluster_hopping::Ledger,
+    calls: &PythonCallCounts,
     _seed: u64,
+    probe_unbacked: usize,
 ) -> PyResult<Py<PyDict>> {
+    reconcile_python_charges(calls, ledger, probe_unbacked)?;
     Err(PyValueError::new_err(
         "ras=True requires building with the graphkey feature",
     ))
@@ -4008,9 +4017,17 @@ fn cluster_search(
         calls: std::sync::Arc::clone(&potential_calls),
     };
     if ras {
-        let out = cluster_archive_search(py, &obj, &cfg, &mut ledger, &potential_calls, seed);
+        let out = cluster_archive_search(
+            py,
+            &obj,
+            &cfg,
+            &mut ledger,
+            &potential_calls,
+            seed,
+            probe_unbacked,
+        );
         errors.finish(py)?;
-        reconcile_python_charges(&potential_calls, &ledger, probe_unbacked);
+        reconcile_python_charges(&potential_calls, &ledger, probe_unbacked)?;
         return out;
     }
     let (out, stats) = if interleaved {
@@ -4057,7 +4074,7 @@ fn cluster_search(
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
     dict.set_item("branch_on_stall", cfg.branch_on_stall)?;
     let ledger_split = PyDict::new(py);
-    set_charge_fields(py, &ledger_split, &ledger, &potential_calls)?;
+    set_charge_fields(py, &ledger_split, &ledger, &potential_calls, probe_unbacked)?;
     ledger_split.set_item("quenches", stats.total())?;
     ledger_split.set_item("converged", stats.converged)?;
     ledger_split.set_item("capped", stats.capped)?;
@@ -4085,7 +4102,7 @@ fn cluster_search(
     };
     dict.set_item("local_step", quench)?;
     dict.set_item("quench_seconds", stats.quench_seconds)?;
-    reconcile_python_charges(&potential_calls, &ledger, probe_unbacked);
+    reconcile_python_charges(&potential_calls, &ledger, probe_unbacked)?;
     Ok(dict.into())
 }
 

@@ -367,9 +367,11 @@ def cluster_search(
     - ``quench``, ``settle``, ``lattice``, ``reoccupy``, ``probe``: the
       other named charges.
     - ``callbacks``: raw Python callbacks. ``split_extras``: evaluations
-      that returned energy and gradient together. Each is counted on its
-      own. ``callbacks`` plus the internal charges equals ``spent`` plus
-      ``split_extras``.
+      that returned energy and gradient together. ``probe_unbacked``:
+      probe charges that had no callback. It is two when the gradient
+      probe returns after its first callback. Each is counted on its
+      own. ``callbacks`` plus the internal charges plus
+      ``probe_unbacked`` equals ``spent`` plus ``split_extras``.
     - ``quenches``: relaxations run, equal to ``converged`` plus ``capped``,
       the ones that reached a small gradient and the ones that stopped at their
       step cap.

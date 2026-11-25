@@ -412,7 +412,10 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert out["charged"] == split["spent"]
     assert _named_charges(split) == split["spent"]
     assert split["callbacks"] == callbacks
-    assert callbacks + _internal_charges(split) == split["spent"] + split["split_extras"]
+    assert (
+        callbacks + _internal_charges(split) + split["probe_unbacked"]
+        == split["spent"] + split["split_extras"]
+    )
     assert split["split_extras"] > 0
     screened_out = out["ledger"]["screened_out"]
     assert (
@@ -448,7 +451,9 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert polished_split["full"] > 0
     assert _named_charges(polished_split) == polished_split["spent"]
     assert (
-        polished_split["callbacks"] + _internal_charges(polished_split)
+        polished_split["callbacks"]
+        + _internal_charges(polished_split)
+        + polished_split["probe_unbacked"]
         == polished_split["spent"] + polished_split["split_extras"]
     )
 
@@ -593,7 +598,8 @@ def test_cluster_search_reports_where_the_budget_went():
     assert out["branch_on_stall"] is False
     assert set(split) == {
         "spent", "screen", "full", "check", "closure", "quench", "settle", "lattice",
-        "reoccupy", "probe", "callbacks", "split_extras", "quenches", "converged", "capped",
+        "reoccupy", "probe", "probe_unbacked", "callbacks", "split_extras", "quenches",
+        "converged", "capped",
         "screened_out", "returned", "branch_draws", "branch_spent", "overlap_rejected", "basins",
     }
     for key in split:
@@ -602,7 +608,31 @@ def test_cluster_search_reports_where_the_budget_went():
     assert "``branch_on_stall``" in cluster_search.__doc__.split("Returns a dict with")[1]
     assert 0 < split["spent"] <= 600
     assert _named_charges(split) == split["spent"]
-    assert split["callbacks"] + _internal_charges(split) == split["spent"] + split["split_extras"]
+    assert (
+        split["callbacks"] + _internal_charges(split) + split["probe_unbacked"]
+        == split["spent"] + split["split_extras"]
+    )
     assert split["quenches"] == split["converged"] + split["capped"] > 0
     assert split["basins"] >= 1
     assert out["hops"] >= split["screened_out"] + split["returned"]
+
+
+def test_an_early_gradient_probe_counts_the_unbacked_charges():
+    import warnings
+
+    def energy(x):
+        return lj_energy(x)
+
+    def gradient(x):
+        raise RuntimeError("probe stopped")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        out = cluster_search(energy, gradient, 4, 8, seed=1)
+    split = out["ledger"]
+    assert split["probe"] == 3
+    assert split["probe_unbacked"] == 2
+    assert (
+        split["callbacks"] + _internal_charges(split) + split["probe_unbacked"]
+        == split["spent"] + split["split_extras"]
+    )
