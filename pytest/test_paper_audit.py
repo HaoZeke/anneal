@@ -2141,6 +2141,12 @@ def test_a_revision_on_the_cov_floor2_record_ref_is_reachable(tmp_path, monkeypa
     assert not audit_mod.harness_reachable("c1c02d1646a7")
 
 
+def committed_record_rows():
+    with (ROOT / "bench/record-refs.csv").open(newline="") as handle:
+        rows = csv.DictReader(line for line in handle if not line.startswith("#"))
+        return [(row["ref"].strip(), row["sha"].strip(), row["tree"].strip()) for row in rows]
+
+
 @pytest.mark.parametrize("revision", [SIDE_COMMIT, "b7e90ce985ff"])
 def test_a_revision_on_no_registered_record_ref_is_flagged(revision):
     # e3ed7dad is on refs/audit/record/bench-sc-h2h-n12, which is not registered;
@@ -2308,14 +2314,123 @@ def test_committed_record_refs_use_only_audit_refs():
     } <= set(refs)
 
 
+def citation_drifts(monkeypatch, sources):
+    monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", False)
+    monkeypatch.setattr(audit_mod, "record_citation_sources", lambda: sources)
+    audit = audit_mod.Audit()
+    audit_mod.record_citation_checks(audit)
+    return {(r[1], r[2], r[3]) for r in audit.drifts()}
+
+
+def test_every_record_citation_is_a_registered_audit_ref():
+    need_origin()
+    audit = audit_mod.Audit()
+    audit_mod.record_citation_checks(audit)
+    assert audit.drifts() == []
+    cited = {r[1].rsplit(":", 1)[0] for r in audit.results if r[2].startswith("the cited record ref has")}
+    assert {"paper/jctc/si.tex", "paper/jctc/data/g3_funnel/PROVENANCE",
+            "bench/template-free2-r7/README.md"} <= cited
+    archived = {r[1].rsplit(":", 1)[0] for r in audit.results if r[2] == "the cited archive record ref is on origin"}
+    assert {"bench/paper-rerun/sc-h2h/README.md", "bench/metal-cluster-h2h/sc-n12/README.md"} <= archived
+
+
+def test_archive_record_refs_stay_out_of_the_registry():
+    # A registry row would make e3ed7dad and the other removed rows' revisions reachable.
+    assert set(audit_mod.ARCHIVE_RECORD_REFS).isdisjoint(row[0] for row in committed_record_rows())
+    assert "refs/audit/record/bench-sc-h2h-n12" in audit_mod.ARCHIVE_RECORD_REFS
+
+
+def test_an_archive_record_citation_needs_its_listed_sha_on_origin(tmp_path, monkeypatch):
+    need_origin()
+    path = tmp_path / "README.md"
+    path.write_text("Those rows remain on `refs/audit/record/bench-sc-h2h-n12`.\n")
+    label = "the cited archive record ref is on origin"
+
+    def drifts():
+        audit = audit_mod.Audit()
+        audit_mod.record_citation_checks(audit)
+        return {(r[1], r[2]) for r in audit.drifts()}
+
+    monkeypatch.setattr(audit_mod, "record_citation_sources", lambda: [str(path)])
+    assert drifts() == set()
+    ref = "refs/audit/record/bench-sc-h2h-n12"
+    monkeypatch.setitem(audit_mod.ARCHIVE_RECORD_REFS, ref, ("0" * 40, "moved"))
+    assert drifts() == {(f"{path}:1", label)}
+    monkeypatch.delitem(audit_mod.ARCHIVE_RECORD_REFS, ref)
+    assert drifts() == {(f"{path}:1", f"the cited record ref has a {audit_mod.RECORD_REFS} row")}
+
+
+BRANCH_FORM_CITATIONS = (
+    ("paper/jctc/si.tex", 209, "record/knockout-pairscale"),
+    ("paper/jctc/si.tex", 218, "record/knockout-move-a"),
+    ("paper/jctc/si.tex", 380, "record/g3-funnel"),
+    ("paper/jctc/si.tex", 415, "record/outside-perf3-r2"),
+    ("paper/jctc/data/g3_funnel/PROVENANCE", 1, "record/g3-funnel"),
+    ("bench/template-free2-r7/README.md", 30, "record/template-free2-r4-escape"),
+)
+
+
+def test_the_branch_form_citations_of_the_old_text_fail(tmp_path, monkeypatch):
+    # a9147dd1 is the last commit before the citations moved to refs/audit/record.
+    sources = []
+    for path in sorted({path for path, _, _ in BRANCH_FORM_CITATIONS}):
+        old = git("show", f"a9147dd1f56820e68b5b3dac83ad3cd39c6a9678:{path}")
+        assert old.returncode == 0, old.stderr
+        copy = tmp_path / path
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        copy.write_text(old.stdout)
+        sources.append(str(copy))
+    labels = {(where.removeprefix(f"{tmp_path}/"), shown) for where, label, shown in citation_drifts(monkeypatch, sources)
+              if label == "a record is cited by its refs/audit/record ref"}
+    assert {(f"{path}:{line}", citation) for path, line, citation in BRANCH_FORM_CITATIONS} <= labels
+
+
+@pytest.mark.parametrize("citation", [
+    "record/g3-funnel",
+    "origin/record/g3-funnel",
+    "refs/heads/record/g3-funnel",
+    "refs/remotes/origin/record/g3-funnel",
+])
+def test_a_branch_form_record_citation_fails(tmp_path, monkeypatch, citation):
+    for name, text in (("README.md", f"rows on `{citation}`.\n"),
+                       ("si.tex", f"of \\path{{{citation}}} runs\n"),
+                       ("PROVENANCE", f"branch {citation}\n")):
+        path = tmp_path / name
+        path.write_text(text)
+        assert citation_drifts(monkeypatch, [str(path)]) == {
+            (f"{path}:1", "a record is cited by its refs/audit/record ref", citation)}
+
+
+def test_an_audit_ref_citation_needs_a_registry_row(tmp_path, monkeypatch):
+    path = tmp_path / "si.tex"
+    path.write_text("\\texttt{refs/\\allowbreak{}audit/\\allowbreak{}record/\\allowbreak{}g3-funnel} and\n"
+                    "\\path{refs/audit/record/knockout-move-a}\n")
+    assert citation_drifts(monkeypatch, [str(path)]) == set()
+    registry(tmp_path, monkeypatch, [row for row in committed_record_rows()
+                                     if row[0] != "refs/audit/record/g3-funnel"])
+    label = "the cited record ref has a " + audit_mod.RECORD_REFS + " row"
+    assert citation_drifts(monkeypatch, [str(path)]) == {
+        (f"{path}:1", label, "refs/audit/record/g3-funnel")}
+
+
+def test_a_record_directory_path_is_not_a_citation(tmp_path, monkeypatch):
+    path = tmp_path / "README.md"
+    path.write_text("bash record/gmin-184/enter.sh and paper/jctc/data/record/foo/rows.csv\n"
+                    "see refs/audit/record/gmin-184\n")
+    assert citation_drifts(monkeypatch, [str(path)]) == set()
+    path.write_text("rows on record/gmin-184.\n")
+    assert citation_drifts(monkeypatch, [str(path)]) == {
+        (f"{path}:1", "a record is cited by its refs/audit/record ref", "record/gmin-184")}
+
+
 def test_provenance_record_check_uses_verified_audit_refs(tmp_path, monkeypatch):
     need_origin()
     commit = "9178884ee114e60dd597fb5a970edbda648979f8"
-    assert audit_mod._commit_on_provenance_ref("record/outside-perf3-r2", commit)
-    assert audit_mod._commit_on_provenance_ref("refs/audit/record/leave-lj75", "666591a0")
+    assert audit_mod._commit_on_audit_ref("record/outside-perf3-r2", commit)
+    assert audit_mod._commit_on_audit_ref("refs/audit/record/leave-lj75", "666591a0")
     registry(tmp_path, monkeypatch, [])
-    assert not audit_mod._commit_on_provenance_ref("record/outside-perf3-r2", commit)
-    assert not audit_mod._commit_on_provenance_ref("refs/audit/record/leave-lj75", "666591a0")
+    assert not audit_mod._commit_on_audit_ref("record/outside-perf3-r2", commit)
+    assert not audit_mod._commit_on_audit_ref("refs/audit/record/leave-lj75", "666591a0")
 
 
 def test_a_registry_row_that_is_not_a_record_ref_is_flagged(tmp_path, monkeypatch):

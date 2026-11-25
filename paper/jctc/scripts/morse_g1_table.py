@@ -120,7 +120,7 @@ def table() -> str:
             "\\begin{table}",
             "\\caption{The submitted revision \\texttt{61fa67cf} alone on ten Morse clusters that",
             "the GMIN table of the main text does not run, from commit \\texttt{42562693} of",
-            "\\texttt{record/g1-develop-stock}: \\texttt{Config::recommended}\\((N)\\) through",
+            "\\texttt{refs/\\allowbreak{}audit/\\allowbreak{}record/\\allowbreak{}g1-develop-stock}: \\texttt{Config::recommended}\\((N)\\) through",
             "\\texttt{h2h\\_morse} with no driver variable but the budget, in the Lennard-Jones length",
             "unit, seeds 2000--2011.",
             "A hit is a lowest energy within \\(10^{-3}\\) of the reference of the run script.",

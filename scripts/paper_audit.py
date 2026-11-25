@@ -1078,15 +1078,15 @@ def gmin_rows_patch(audit: Audit) -> tuple[str, str, str]:
 
 
 def imported(audit: Audit, folder: str, name: str = "rows.csv", keys: tuple[str, str] = ("source", "blob")) -> str:
-    """An imported row file is the blob its PROVENANCE names, at that path of a commit on that record branch."""
+    """An imported row file is the blob its PROVENANCE names, at that path of a commit on that record ref."""
     fields = dict(line.split(" ", 1) for line in audit.text(f"{folder}/PROVENANCE").splitlines())
     path = f"{folder}/{name}"
     source, blob = fields[keys[0]], fields[keys[1]]
     local = git("hash-object", str(ROOT / path)).stdout.strip()
     audit.cell(path, "blob of the copy", blob, local)
     audit.cell(path, "blob at the record commit", blob, git("rev-parse", f"{fields['commit']}:{source}").stdout.strip())
-    on_branch = _commit_on_provenance_ref(fields["branch"], fields["commit"])
-    audit.record(on_branch, path, "the record commit is on the record branch of origin", fields["branch"],
+    on_branch = _commit_on_audit_ref(fields["branch"], fields["commit"])
+    audit.record(on_branch, path, "the record commit is on the record ref of origin", fields["branch"],
                  "on it" if on_branch else "not on it")
     return path
 
@@ -1306,7 +1306,7 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
                    "revision, which only sets the number of parallel build jobs,")
     audit.said(SI, f"The rows of this code in the second block are the submitted revision "
                    f"\\texttt{{\\seqsplit{{{SUBMITTED}}}}}, session {GMIN_DEVELOP_SESSION} of "
-                   "\\path{paper/jctc/data/gmin_develop}, copied from the record branch its \\texttt{PROVENANCE} file "
+                   "\\path{paper/jctc/data/gmin_develop}, copied from the record ref its \\texttt{PROVENANCE} file "
                    "names.")
     audit.said(SI, "The GMIN tables of the main text use four GMIN inputs.")
 
@@ -1581,7 +1581,7 @@ def knockout_move_a(audit: Audit, cells: dict[str, dict]) -> None:
     audit.said(COVER, "At 12 seeds, neither rescaling the preset lengths nor replacing adaptive\n"
                       "move choice by a uniform draw produces a detectable hit-rate change in the\n"
                       "tested panels.")
-    audit.said(SI, "\\texttt{\\seqsplit{50c532253f3ad11e6457a119bb603f05b4f0be79}} of \\path{record/knockout-move-a}, on "
+    audit.said(SI, "\\texttt{\\seqsplit{50c532253f3ad11e6457a119bb603f05b4f0be79}} of \\path{refs/audit/record/knockout-move-a}, on "
                    "the same develop commit.")
     audit.said(SI, "even seeds run the preset first and odd seeds the uniform draw first.")
     audit.record("the choice among the moves, the" not in collapse(audit.text(TEX)), TEX,
@@ -1647,7 +1647,7 @@ def knockout_pairscale(audit: Audit, cells: dict[str, dict]) -> None:
     audit.said(TEX, "Table~\\ref{tab:knockouts} gives three paired on/off tests: the former\n"
                     "structure templates, the preset length unit, and adaptive move choice.")
     audit.said(SI, "\\texttt{\\seqsplit{5c37c840ed2e9f9a2d881105363b33762b5cca31}} of "
-                   "\\path{record/knockout-pairscale}, on develop "
+                   "\\path{refs/audit/record/knockout-pairscale}, on develop "
                    "\\texttt{\\seqsplit{dd6ff9273be30ab317bfd5508596f4beb19cb3a4}}.")
     audit.said(SI, "even seeds run the Lennard-Jones diameter first and odd seeds the Morse minimum first.")
     audit.record("the length unit, the" not in collapse(audit.text(TEX)), TEX,
@@ -2232,7 +2232,7 @@ OUTSIDE_DATA = "paper/jctc/data/outside_perf"
 
 
 def outside_session(audit: Audit) -> None:
-    """tab:si-outside is the two builds of 61fa67cf in record/outside-perf3-r2, recomputed from its per-seed rows."""
+    """tab:si-outside is the two builds of 61fa67cf in refs/audit/record/outside-perf3-r2, recomputed from its per-seed rows."""
     fields = dict(line.split(" ", 1) for line in audit.text(f"{OUTSIDE_DATA}/PROVENANCE").splitlines())
     path = f"{OUTSIDE_DATA}/rows.csv"
     source = git("show", f"{fields['commit']}:{fields['source']}").stdout
@@ -2249,8 +2249,8 @@ def outside_session(audit: Audit) -> None:
     audit.cell(path, "blob of the committed projection", fields["blob"],
                git("hash-object", str(ROOT / path)).stdout.strip())
     audit.cell(path, "selection from the record source", "arms develop,develop_prime", fields["selection"])
-    on_branch = _commit_on_provenance_ref(fields["branch"], fields["commit"])
-    audit.record(on_branch, path, "the record commit is on the record branch of origin",
+    on_branch = _commit_on_audit_ref(fields["branch"], fields["commit"])
+    audit.record(on_branch, path, "the record commit is on the record ref of origin",
                  fields["branch"], "on it" if on_branch else "not on it")
     audit.cell(f"{OUTSIDE_DATA}/PROVENANCE", "tree of the record commit", fields["tree"],
                git("rev-parse", f"{fields['commit']}^{{tree}}").stdout.strip())
@@ -2287,7 +2287,7 @@ G1_STORED = ("bench/morse-gmin/seeds.csv", "bench/morse-panel/seeds.csv")
 
 
 def morse_g1(audit: Audit) -> None:
-    """tab:si-morse-g1 is the anneal rows of record/g1-develop-stock, checked row by row and recomputed."""
+    """tab:si-morse-g1 is the anneal rows of refs/audit/record/g1-develop-stock, checked row by row and recomputed."""
     path = imported(audit, G1_DATA)
     fields = dict(line.split(" ", 1) for line in audit.text(f"{G1_DATA}/PROVENANCE").splitlines())
     commit = fields["commit"]
@@ -2345,7 +2345,7 @@ def morse_g1(audit: Audit) -> None:
     audit.said(SI, "The record pairs these rows with stored GMIN rows of earlier sessions, which name no machine for "
                    "any cluster and no GMIN revision for five of the ten, so the article prints this code alone here.")
     audit.said(SI, "The rows are copied from commit \\texttt{\\seqsplit{4256269394435f77787d2bfdbead2321e08340a6}} "
-                   "of \\path{record/g1-develop-stock}")
+                   "of \\path{refs/audit/record/g1-develop-stock}")
     audit.said(TEX, "The Supporting Information runs the submitted revision alone on ten more Morse clusters, of 30, "
                     "38, 70 and 80 atoms at \\(\\rho\\) from 3 to 14, where it hits from 4 to 12 of 12 seeds.")
     audit.cell(f"{G1_DATA}/PROVENANCE", "the cited record commit", "4256269394435f77787d2bfdbead2321e08340a6", commit)
@@ -2357,7 +2357,7 @@ G3_TRACE_FILES = ("examples/h2h_gmin_proof.rs", "examples/h2h_morse.rs", "src/me
 
 
 def g3_session(audit: Audit) -> None:
-    """The traced session of record/g3-funnel reproduces the rows of this code in the GMIN table seed by seed."""
+    """The traced session of refs/audit/record/g3-funnel reproduces the rows of this code in the GMIN table seed by seed."""
     path = imported(audit, G3_DATA)
     fields = dict(line.split(" ", 1) for line in audit.text(f"{G3_DATA}/PROVENANCE").splitlines())
     commit = fields["commit"]
@@ -2403,7 +2403,8 @@ def g3_session(audit: Audit) -> None:
                    "its archived rows, and a replay of each run gives the same record of accepted\n"
                    "minima and the same lowest energy.\n"
                    "All 60 seeds are rows of this code printed in the GMIN table.")
-    audit.said(SI, "Commit \\texttt{\\seqsplit{e578f267b3826cfd7e0f1737515bc45f1b8a72c6}} of \\path{record/g3-funnel}")
+    audit.said(SI, "The record \\path{refs/audit/record/g3-funnel}, at commit "
+                   "\\texttt{\\seqsplit{e578f267b3826cfd7e0f1737515bc45f1b8a72c6}}, runs this code on")
     audit.said(SI, "removes no line of \\path{src}, and runs with the record on.")
 
 
@@ -4726,7 +4727,7 @@ def science_claims(audit: Audit) -> None:
     audit.said(SI, "A fingerprint bias during local optimization is reported on LJ\\(_{38}\\)\n"
                    "and LJ\\(_{75}\\).")
     trail = "666591a0"
-    trail_on_origin = _commit_on_provenance_ref("refs/audit/record/leave-lj75", trail)
+    trail_on_origin = _commit_on_audit_ref("refs/audit/record/leave-lj75", trail)
     audit.record(bool(commit_of(trail)) and git("merge-base", "--is-ancestor", trail, SUBMITTED).returncode != 0, TEX,
                  "the trail record is outside the history of the submitted revision", "outside", "checked")
     audit.record(trail_on_origin, TEX, "the trail record is on origin", "present", "checked")
@@ -5689,7 +5690,7 @@ def _verified_record_ref_tips() -> dict[str, str]:
     return {ref: sha for ref, sha, checks in record_ref_status(RECORD_REFS) if all(ok for _, ok, _, _ in checks)}
 
 
-def _commit_on_provenance_ref(branch: str, commit: str) -> bool:
+def _commit_on_audit_ref(branch: str, commit: str) -> bool:
     """True when commit is an ancestor of the verified audit ref for a record ref, or of origin/<branch>."""
     if branch.startswith(("record/", "refs/audit/record/")):
         ref = branch if branch.startswith("refs/audit/record/") else f"refs/audit/{branch}"
@@ -5706,6 +5707,89 @@ def record_ref_checks(audit: Audit) -> None:
     for _ref, _sha, checks in record_ref_status(RECORD_REFS):
         for label, ok, shown, value in checks:
             audit.record(ok, RECORD_REFS, label, shown, value)
+
+
+# The record/<name> branches are gone from origin, so a record is cited by its
+# full audit ref. The prefix group tells refs/audit/record/<name> from the
+# record/<name>, origin/record/<name> and refs/heads/record/<name> branch forms,
+# and from a path such as paper/data/record/<name>, which is not a ref.
+_RECORD_CITATION = re.compile(r"(?<![A-Za-z0-9_.-])((?:[A-Za-z0-9_.-]+/)*)record/([A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)")
+_RECORD_BRANCH_PREFIXES = ("", "origin/", "refs/heads/", "refs/remotes/origin/")
+# Test inputs and vendored trees may hold the branch form on purpose.
+_RECORD_CITATION_EXEMPT = ("pytest/", "tests/", "vendor/")
+# Audit record refs cited only as where removed rows are kept. Printed numbers
+# may not rest on them, so they have no RECORD_REFS row, which would make their
+# commits reachable; origin must still hold each at this SHA.
+ARCHIVE_RECORD_REFS = {
+    "refs/audit/record/bench-sc-h2h-n12": (
+        "182a334afbb6aea1db0a8c15482653f6c357b5a1",
+        "Sutton-Chen head-to-head rows removed because their revisions are not reachable",
+    ),
+}
+
+
+def record_citation_sources() -> list[str]:
+    """Tracked files that cite records: the paper, PROVENANCE files, READMEs and docs."""
+    paths = []
+    for path in git("ls-files", "-z").stdout.split("\0"):
+        if not path or path.startswith(_RECORD_CITATION_EXEMPT):
+            continue
+        name = path.rsplit("/", 1)[-1]
+        if (name.upper().startswith(("README", "PROVENANCE")) or name.lower().endswith("provenance.txt")
+                or name.endswith((".md", ".rst", ".tex"))):
+            paths.append(path)
+    return paths
+
+
+def record_citations(path: str, text: str) -> list[tuple[int, str, bool]]:
+    """Each record cited in text, as (line, citation, is the audit ref form).
+
+    TeX break hints between the parts of a ref are dropped first. A bare
+    record/<name>/ that names a directory of this tree is a path and is skipped.
+    """
+    if path.endswith(".tex"):
+        text = re.sub(r"\\allowbreak(\{\})?\s*", "", text).replace("\\_", "_")
+    out = []
+    for number, line in enumerate(text.splitlines(), 1):
+        for match in _RECORD_CITATION.finditer(line):
+            prefix, name = match.groups()
+            if prefix == "refs/audit/":
+                out.append((number, f"refs/audit/record/{name}", True))
+            elif prefix in _RECORD_BRANCH_PREFIXES:
+                if not prefix and line[match.end():].startswith("/") and (ROOT / "record" / name).is_dir():
+                    continue
+                out.append((number, match.group(0), False))
+    return out
+
+
+def record_citation_checks(audit: Audit) -> None:
+    """Every record cited in the paper, a PROVENANCE file, a README or a doc is a registered audit ref.
+
+    A ref in ``ARCHIVE_RECORD_REFS`` passes instead when origin holds it at its listed SHA, which is only
+    read under --fetch-records.
+    """
+    registered = {ref for ref, _sha, _checks in record_ref_status(RECORD_REFS)}
+    heads = origin_audit_record_refs() if _FETCH_RECORDS else {}
+    cited = 0
+    for path in record_citation_sources():
+        try:
+            text = audit.text(path)
+        except (OSError, UnicodeDecodeError):
+            continue
+        for number, citation, audit_form in record_citations(path, text):
+            cited += 1
+            where = f"{path}:{number}"
+            if not audit_form:
+                audit.record(False, where, "a record is cited by its refs/audit/record ref", citation,
+                             f"refs/audit/{citation[citation.index('record/'):]}")
+            elif citation in ARCHIVE_RECORD_REFS and citation not in registered:
+                sha, _why = ARCHIVE_RECORD_REFS[citation]
+                audit.record(heads.get(citation) == sha, where, "the cited archive record ref is on origin",
+                             f"{citation} {sha[:8]}", heads.get(citation, "absent"))
+            else:
+                audit.record(citation in registered, where, f"the cited record ref has a {RECORD_REFS} row",
+                             citation, "registered" if citation in registered else "not registered")
+    audit.record(cited > 0, "paper", "the record citations are found", cited, "at least one")
 
 
 @functools.cache
@@ -6080,7 +6164,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         paired_statistics, manuscript_gmin, withdrawn_benchmarks,
         supporting_information, release, paper_0120,
         gad_published, openconf, head_to_head, sc96_78_howto, stale_claims,
-        tip4p_panel, covalent_panels, covalent_gfn2, printed_harnesses, ase_gofee,
+        tip4p_panel, covalent_panels, covalent_gfn2, printed_harnesses, record_citation_checks, ase_gofee,
         lj_large, bench_prose, manuscript_ase, manuscript_knockouts,
         manuscript_priors, panel_references, generated_tables,
         supporting_numbers, manuscript_new, manuscript_followups, cover_letter,
