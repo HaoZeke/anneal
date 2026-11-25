@@ -369,7 +369,9 @@ fn finish(
     ledger: &Ledger,
     outcome: Outcome,
 ) -> Done {
-    ledger.assert_named_charges();
+    ledger
+        .assert_named_charges()
+        .expect("a finished search left an unnamed charge");
     let wall_s = started.elapsed().as_secs_f64();
     let end_rss = rss_anon_kb();
     rss.record(end_rss);

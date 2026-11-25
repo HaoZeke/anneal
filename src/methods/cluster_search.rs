@@ -1548,7 +1548,7 @@ fn finish_search<O>(
     mut outcome: Outcome,
     mut stats: RelaxStats,
     search_started: Instant,
-) -> (Outcome, RelaxStats)
+) -> Result<(Outcome, RelaxStats), SearchError>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
@@ -1561,7 +1561,7 @@ where
         polish_seconds: polish_started.elapsed().as_secs_f64(),
         polish_calls: ledger.spent().saturating_sub(spent),
     });
-    ledger.assert_named_charges();
+    ledger.assert_named_charges()?;
     assert_eq!(
         ledger.charges().screen,
         stats.screen_charged,
@@ -1577,7 +1577,7 @@ where
         stats.check_charged,
         "check charges diverged from the relaxation counter"
     );
-    (outcome, stats)
+    Ok((outcome, stats))
 }
 
 /// Runs a cluster search on `objective` under `ledger`.
@@ -1594,6 +1594,7 @@ pub fn search<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    ledger.assert_named_charges()?;
     let search_started = Instant::now();
     let mut stats = RelaxStats::default();
     let requested_reserve = molecular_answer_reserve(cfg, ledger);
@@ -1643,14 +1644,7 @@ where
     if hold.is_some() {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
     }
-    Ok(finish_search(
-        objective,
-        cfg,
-        ledger,
-        out,
-        stats,
-        search_started,
-    ))
+    finish_search(objective, cfg, ledger, out, stats, search_started)
 }
 
 /// [`search`] of a [`crate::potentials::PairPotential`], instantiated in this crate.
@@ -1687,6 +1681,7 @@ pub fn search_from<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    ledger.assert_named_charges()?;
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
     let search_started = Instant::now();
@@ -1727,14 +1722,7 @@ where
     if hold.is_some() {
         finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
     }
-    Ok(finish_search(
-        objective,
-        cfg,
-        ledger,
-        out,
-        stats,
-        search_started,
-    ))
+    finish_search(objective, cfg, ledger, out, stats, search_started)
 }
 
 /// Calls kept back from a molecular hop for the final polish.
@@ -1900,6 +1888,7 @@ where
     O: DifferentiableObjective<f64> + ?Sized,
     H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
 {
+    ledger.assert_named_charges()?;
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
     let search_started = Instant::now();
@@ -1930,14 +1919,7 @@ where
             checkpoint,
         )?
     };
-    Ok(finish_search(
-        objective,
-        cfg,
-        ledger,
-        out,
-        stats,
-        search_started,
-    ))
+    finish_search(objective, cfg, ledger, out, stats, search_started)
 }
 
 /// As [`search_from`], reporting every certified quench to `history`.
@@ -1960,6 +1942,7 @@ pub fn search_from_with_history<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    ledger.assert_named_charges()?;
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
     let mut stats = RelaxStats::default();
@@ -2352,6 +2335,7 @@ pub fn search_from_bank<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    ledger.assert_named_charges()?;
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
     let search_started = Instant::now();
@@ -2652,14 +2636,7 @@ where
         rigid_path,
         ..Outcome::default()
     };
-    Ok(finish_search(
-        objective,
-        cfg,
-        ledger,
-        out,
-        stats,
-        search_started,
-    ))
+    finish_search(objective, cfg, ledger, out, stats, search_started)
 }
 
 #[cfg(any(feature = "bank-rpc", test))]
@@ -3602,6 +3579,22 @@ mod tests {
             "nothing converged, so the chain is not on the quenched landscape"
         );
         assert!(ledger.spent() <= 120_000, "spent {}", ledger.spent());
+    }
+
+    #[test]
+    fn a_search_returns_an_error_when_the_ledger_already_holds_an_unnamed_charge() {
+        let pot = PairPotential::lennard_jones(3);
+        let mut ledger = Ledger::new(30);
+        assert!(ledger.charge(), "the pre-charge fits");
+        assert_eq!(ledger.charges().unnamed, 1);
+        let err = search(&pot, &Config::for_cluster(3), &mut ledger, 1)
+            .expect_err("unnamed charges are an error");
+        assert_eq!(err, SearchError::UnnamedCharge { count: 1 });
+        assert_eq!(
+            ledger.spent(),
+            1,
+            "the search returned before charging more"
+        );
     }
 
     /// The returned structure has to be a minimum carrying the reported energy,

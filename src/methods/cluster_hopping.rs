@@ -507,7 +507,8 @@ impl QuenchBoundary {
 /// first-encounter statistic the list exists to report.
 const IMPROVEMENT_CAP: usize = 512;
 
-/// A search stopped because no initial quench was finite.
+/// A search stopped because no initial quench was finite, or because the
+/// ledger already held an unnamed charge.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SearchError {
     /// The initial evaluation was non-finite on every attempt.
@@ -515,6 +516,14 @@ pub enum SearchError {
     NoFiniteStart {
         /// Quenches tried before the search stopped.
         attempts: usize,
+    },
+    /// The ledger held charges with no name.
+    ///
+    /// A release build used to abort. The search returns this instead.
+    #[error("{count} unnamed charges on the ledger")]
+    UnnamedCharge {
+        /// Unnamed units present when the search refused them.
+        count: usize,
     },
 }
 
@@ -634,8 +643,9 @@ pub enum ChargeName {
 ///
 /// `spent` equals [`ChargeSplit::total`] after every charge. A finished
 /// search also has [`ChargeSplit::unnamed`] at zero, so `spent` equals
-/// [`ChargeSplit::named`]. Both checks use `assert`, so a release build
-/// keeps them.
+/// [`ChargeSplit::named`]. The total check is an `assert`. An unnamed
+/// remainder is [`SearchError::UnnamedCharge`], so a release build
+/// returns it instead of aborting.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ChargeSplit {
     /// Screening-relaxation charges.
@@ -1091,20 +1101,22 @@ impl Ledger {
 
     /// `spent` equals the sum of the named counters, and nothing is unnamed.
     ///
-    /// This is `assert`, not `debug_assert`, so a release build keeps it.
-    pub fn assert_named_charges(&self) {
+    /// An unnamed charge is [`SearchError::UnnamedCharge`], including in a
+    /// release build. The counter identity stays an `assert`.
+    pub fn assert_named_charges(&self) -> Result<(), SearchError> {
         self.assert_split();
-        assert_eq!(
-            self.charges.unnamed, 0,
-            "unnamed charges remain: {:?}",
-            self.charges
-        );
+        if self.charges.unnamed != 0 {
+            return Err(SearchError::UnnamedCharge {
+                count: self.charges.unnamed,
+            });
+        }
         assert_eq!(
             self.spent,
             self.charges.named(),
             "spent is not the sum of the named counters: {:?}",
             self.charges
         );
+        Ok(())
     }
 
     /// Charges a fraction of one evaluation, for work that touches a subset
@@ -12590,6 +12602,89 @@ mod tests {
             "a rejected probe must skip basin identity"
         );
         assert!(seen.is_empty(), "a deferred basin must remain eligible");
+    }
+
+    #[test]
+    fn absorb_paid_clips_the_extra_from_unnamed_through_screen() {
+        let side = ChargeSplit {
+            unnamed: 2,
+            probe: 3,
+            reoccupy: 4,
+            lattice: 5,
+            settle: 6,
+            quench: 7,
+            closure: 8,
+            check: 9,
+            full: 10,
+            screen: 11,
+        };
+        assert_eq!(side.total(), 65);
+        let mut host = ChargeSplit {
+            screen: 1,
+            ..ChargeSplit::default()
+        };
+        host.absorb_paid(side, 50);
+        assert_eq!(host.unnamed, 0);
+        assert_eq!(host.probe, 0);
+        assert_eq!(host.reoccupy, 0);
+        assert_eq!(host.lattice, 0);
+        assert_eq!(host.settle, 5);
+        assert_eq!(host.quench, 7);
+        assert_eq!(host.closure, 8);
+        assert_eq!(host.check, 9);
+        assert_eq!(host.full, 10);
+        assert_eq!(host.screen, 12);
+        assert_eq!(host.total(), 51);
+    }
+
+    #[test]
+    fn absorb_paid_files_a_shortfall_as_unnamed() {
+        let mut host = ChargeSplit::default();
+        let side = ChargeSplit {
+            full: 2,
+            screen: 1,
+            ..ChargeSplit::default()
+        };
+        host.absorb_paid(side, 7);
+        assert_eq!(host.full, 2);
+        assert_eq!(host.screen, 1);
+        assert_eq!(host.unnamed, 4);
+        assert_eq!(host.total(), 7);
+    }
+
+    #[test]
+    fn with_charge_name_restores_the_outer_name() {
+        let mut ledger = Ledger::new(10);
+        assert!(ledger.with_charge_name(ChargeName::Screen, |ledger| ledger.charge()));
+        assert!(ledger.charge());
+        assert_eq!(ledger.charges().screen, 1);
+        assert_eq!(ledger.charges().unnamed, 1);
+        ledger.with_charge_name(ChargeName::Full, |ledger| {
+            assert!(ledger.charge());
+            ledger.with_charge_name(ChargeName::Check, |ledger| {
+                assert!(ledger.charge());
+            });
+            assert!(ledger.charge());
+        });
+        assert_eq!(ledger.charges().full, 2);
+        assert_eq!(ledger.charges().check, 1);
+        assert!(ledger.charge());
+        assert_eq!(ledger.charges().unnamed, 2);
+    }
+
+    #[test]
+    fn charge_many_pays_only_what_the_budget_has_left() {
+        let mut ledger = Ledger::new(5);
+        assert!(ledger.with_charge_name(ChargeName::Closure, |ledger| ledger.charge_many(3)));
+        assert_eq!(ledger.spent(), 3);
+        assert_eq!(ledger.charges().closure, 3);
+        assert!(!ledger.with_charge_name(ChargeName::Probe, |ledger| ledger.charge_many(4)));
+        assert_eq!(ledger.spent(), 5);
+        assert_eq!(ledger.charges().probe, 2);
+        assert_eq!(ledger.charges().closure, 3);
+        assert!(!ledger.charge_many(1));
+        assert_eq!(ledger.spent(), 5);
+        assert_eq!(ledger.charges().unnamed, 0);
     }
 
     #[test]
