@@ -9,6 +9,7 @@ the same system, arm, seed and revision is left untouched.
 from __future__ import annotations
 
 import csv
+import hashlib
 import math
 import os
 import random
@@ -26,7 +27,6 @@ ARM = "cooperative"
 SYSTEM = "au55"
 CHAINS = 4
 REFERENCE = "-191.03085280"
-HORIZON_S = 4 * 60 * 60
 BOOTSTRAP_DRAWS = 10000
 BOOTSTRAP_SEED = 20261123
 KINDS = (
@@ -66,12 +66,18 @@ HEADER.extend(
         "ensemble_total",
         "server_aggregate",
         "terms_match",
+        "binary",
+        "features",
+        "shape_keyed",
+        "libira_sha256",
         "revision",
         "nproc",
         "cpu_model",
     ]
 )
 ROWS = ROOT / "bench" / "arch-cooperative" / "au55" / "rows.csv"
+FEATURES = "bank-rpc ira"
+BINARY_NAME = "arch_cooperative"
 REPORT = ROOT / "bench" / "arch-cooperative" / "au55" / "REPORT.md"
 BASELINE = ROOT / "bench" / "paper-0120" / "rows.csv"
 
@@ -86,6 +92,7 @@ def main() -> None:
     if REFERENCE not in metal:
         raise SystemExit("au55 reference string is absent from the metal example")
     binary = release_binary()
+    libira = libira_sha256()
     revision = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
     ).strip()
@@ -98,17 +105,10 @@ def main() -> None:
         finished.extend(rows_for(revision))
         walls.extend(float(row["wall_s"]) for row in finished)
     minima = tempfile.mkdtemp(prefix="au55-minima-")
-    stopped = None
-    for index, seed in enumerate(SEEDS):
+    for seed in SEEDS:
         if seed in done:
             continue
-        remaining = sum(1 for later in SEEDS[index:] if later not in done)
-        if walls:
-            projected = sum(walls) + (sum(walls) / len(walls)) * remaining
-            if projected > HORIZON_S:
-                stopped = projected
-                break
-        row = run_seed(seed, budget, revision, minima, binary)
+        row = run_seed(seed, budget, revision, minima, binary, libira)
         append_row(row)
         finished.append(row)
         walls.append(float(row["wall_s"]))
@@ -118,9 +118,7 @@ def main() -> None:
             f"wall_s={row['wall_s']} terms_match={row['terms_match']}",
             flush=True,
         )
-    write_report(finished, budget, revision, stopped)
-    if stopped is not None:
-        print(f"projection stop {stopped:.1f}s", flush=True)
+    write_report(finished, budget, revision, libira)
 
 
 def stored_seeds(revision: str) -> set[int]:
@@ -159,7 +157,25 @@ def release_binary() -> Path:
     return binary
 
 
-def run_seed(seed: int, budget: int, revision: str, minima: str, binary: Path) -> dict[str, str]:
+def libira_sha256() -> str:
+    lib_dir = os.environ.get("IRA_LIB_DIR", "")
+    path = Path(lib_dir) / "libira.so"
+    if not path.is_file():
+        raise SystemExit("libira.so is not available")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if len(digest) != 64:
+        raise SystemExit("libira.so digest is not 64 hex characters")
+    return digest
+
+
+def run_seed(
+    seed: int,
+    budget: int,
+    revision: str,
+    minima: str,
+    binary: Path,
+    libira: str,
+) -> dict[str, str]:
     env = os.environ.copy()
     for key in (
         "OMP_NUM_THREADS",
@@ -185,6 +201,7 @@ def run_seed(seed: int, budget: int, revision: str, minima: str, binary: Path) -
                 str(seed),
                 str(budget),
                 revision,
+                libira,
             ],
             cwd=ROOT,
             env=env,
@@ -204,11 +221,13 @@ def run_seed(seed: int, budget: int, revision: str, minima: str, binary: Path) -
     if len(fields) != len(HEADER):
         raise SystemExit(f"seed {seed} row has {len(fields)} fields")
     row = dict(zip(HEADER, fields, strict=True))
-    check_row(row, seed, budget, revision)
+    check_row(row, seed, budget, revision, libira)
     return row
 
 
-def check_row(row: dict[str, str], seed: int, budget: int, revision: str) -> None:
+def check_row(
+    row: dict[str, str], seed: int, budget: int, revision: str, libira: str
+) -> None:
     if "/" in row["cpu_model"] or contains_forbidden(row["cpu_model"]):
         raise SystemExit(f"seed {seed} cpu model is not a bare model string")
     if row["system"] != SYSTEM or row["arm"] != ARM:
@@ -217,6 +236,10 @@ def check_row(row: dict[str, str], seed: int, budget: int, revision: str) -> Non
         raise SystemExit(f"seed {seed} chain record does not match")
     if int(row["call_budget"]) != budget or row["revision"] != revision:
         raise SystemExit(f"seed {seed} budget or revision does not match")
+    if row["binary"] != BINARY_NAME or row["features"] != FEATURES:
+        raise SystemExit(f"seed {seed} binary or features do not match")
+    if row["shape_keyed"] != "true" or row["libira_sha256"] != libira:
+        raise SystemExit(f"seed {seed} shape keying or library digest does not match")
     wall = float(row["wall_s"])
     if not math.isfinite(wall) or wall < 0.05:
         raise SystemExit(f"seed {seed} wall time is below 50 ms")
@@ -267,7 +290,7 @@ def write_report(
     rows: list[dict[str, str]],
     budget: int,
     revision: str,
-    stopped: float | None,
+    libira: str,
 ) -> None:
     if not rows:
         return
@@ -297,6 +320,8 @@ def write_report(
         f"Ledger charge sum {sum(int(row['charge_sum']) for row in rows)}.",
         f"Ensemble total sum {sum(int(row['ensemble_total']) for row in rows)}.",
         f"Server aggregate sum {sum(int(row['server_aggregate']) for row in rows)}.",
+        f"Binary {BINARY_NAME}. Features {FEATURES}. shape_keyed true.",
+        f"libira.so sha256 {libira}.",
         "",
         "Per seed:",
         "",
@@ -330,12 +355,12 @@ def write_report(
         )
         lines.append("Those calls_to_hit values are the end charged sum.")
     comparison(lines, rows, budget)
-    if stopped is not None:
-        lines.append("")
-        lines.append(
-            f"Remaining seeds were not started. Projected total wall time "
-            f"{stopped:.1f} s exceeds {HORIZON_S} s."
-        )
+    lines.append("")
+    lines.append(
+        "`rows-bankrpc-only.csv` keeps twelve Au55 rows from a `bank-rpc`"
+    )
+    lines.append("build with `shape_keyed` false. That file is not a paper cell.")
+    lines.append("Its values are unchanged.")
     lines.append("")
     lines.append(
         "Intervals use 10000 resamples and generator seed 20261123. "

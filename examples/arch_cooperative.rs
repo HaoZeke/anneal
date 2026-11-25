@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! arch_cooperative serve <seed> <budget>
-//! arch_cooperative seed <seed> <budget> <revision>
+//! arch_cooperative seed <seed> <budget> <revision> <libira-sha256>
 //! ```
 //!
 //! `seed` prints one CSV row. The budget is the ensemble total and must
@@ -177,8 +177,9 @@ mod driver {
                 let seed = required_u64(args.next(), "seed")?;
                 let budget = required_u64(args.next(), "budget")?;
                 let revision = args.next().ok_or("seed takes a revision")?;
+                let libira = args.next().ok_or("seed takes a libira sha256")?;
                 reject_extra(args.next(), "seed")?;
-                run_seed(seed, budget, &revision)
+                run_seed(seed, budget, &revision, &libira)
             }
             _ => Err("usage: arch_cooperative serve|seed".into()),
         }
@@ -338,6 +339,14 @@ fn fresh_eval(gupta: &Gupta, coordinates: &[f64]) -> Result<FreshEvaluation, Str
         }
     }
 
+    fn check_sha(value: &str) -> Result<(), String> {
+        if value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            Ok(())
+        } else {
+            Err("libira sha256 must be 64 hex characters".into())
+        }
+    }
+
     fn check_revision(revision: &str) -> Result<(), String> {
         if revision.len() == 40 && revision.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             Ok(())
@@ -346,8 +355,12 @@ fn fresh_eval(gupta: &Gupta, coordinates: &[f64]) -> Result<FreshEvaluation, Str
         }
     }
 
-    fn run_seed(seed: u64, budget: u64, revision: &str) -> Result<(), String> {
+    fn run_seed(seed: u64, budget: u64, revision: &str, libira: &str) -> Result<(), String> {
+        if !cfg!(feature = "ira") {
+            return Err("seed requires the ira feature".into());
+        }
         check_revision(revision)?;
+        check_sha(libira)?;
         let per_chain = per_chain_budget(budget)?;
         let per_chain_usize = usize::try_from(per_chain).map_err(|_| "budget does not fit")?;
         let server = spawn_server(seed, budget)?;
@@ -385,6 +398,7 @@ fn fresh_eval(gupta: &Gupta, coordinates: &[f64]) -> Result<FreshEvaluation, Str
             hit_at,
             chains: &chains,
             server_aggregate: status.aggregate_charged,
+            libira,
         })?;
         println!("{row}");
         Ok(())
@@ -716,6 +730,7 @@ fn fresh_eval(gupta: &Gupta, coordinates: &[f64]) -> Result<FreshEvaluation, Str
         cfg.replicas = 1;
         cfg.basin_stride = 8;
         cfg.polish_records = cfg.relax_steps;
+        cfg.shape_keyed = true;
         cfg
     }
 
@@ -1204,6 +1219,7 @@ fn step_norm(current: ArrayView1<f64>, proposed: &Array1<f64>) -> Option<f64> {
         hit_at: u64,
         chains: &'a [ChainOut],
         server_aggregate: u64,
+        libira: &'a str,
     }
 
     fn build_row(input: &RowInput<'_>) -> Result<String, String> {
@@ -1217,6 +1233,7 @@ fn step_norm(current: ArrayView1<f64>, proposed: &Array1<f64>) -> Option<f64> {
             hit_at,
             chains,
             server_aggregate,
+            libira,
         } = *input;
         let mut summaries = [ChargeSummary::default(); 11];
         let mut oracle_calls = 0u64;
@@ -1279,6 +1296,10 @@ fn step_norm(current: ArrayView1<f64>, proposed: &Array1<f64>) -> Option<f64> {
         fields.push(ensemble_total.to_string());
         fields.push(server_aggregate.to_string());
         fields.push(terms_match.to_string());
+        fields.push("arch_cooperative".to_owned());
+        fields.push("bank-rpc ira".to_owned());
+        fields.push("true".to_owned());
+        fields.push(libira.to_owned());
         fields.push(revision.to_owned());
         fields.push(nproc().to_string());
         fields.push(cpu_model());
