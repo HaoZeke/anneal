@@ -6837,7 +6837,13 @@ where
                 bar: ledger.best,
                 allowance: descent.allowance(),
             };
-            let offered = generic_packing_candidate_with_encounter(cfg, &mut probe, relax, screen);
+            // The walk adopts no candidate before it ends, so the catalogue's
+            // quenches are diagnostic and leave the walk's adaptive kernels
+            // as they were.
+            let offered = {
+                let mut scope = probe.diagnostic_scope();
+                generic_packing_candidate_with_encounter(cfg, &mut scope, relax, screen)
+            };
             let before = ledger.spent();
             let candidate = offered.filter(|(energy, state, _)| {
                 *energy < ledger.best - PACKING_IMPROVEMENT

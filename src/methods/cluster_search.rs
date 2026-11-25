@@ -902,6 +902,11 @@ where
             .filter(|check| check.at == x);
         let before = led.spent();
         let screening = iters <= screen_iters;
+        // A diagnostic quench descends on the plain surface and leaves the
+        // portfolio's block clock, its credit and the local-step decision
+        // to the walk. Counting a probe's quenches as hops moved the block
+        // boundary and fed the probe's minima to the block reward.
+        let diagnostic = led.is_diagnostic_quench();
         // A rigid chart uses this same descent. A line-search-free capped
         // step reached a different basin, and the small-cluster walk then
         // took more hops at the same cost per quench.
@@ -909,7 +914,10 @@ where
         // A start the previous relaxation already certified at or below the
         // stop has nothing left to descend, and the descent's first call
         // would pay again for the energy and gradient on file.
-        let plain = surfaces.is_none() && !cfg.two_phase.is_some_and(|two| two.is_active());
+        let plain = match surfaces {
+            Some(_) => diagnostic,
+            None => !cfg.two_phase.is_some_and(|two| two.is_active()),
+        };
         if plain
             && let Some(check) = prior.as_ref()
             && largest_component(check.gradient.view()) <= opt.gtol
@@ -937,6 +945,7 @@ where
         // that minimum to the plain relaxation below. Both phases charge.
         let compacted;
         let surface = match surfaces.as_mut() {
+            Some(_) if diagnostic => None,
             Some(portfolio) => portfolio.begin(screening),
             None => cfg.two_phase.filter(|two| two.is_active()),
         };
@@ -1017,7 +1026,7 @@ where
                 *last.borrow_mut() = Some(check);
                 return Some(answer);
             }
-            let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
+            let clock = (deciding && !diagnostic).then(|| (led.spent(), std::time::Instant::now()));
             let answered = charge_rejecting_repeat_failure(
                 objective,
                 led,
@@ -1123,6 +1132,7 @@ where
         // A quench of a few calls times the start, not the potential.
         if !molecular_anc
             && deciding
+            && !diagnostic
             && timed_calls >= 3
             && let Some(tric) = tric.as_ref()
             && let Some(check) = last.borrow().as_ref()
@@ -1178,7 +1188,7 @@ where
         // the run found. Applied again after the convergence check, which
         // can be the call that raises the stop.
         let (f, xr, _) = lowest_stopped_answer(led, f, xr, &best_physical);
-        if let Some(portfolio) = surfaces.as_mut() {
+        if let Some(portfolio) = surfaces.as_mut().filter(|_| !diagnostic) {
             portfolio.observe(screening, f, target);
         }
         // A descent stopped on a verdict is known not to be converged, so
