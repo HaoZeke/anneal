@@ -6,6 +6,334 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 <!-- towncrier release notes start -->
 
+## [0.13.0](https://github.com/HaoZeke/anneal/tree/v0.13.0) - 2026-11-25
+
+### Removed
+
+- Breaking removal of items that v0.12.0 still defines.
+  ``anneal_core::soap::fivefold_plateau``,
+  ``anneal_core::soap::extended_scale`` and
+  ``anneal_core::soap::motif_fractions`` are gone. Delete those calls.
+  Fraction triples that remain go through
+  ``anneal_core::structure::named_triplet_fractions`` with the cutoff
+  the caller chooses. There is no replacement for the plateau test or
+  the extended-scale test.
+  The private ``packing_bank`` module is gone. That removes
+  ``PackingBank``, ``PackingBank::new``, ``PackingBank::order``,
+  ``PackingBank::offer``, ``PackingBank::better_other`` and the
+  constant ``GAP``.
+  These ``pub(crate)`` helpers in
+  ``anneal_core::methods::cluster_hopping::binary_geometry`` are gone:
+  ``FccCentre``, ``fcc_cut``, ``IcosahedronJoin``,
+  ``polyicosahedral_cut``, ``mackay_cut``, ``mackay_cap``,
+  ``axial_spine_cut`` and ``quench_as_placed``.
+- Breaking removal: the inert structure-prior switches are gone from
+  ``Config`` and ``ContinuousSymmetry``. The fields had no effect once
+  the structure templates were removed, and the fields themselves are
+  now deleted. v0.12.0 still has them.
+  The public fields removed from ``anneal_core::methods::cluster_hopping::Config``
+  are ``prior_reseed``, ``prior_growth``, ``prior_core``, ``prior_handover``
+  and ``prior_motif``. The public field removed from the variant
+  ``ContinuousSymmetry::Measure`` is ``reseed_hops``, so it is now
+  ``ContinuousSymmetry::Measure { interval }``. ``Config::prior_soap`` is
+  the one prior switch that remains.
+  Callers should delete every assignment, struct-literal field and
+  ``Measure`` pattern that names these fields, since Rust code that still
+  names them no longer compiles. Set ``prior_soap`` to ``false`` or use
+  ``Knockouts`` with ``Config::apply_knockouts`` to turn the SOAP proposal off.
+  A saved JSON or TOML configuration must drop the keys ``prior_reseed``,
+  ``prior_growth``, ``prior_core``, ``prior_handover``, ``prior_motif`` and
+  ``reseed_hops`` (also as ``continuous_symmetry.reseed_hops``). TOML that
+  sets one of those ``prior_*`` keys or ``reseed_hops`` is now rejected.
+  ``Config::validate_toml_keys`` walks the document and returns
+  ``RemovedConfigKeyError``. ``CampaignConfig::parse`` runs that check
+  before it decodes the file, so a campaign file with those keys is
+  rejected too. Deserialising ``ContinuousSymmetry::Measure`` with
+  ``reseed_hops`` fails with the same error. ``Config::validate_json_keys``
+  and the Python ``Config.validate_json`` / ``Config.validate_toml`` reject
+  the removed keys as well. The list is ``REMOVED_PRIOR_KEYS``.
+  ``prior_soap`` is not on that list.
+  The ``H2H_HANDOVER`` environment toggle of ``h2h_metal`` is gone, and
+  setting it to a non-empty value now fails, so unset it. ``H2H_PRIORS``
+  accepts only ``soap``, ``0``, ``none`` or ``1``. Use
+  ``Config::parse_prior_switches`` and ``Config::check_removed_env`` to run
+  the same checks in your own driver.
+
+### Added
+
+- ``Config::cap_twist`` adds a cap turn about a local symmetry axis as a
+  stall response for unlabelled atomic chains. The axis and its order come
+  from the best rotational self-map of a pivot's first shell, and the cap
+  is everything beyond half a layer from the pivot. On a call-plateau
+  leave a learned allocator draws the turn against the climb. Off by
+  default, so the paper preset draws the same calls.
+- ``Config::plateau_heat`` doubles the Metropolis temperature and the lattice-exchange temperature on each escape plateau, up to four times the preset, and returns to the preset when a new lowest minimum is recorded. The proposal step stays the configured length. Off leaves the preset trajectory. ``h2h_gmin_proof``, ``h2h_morse`` and ``h2h_metal`` read ``H2H_PLATEAU_HEAT=1``.
+- ``Config::recommended_for_pair`` applies ``Config::recommended`` in a unit-depth pair potential's own length unit. Lennard-Jones is unchanged. ``h2h_morse`` reads ``H2H_PAIR_SCALE=1`` and otherwise keeps the preset.
+- ``Config::retry_noop_stall_leave``,
+  ``Config::align_directed_stall_source``,
+  ``Config::capped_lindh_quench``, ``Config::call_floor``,
+  ``Config::call_floor_elements``, ``Config::branch_on_stall`` and
+  ``Config::for_cluster_with_scales`` are public. None of these names
+  exists in v0.12.0. ``molecular_call_floor`` is a different function
+  and is unchanged.
+  ``retry_noop_stall_leave`` retries a call-clock leave at once when no
+  escape candidate exists. Off, an attempted leave still consumes its
+  plateau window. On, only a leave that runs consumes it.
+  ``align_directed_stall_source`` starts those leaves from the recorded
+  best. Off keeps the live walker as the activation target.
+  ``capped_lindh_quench`` quenches a Cartesian molecule with capped
+  Lindh steps. It is off unless set. A non-molecular or rigid-body
+  library ignores it.
+  ``call_floor`` is an optional positive pair distance. A trial inside
+  it is opened just past the floor before relaxation, and dropped
+  uncharged when the opening fails. A zero-step read inside it is
+  refused uncharged. A floor that is not positive is refused when the
+  search starts. Declared species without a floor keep
+  ``OVERLAP_CALL_LIMIT``. Stock presets leave it unset.
+  ``call_floor_elements`` is one atomic number per point, read only by
+  ``call_floor``. Each pair floor is ``element_call_floor`` and is never
+  below ``call_floor``. A count other than the point count is refused.
+  ``branch_on_stall`` spends a stalled stretch on independent descents
+  from fresh random clusters. Off leaves the chain on its own
+  trajectory. The walk does not see a branch.
+  ``for_cluster_with_scales(n_points, length_scale, energy_scale)`` is
+  ``for_cluster`` at those scales, including the scaled shell core.
+  ``for_cluster`` calls it with the reduced Lennard-Jones scales.
+- ``Knockouts`` and ``Config::apply_knockouts`` switch off named parts of
+  a preset: ``prior_soap`` turns off the fivefold SOAP proposal and
+  ``move_choice`` draws the move arm uniformly. The ``h2h_gmin_proof``,
+  ``h2h_morse`` and ``h2h_metal`` drivers read a comma list of these names
+  from ``H2H_KNOCKOUT``. Unset or empty, a run is bit-identical to the
+  preset, and an unknown name stops the driver.
+- ``anneal.SEARCH_HIT_TOL``, ``anneal.DEFAULT_HIT_TOL`` and
+  ``anneal.energy_hits`` are public. They are the Python names of
+  ``anneal_core::SEARCH_HIT_TOL``, ``anneal_core::DEFAULT_HIT_TOL`` and
+  ``anneal_core::energy_hits``. ``energy_hits(energy, target, tol)`` is
+  the one-sided predicate ``energy <= target + tol``. ``tol`` defaults
+  to ``DEFAULT_HIT_TOL`` (``1e-3``). ``SEARCH_HIT_TOL`` is ``1e-4``.
+  The same three names are registered on ``anneal._core``.
+- ``gmin_losses2`` compares the parent preset, this tree with Morse lengths on the pair minimum, and GMIN. Rows go under ``/work`` or ``$OUTPUT``. The Snakemake output is a marker file, so a rerun cannot delete a tracked table.
+- ``lattice::observed_basis_candidate`` builds a compact lattice
+  candidate from a well-conditioned Gabriel tetrahedron in the current
+  geometry. On a directed stall, a search whose geometry is free to move
+  can propose one lattice body grown from a contact tetrahedron of the
+  current structure. The cloud stops at as many sites as the body has
+  distinct 4-point frames. When that count is reached with fewer sites
+  than the structure has points, the stall proposes nothing. Cluster
+  hopping runs this probe once per basin on a side ledger, and only while
+  the remaining budget can pay for every distinct tetrahedron the point
+  count can present. It is on by default under ``Config::recommended``.
+  Rigid-body, molecular, frozen, and active-region configurations skip
+  it. Charging the side quench against the run budget moved the pinned
+  preset-walk and heated fingerprints in
+  ``metropolis_heat_follows_the_plateau`` and
+  ``lattice_exchange_follows_the_plateau`` in ``tests/plateau_heat.rs``.
+
+### Developer
+
+- A contract test checks that the root crate, the wheel crate and ``Cargo.lock``
+  name one ``rgpot-pair`` revision. Cargo resolves two revisions side by side
+  and links both copies of the kernels, so a bump that misses a manifest is
+  caught here and not in a built wheel.
+- The CI sdist job runs ``scripts/check_installed_anneal.py`` before pytest,
+  as the release workflow does. The earlier check compared the module path
+  with ``python/anneal/__init__.py``, which an install and a shadowing
+  package both fail to match, so it could not fail.
+- The CI workflow contract tests parse ``ci.yml`` as YAML and check steps,
+  jobs and conditions, the way the release workflow tests do. The audit of
+  large files and the step that picks the macOS test matrix also run from
+  the contract tests, in a throwaway repository and shell.
+- The audit helpers run on macOS and on Python 3.10, and the tests start their child Python with ``sys.executable``, never a bare ``python3``.
+  ``paper/jctc/scripts/tblite_receipt.py`` and ``scripts/optbench/anneal_globalopt.py`` read TOML with ``tomli`` when ``tomllib`` is absent, and the ``testing`` extra and the CI test install declare ``tomli`` for Python before 3.11.
+  ``scripts/paper_audit.py`` matches the template switches in old revisions in Python after a fixed-string ``git grep``, since the BSD regex library has no ``\b``.
+  ``scripts/session_metadata.py`` records every CPU where the OS has no ``sched_getaffinity``.
+  ``scripts/machine_provenance.py`` reads the hardware UUID with ``ioreg`` and the CPU brand with ``sysctl`` on macOS; a host that offers neither still raises rather than record an invented value.
+- The release workflow contract tests parse ``release.yml`` as YAML. They check
+  the step order, that a step has no ``if`` or ``continue-on-error``, the exact
+  ``cargo publish`` command and the version it publishes, and the wheel matrix.
+  A step that moves, is skipped or swallows its exit status now fails them.
+- The release workflow's sdist smoke test runs ``scripts/check_installed_anneal.py``.
+  It fails unless ``anneal`` and ``anneal._core`` import from ``site-packages``
+  inside the venv the sdist was installed into. The earlier check compared the
+  module path with ``python/anneal/__init__.py``, which no interpreter started
+  at the repository root can return, so it could not fail.
+- The revision tests in ``pytest/test_paper_audit.py`` take their tip from the remote refs the audit counts as pushed, listed by ``audit_remote_refs()`` in ``scripts/paper_audit.py``, which the revision index reads too: ``origin/develop`` first, then ``origin/main`` while the audit counts it, then the rest of the set.
+  A clone that holds other remote branches, as the CI checkout does, no longer yields the alphabetically first or the newest ref, and the helper fails with a message when no audited branch is present.
+  ``scripts/paper_audit.py`` tests that a commit exists with one ``git cat-file --batch-check`` helper everywhere.
+- ``scripts/paper_audit.py`` runs on a Python without numpy.
+  ``scripts/sc96_78_common.py`` imports numpy inside ``write_start``, the only function that draws starts, so the audit, which loads ``scripts/sc96_78_hits.py`` for the Sutton-Chen step, no longer pulls it in.
+  ``pytest/test_paper_audit.py`` runs the whole audit entry point with numpy, scipy and matplotlib refused by an import hook, requires exit status 0 and that no blocked import was even attempted, and checks that the same harness fails for a script that imports numpy.
+
+### Changed
+
+- An auxiliary rigid quench is recorded only when it is finite, sane,
+  stationary and clear of a centre clash, and a walk that has reached its
+  target spends no further evaluations. That record does not move the
+  main chain's stall clock, its escape target, or the reward paid to its
+  move allocator. A rigid contact is the
+  body's span, and not tighter than the cycle move's own threshold, so
+  on TIP4P it stays 2.5 angstroms. A failed chain reversal is not a move,
+  and a custom body can declare its bonds.
+  The archive walk no longer indexes past its kernels when every arm
+  reverses a chain, and it ends when it has no proposer.
+  A rigid search restores its separate chain incumbent on a ledger that
+  an atomic search had cleared.
+  The rigid search no longer prints a rigid_diag line to stderr. Its
+  side-walk counts are returned in the outcome as rigid_path, and the
+  Python cluster_search carries them as a rigid_path dict for a rigid
+  body. A test checks that a rigid search writes nothing to stderr. ([#160](https://github.com/HaoZeke/anneal/issues/160))
+- A revision that a benchmark row cites must be a full 40-character SHA, a repository URL at a full SHA, or a pinned revision of another project. The record ingest and the ASE panel refresh refuse an abbreviated SHA through one shared validator.
+- Bench scripts and board examples no longer write a raw hostname. ``host_label`` in ``scripts/machine_provenance.py`` keeps the sandbox name ``bench`` and turns any other name into a salted digest; shell scripts call ``machine_provenance.py host-label``. The TIP4P rerun drops its ``hostname`` column, so fresh output has the columns of the committed artifacts. The kernel boot id is likewise written as a salted digest through ``boot_label``, with ``machine_provenance.py boot-label`` for shell scripts. A test fails when a script reads the host or the boot id another way. Bank and catalog endpoints are logged through ``endpoint_label``, which keeps the port and replaces the host by its label, while the job still dials the real address. The Rust examples read the host name and boot id only in ``examples/common/host_label.rs`` and write ``unknown`` where the kernel gives none.
+- Cut fixed per-run overhead in ``cluster_hopping``, ``csm``,
+  ``assignment``, and ``lattice::candidate_from_basis`` while keeping
+  trajectories bit-identical. ``cluster_hopping`` no longer computes a
+  write-only ``PackingBank`` on every accepted hop and hoists environment
+  flag reads out of the acceptance loop. ``candidate_from_basis`` grows and
+  peels lattice clouds with deterministic integer-hashed indexed maps and
+  binary heaps instead of quadratic frontier scans. ``csm`` caches group
+  tables, precomputes class blocks, hashes cached operations without per-op
+  bit-vector allocations, and certifies duals in place. ``assignment``
+  reuses scratch buffers and keeps the AVX2 target region across the
+  shortest-paths, uniqueness, and Kuhn-Munkres loops.
+- Every script, bench runner, paper script and shell wrapper that checks a commit id calls ``scripts/revision_reach.py``: ``is_full_sha`` for a whole id, ``commit_id_pattern`` for text that may quote a prefix, and ``revision_reach.py full-sha`` for the shell. A test fails when a new forty-character hex check or machine id read appears elsewhere, with no exemption for a whole file.
+- Restricted crate publication to a minimal ``Cargo.toml`` include allowlist so
+  large research trees (for example ``paper/`` and ``bench/``) are not packaged,
+  while required crate build inputs remain included.
+- Symmetry detection takes the sine and cosine of a rotation once per
+  axis and order instead of once per rotated point. Deviations, detected
+  operations and symmetrised structures are unchanged bit for bit.
+- The campaign and panel scripts read the machine id and the CPU model only through ``machine_columns()``. The GMIN head-to-head runner, the TIP4P rerun, the template-free cell runner, the LJ board and the other scripts that read ``/etc/machine-id`` or ``/proc/cpuinfo`` themselves no longer do. Rows already on disk are not changed.
+- The optional ``ase`` extra allows ASE 3.23 up to, but not including,
+  3.30. v0.12.0 stopped before 3.28.
+- The release workflow publishes ``anneal-core`` to crates.io only after
+  the PyPI publish job has succeeded. Building the sdist and the wheels
+  is not enough: a failed PyPI upload no longer leaves a crates.io
+  release that cannot be undone.
+- The wheel crate manifest names the ``anneal-core`` version on that
+  dependency. The version is the workspace package version. v0.12.0
+  depended on the path and did not name a version. The manifest still
+  sets ``description``, ``license = "MIT"`` and ``publish = false``,
+  as it did in v0.12.0.
+- ``BasinIndex::lookup`` skips a stored centre when the block sums of the
+  two descriptors already put it past the merge radius, before reading
+  the descriptor. The bound allows for the rounding of the sums, so every
+  lookup returns the basin the plain walk returns. It applies to metrics
+  whose new ``BasinMetric::is_euclidean`` is true, which
+  ``EuclideanMetric`` is.
+- ``ClusterKernels`` is ``#[non_exhaustive]``. A struct literal or a
+  ``match`` on it outside the crate no longer compiles without
+  ``ClusterKernels::new`` and a wildcard arm. A later kernel is not a
+  further breaking change.
+- ``Ledger::hold_tail`` returns a ``TailHold`` for the calls it hid, and
+  ``Ledger::release_tail`` takes that hold back and restores only its calls.
+  A hold cannot be copied, a second release of it restores nothing, and a
+  hold from another ledger restores nothing, so one caller cannot release
+  another caller's reserve.
+- ``catalog::molecular::HARTREE_EV``, ``BOHR_ANGSTROM`` and ``WATER_RECORD_GRADIENT`` changed from constants to functions: ``hartree_ev()``, ``bohr_angstrom()`` and ``water_record_gradient()``.
+  Callers replace the path with a call.
+  The factors now come from ``readcon_core::units`` (CODATA 2018), as in rgpot, instead of a typed numeric literal, and the Python scripts read the same factors from ``scripts/codata2018.py``.
+  The values agree with the old literals to the digits the literals carried.
+- ``scripts/session_metadata.py`` records ``dirty``, whether ``git status --porcelain`` lists a change or an untracked file, for the checkout and for ``anneal_repro``, and ``openmp_in_use``, the OpenMP runtime named by the libraries mapped into the recorder or by the dynamic section of the command's executable. A runtime or a state that cannot be established is recorded as ``unknown`` or null, never inferred from the installed libraries.
+
+### Fixed
+
+- A caller stop during the main hop quench now keeps that quench's lowest
+  evaluated state as the run's answer. Side-ledger charges made before the
+  stop are added up to the budget that remains, so the charged count matches
+  the evaluations the run performed.
+- A capped ``BasinIndex`` reuses its latest seat once ``with_cap`` or
+  ``set_cap`` is full. ``push``, ``basin_of`` and a ``BasinBias`` deposit
+  follow that seat, which is what a rigid chain does past 2048 basins.
+- A packaged build evaluates a Gupta cluster. ``cargo package`` omits
+  the unpublished pair-kernel dependency, and the public installer now
+  installs the in-tree pair loops instead of doing nothing. Gupta no
+  longer panics when that dependency is absent. A coincident pair is
+  an infinite energy.
+- A run closed by its target or a caller stop inside a quench now reports
+  the lowest energy the potential returned, with its geometry. The
+  observed-basis probe and the auxiliary quenches recorded through
+  ``record_quenched_answer`` used to drop that point when the certifying
+  gradient could not be charged on a closed run, so ``Outcome::best``
+  could sit above the lowest evaluated energy. Calls a side quench made
+  before it raised the caller stop are also settled on the run's ledger
+  (``Ledger::charge_many``), so ``Outcome::charged`` matches the
+  potential evaluations the run made.
+- A stall arm that cannot act is now redrawn among the arms not yet
+  tried for that stall. Only the arm that acts is scored, and its
+  score is the energy that action reached, so an idle trail draw no
+  longer leaves the stall posterior at its prior.
+- A tuned-GMIN row is now refused when its harness commit, even an ancestor of HEAD or a repository URL form, lacks the recorded data blob or the tuned.py of HEAD. The one accepted tuned.py rewrite applies only to the recorded harness commit, and a side commit may no longer change a Python file under ``scripts/`` that tuned.py can import.
+- Cap GMIN by ``GRADT=true`` gradient passes while refusing post-abort
+  ``GRADT=false`` energy-only entries and reporting pre-abort energy-only
+  entries separately, and key every GMIN build cache on source revision,
+  tarball digest, cap and patch contents, and compile options.
+- Crate packages now exclude Python bytecode and cache directories created while
+  testing the scripts, keeping generated files out of the published archive.
+- Every benchmark row writer now reads the ``ANNEAL_MACHINE_ID`` and ``ANNEAL_CPU_MODEL`` hand-off that the row provenance notes describe, through ``machine_columns()``. Only one of the two, or an identity that is not a salted SHA-256 digest, is refused. The unused ``environment()`` helper is gone.
+- Kernel installation now selects its packaged fallback inside ``anneal-core``
+  instead of exposing a private configuration name to crates that call the
+  installation macro.
+- Plain ``rcycle`` now reads the anchor and donors from the declared
+  bond graph. It picks oxygen and hydrogen by atomic number only when a
+  geometry declares no bonds.
+- Record a salted physical-machine identifier, CPU model, and GMIN build key
+  across all paper and GMIN benchmark runners while retaining the compatibility
+  hostname, stage ``machine_provenance.py`` into isolated work directories,
+  record all build-key inputs (``cap=``, ``patch=``, ``fc=``, ``cc=``, ``cxx=``,
+  ``fcflags=``, ``cppflags=``) and ``binary_sha256=`` in ``gmin-source.txt``,
+  reuse saved GMIN rows only when both ``code_revision`` and ``gmin_build_key``
+  match (rejecting mismatches naming the field), mark missing provenance on
+  reused legacy ``metal_h2h`` rows as ``unknown`` in summaries, and refuse
+  legacy schemas or mixed sample provenance unless panel runners target an
+  alternate ``--out`` directory or explicitly opt in with ``--overwrite-legacy``.
+- The GFN2 examples built on ``examples/common/rgpot_eindir.rs`` descend
+  on the energy again. ``rgpot_xtb_force`` already writes the force,
+  -dE/dx in eV/Å, and the callback negated it a second time before rgpot
+  negated it to make the objective gradient, so every quench climbed.
+  The callback now publishes the engine force unchanged. The unreleased
+  ``anneal_core::xtb_gradient`` module, which held that extra negation,
+  is removed. ``tests/rgpot_xtb_gradient.rs`` checks the objective
+  gradient against a central difference of the engine energy.
+- The ``enter_*.sh`` wrappers copy the local modules a staged campaign script imports, found by ``scripts/stage_python.py``, instead of a hand-kept list, so a staged script no longer stops on a missing module. A test checks every wrapper.
+- The benchmark row provenance notes describe how ``machine_id`` and ``cpu_model`` are read on macOS (``ioreg`` and ``sysctl``), the order of the Linux sources, and the ``ANNEAL_MACHINE_ID`` and ``ANNEAL_CPU_MODEL`` hand-off.
+- The molecular-cluster example is documented as GFN2-xTB through
+  ``libxtb_engine.so``. ``surface_hop_on_best`` is recorded and not
+  applied. The Sutton-Chen and Morse hit pages were rewritten from
+  their runs. A cycle-reversal comparison, a one-start TIP4P printout
+  and the landfold survey table no longer copy numbers the documented
+  commands did not print. The vesin build names the 0.6.2 source layout.
+- The native library archives on the GitHub release carry
+  ``include/dlpack/dlpack.h``. ``anneal-core.h`` includes ``<dlpack/dlpack.h>``,
+  and the archives held only the three anneal headers, so a C consumer of an
+  extracted archive failed to compile. The release job now compiles a consumer
+  against each archive before it uploads it.
+- The paper table generators, the paper audit and the record ingest now share one check of a tuned GMIN row and one definition of a held revision, in ``scripts/revision_reach.py``. The generator no longer keeps a copy that could give a different verdict for the same row.
+- The runnable user-doc examples follow the current calls. A batched
+  ensemble objective returns one value per chain. Landfold is invoked
+  with ``cargo run``, because ``.cargo/config.toml`` does not put the
+  binary in ``target/release``. ``molecular_cluster`` is checked with
+  ``rgpot-ex``, ``featomic``, and ``bank-rpc`` together. The
+  twelve-molecule TIP4P page no longer quotes a summary this tree
+  does not print.
+- Voided GFN2 Si13 references are no longer treated as valid by the audit,
+  rescore, or floor-gate tooling. ``filter_rows`` in
+  ``scripts/covalent_h2h/gfn2_crest.py`` applies ``--anneal-revision`` and
+  ``--false-hits`` the same way to summaries and rescores; a named false
+  hit counts as a miss at its budget, with ``best`` set to its ``xtb_eV``.
+- ``ANNEAL_REPRODUCIBLE_ARCHIVE=1`` builds the Meson cargo static archive with
+  remapped source, target, and ``CARGO_HOME`` paths. A target directory inside
+  the source tree, such as a Meson build directory in the checkout, maps to
+  ``/build`` rather than ``/source``. The archive written after ``ld -r`` has a
+  zero mtime, uid, and gid, including when the archiver has no deterministic
+  mode. The default build is unchanged.
+- ``scripts/gmin_panel/tuned.py --verify`` no longer runs the ``command`` text of a stored row. It rebuilds the command from the row's system, code and seed, refuses a row whose stored command, budget or ``data_blob`` differs, and runs only the rebuilt one. An evaluation row's ``data_blob`` is now the blob of the input bytes GMIN read: each run copies the input to a scratch ``$ROOT`` and refuses an input that differs from HEAD. An evaluation does not start when ``tuned.py`` or a module it loaded from ``scripts/`` differs from the ``harness_commit`` it records, every binary is hashed before each run, and the anneal arm needs a clean checkout of ``anneal_commit``. ``enter_tuned.sh`` passes its paths to ``tuned.py`` as quoted words and builds the examples from the recorded base on every entry.
+- ``scripts/ingest_record.py`` refuses a record when any revision field of any row is blank, ``unknown`` or not a commit, whatever other valid commits the row holds, as the paper audit counts such a field as unrecorded. A tuned-GMIN row is accepted when ``paper_audit.py`` accepts it, so a record whose harness is a side commit that matches the data and ``tuned.py`` of ``HEAD`` is no longer refused. The summary of the ASE panel, the paper tables, the GMIN panel, the audit and the ingest of a record share one rule for a held commit, an ancestor of ``HEAD`` (``scripts/revision_reach.py``), so a commit that is in the object store but not an ancestor is held by none of them.
+- ``scripts/ingest_record.py`` stages each row file beside its destination and moves it into place with ``os.replace``, and puts every file it may have touched back as it was when a generator fails. The table generators of the ASE panel, the paper and the GMIN panel write through ``scripts/atomic_write.py``, so a failed write leaves the old file and no temporary file.
+- ``soap::contact_cutoff`` follows the length its spec is written
+  at. The default spec still returns 1.35. A spec at half that
+  length returns half the cutoff.
+
+
 ## [0.12.0](https://github.com/HaoZeke/anneal/tree/v0.12.0) - 2026-11-16
 
 ### Added
