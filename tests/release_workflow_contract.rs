@@ -327,3 +327,47 @@ fn the_sdist_packs_explicit_bench_and_example_targets() {
         "pyproject.toml does not pack examples/**/*.rs into the sdist"
     );
 }
+
+// cluster_search(ras=True) is compiled only with graphkey. A wheel feature
+// list without it publishes a module that refuses the documented search.
+#[test]
+fn every_wheel_build_enables_graphkey() {
+    let pyproject = include_str!("../pyproject.toml");
+    let maturin = pyproject
+        .split("\n[tool.maturin]\n")
+        .nth(1)
+        .expect("[tool.maturin] table")
+        .split("\n[")
+        .next()
+        .unwrap_or_default();
+    let features = maturin
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("features"))
+        .and_then(|rest| rest.trim_start().strip_prefix('='))
+        .expect("[tool.maturin] features");
+    assert!(features.contains("\"python\""), "{features}");
+    assert!(features.contains("\"graphkey\""), "{features}");
+
+    // A `--features` list on the command line is checked as well, in case it
+    // replaces the pyproject list.
+    let release = include_str!("../.github/workflows/release.yml");
+    let wheels = workflow_job(release, "wheels");
+    assert!(wheels.contains("PyO3/maturin-action"));
+    // nauty's bindings need libclang inside the manylinux containers.
+    assert!(wheels.contains("before-script-linux:"));
+    assert!(wheels.contains("LIBCLANG_PATH"));
+    assert!(wheels.contains("BINDGEN_EXTRA_CLANG_ARGS"));
+    for line in wheels.lines() {
+        if let Some(listed) = line.split("--features").nth(1) {
+            let listed = listed
+                .trim_start_matches('=')
+                .split_whitespace()
+                .next()
+                .unwrap_or_default();
+            assert!(
+                listed.split(',').any(|feature| feature == "graphkey"),
+                "release wheel build drops graphkey: {line}"
+            );
+        }
+    }
+}

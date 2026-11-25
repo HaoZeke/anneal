@@ -174,8 +174,28 @@ jobs:
           target: ${{ matrix.target }}
           # abi3 enabled in Cargo.toml (pyo3 with "abi3-py310") produces a
           # single wheel per platform that works on all Python >=3.10.
-          args: --release --out dist --features python
+          args: --release --out dist --features python,graphkey
           manylinux: auto
+          # graphkey compiles nauty and generates its bindings with bindgen,
+          # which loads libclang. The manylinux2014 x86_64 image has none, so
+          # the PyPI libclang is loaded with GCC's builtin headers. The
+          # aarch64 cross image has libclang, but bindgen must read the
+          # target sysroot. Its GCC 4.8 defaults to C90 and predates C11
+          # _Thread_local, which nauty and the rgpot kernels put on static
+          # caches; __thread is the same storage class.
+          before-script-linux: |
+            case "${{ matrix.target }}" in
+              x86_64)
+                python3 -m pip install libclang
+                LIBCLANG_PATH="$(python3 -c 'import clang, os; print(os.path.join(os.path.dirname(clang.__file__), "native"))')"
+                export LIBCLANG_PATH
+                export BINDGEN_EXTRA_CLANG_ARGS="-I$(gcc -print-file-name=include)"
+                ;;
+              aarch64)
+                export CFLAGS_aarch64_unknown_linux_gnu="-std=gnu11 -D_Thread_local=__thread"
+                export BINDGEN_EXTRA_CLANG_ARGS_aarch64_unknown_linux_gnu="--sysroot=$TARGET_SYSROOT"
+                ;;
+            esac
 
       - name: Validate wheels
         if: matrix.target != 'aarch64' || runner.os != 'Linux'

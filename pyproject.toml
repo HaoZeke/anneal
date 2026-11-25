@@ -62,7 +62,9 @@ cutest = [
 # The wheel crate installs the rgpot kernels, which anneal-core cannot
 # depend on from crates.io.
 manifest-path = "crates/anneal-python/Cargo.toml"
-features      = ["python"]
+# graphkey carries cluster_search(ras=True); a wheel without it refuses the
+# documented archive search.
+features      = ["python", "graphkey"]
 module-name   = "anneal._core"
 python-source = "python"
 # cargo resolves every path in the root manifest for any build: the

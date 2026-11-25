@@ -12,10 +12,10 @@ name = "anneal_python"
 crate-type = ["cdylib"]
 
 [features]
-# maturin and CI pass `--features python`; the module is always the
-# Python build of anneal-core.
+# maturin and CI pass `--features python,graphkey`; the module is always
+# the Python build of anneal-core.
 python = []
-# Exercise the archive-search Python mapping in the installed extension.
+# cluster_search(ras=True), the residual archive search. Every wheel enables it.
 graphkey = ["anneal-core/graphkey"]
 
 [dependencies]
