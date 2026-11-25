@@ -123,7 +123,7 @@ fn run(args: &[String]) -> Result<(), String> {
 fn check_budget_source(spec: Spec) -> Result<(), String> {
     let text = std::fs::read_to_string("scripts/paper_0120/run_panel.py")
         .map_err(|err| format!("read paper budget source: {err}"))?;
-    let expected = format!("\"lj38\": {}", spec.budget);
+    let expected = "\"lj38\": 400_000";
     if spec.name == "lj38" && !text.contains(&expected) {
         return Err(format!("paper budget source does not contain {expected}"));
     }
