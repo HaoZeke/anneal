@@ -1,7 +1,7 @@
-abstract_words=224
-abstract_numerals=36
-body_words=6805
+abstract_words=183
+abstract_numerals=5
+body_words=6813
 pages=26
-sha256 39d24a85464367b5ee7999a7b63511acbd53bed6727ba5f5612ea57bd6f1bc0c  paper/jctc/manuscript.tex
+sha256 f98ecca538d610ea9cdd442ca951318f55214d7dad6aaa4851c28bd304684794  paper/jctc/manuscript.tex
 sha256 5a3fdef16a6a962a82ee3f10dd13e17465e35cf2d33d511ab176ea1b90bff91e  paper/jctc/macros.tex
 sha256 e1702d82b3fec934833626a8279e26d5faf844cc60f5dfd34f0c0bb30304bbca  paper/jctc/labels-si.tex
