@@ -144,15 +144,29 @@ fn symmetry_polish(
     };
     let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
     for &order in &orders {
-        if let Some(c) = crate::symmetrise::detect(x, n, &[order], cfg.symmetry_tolerance) {
+        let found = if cfg.detected_symmetry {
+            crate::symmetrise::detect(x, n, &[order], cfg.symmetry_tolerance)
+        } else {
+            crate::symmetrise::detect_crystallographic(x, n, &[order], cfg.symmetry_tolerance)
+        };
+        if let Some(c) = found {
             cands.push(c);
         }
     }
     let group = crate::symmetrise::generate_group_for(cfg.detected_symmetry, &cands, 60)?;
     let y = if group.len() > 1 {
         crate::symmetrise::symmetrise_group(x, n, &group, cfg.merge_radius.max(0.5))
-    } else {
+    } else if cfg.detected_symmetry {
         crate::symmetrise::symmetrise_detected(
+            x,
+            n,
+            &orders,
+            cfg.symmetry_tolerance,
+            cfg.merge_radius.max(0.5),
+        )
+        .map(|(s, _)| s)?
+    } else {
+        crate::symmetrise::symmetrise_detected_crystallographic(
             x,
             n,
             &orders,
