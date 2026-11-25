@@ -46,11 +46,24 @@ def complete(row: dict[str, str]) -> bool:
     )
 
 
-def by_arm(rows: list[dict[str, str]]) -> dict[str, dict[str, dict[str, str]]]:
+SEARCH_CELLS = (
+    "sw10",
+    "sw13",
+    "sw20",
+    "tc10",
+    "tc20",
+    "gfn2-si10",
+    "gfn2-si13",
+    "gfn2-c10",
+)
+
+
+def index_search(rows: list[dict[str, str]]) -> dict[str, dict[str, dict[str, str]]]:
     grouped: dict[str, dict[str, dict[str, str]]] = defaultdict(dict)
     for row in rows:
-        if complete(row):
-            grouped[row["cell"]][f"{row['arm']}:{row['seed']}"] = row
+        if row["kind"] == "slab" or row["phase"] != "":
+            continue
+        grouped[row["cell"]][f"{row['arm']}:{row['seed']}"] = row
     return grouped
 
 
@@ -111,7 +124,9 @@ def fmt(value: float | None, digits: int = 4) -> str:
 
 
 def search_cell(name: str, rows: dict[str, dict[str, str]], censored: int) -> dict[str, object]:
-    arms = {arm: seeds_of(rows, arm) for arm in ARMS}
+    finished = {key: row for key, row in rows.items() if complete(row)}
+    arms = {arm: seeds_of(finished, arm) for arm in ARMS}
+    recorded = {arm: seeds_of(rows, arm) for arm in ARMS}
     common = set(arms["A"]) & set(arms["B"])
     a_hits = sum(arms["A"][seed]["hit"] == "true" for seed in common)
     b_hits = sum(arms["B"][seed]["hit"] == "true" for seed in common)
@@ -133,15 +148,19 @@ def search_cell(name: str, rows: dict[str, dict[str, str]], censored: int) -> di
     nonphysical = []
     agree_n = 0
     compared = 0
-    for seed in sorted(common):
-        a = arms["A"][seed]
-        b = arms["B"][seed]
-        if a["physical_hit"] == "true" and b["physical_hit"] != "true":
+    for seed in sorted(set(recorded["A"]) & set(recorded["B"])):
+        a = recorded["A"][seed]
+        b = recorded["B"][seed]
+        a_done = a["censored"] == "false"
+        b_done = b["censored"] == "false"
+        if a_done and b_done and a["physical_hit"] == "true" and b["physical_hit"] != "true":
             losses.append(seed)
-        if a["hit"] == "true" and a["physical_hit"] != "true" and b["hit"] != "true":
+        if a_done and a["hit"] == "true" and a["physical_hit"] != "true" and b["hit"] != "true":
             expected.append(seed)
-        if b["hit"] == "true" and b["physical_hit"] != "true":
+        if b_done and b["hit"] == "true" and b["physical_hit"] != "true":
             nonphysical.append(seed)
+        if not (a_done and b_done):
+            continue
         a_best = as_float(a["best"])
         b_best = as_float(b["best"])
         if a_best is not None and b_best is not None:
@@ -165,12 +184,19 @@ def search_cell(name: str, rows: dict[str, dict[str, str]], censored: int) -> di
     )
     memory_fail = bool(memory_n >= 6 and memory and memory_bar is not None and memory["low"] > memory_bar)
     b2_mismatch = []
-    for seed, row in sorted(arms["B"].items()):
-        other = arms["B2"].get(seed)
+    b2_wall_calls = []
+    for seed, row in sorted(recorded["B"].items()):
+        other = recorded["B2"].get(seed)
         if other is None:
             continue
-        if row["hit"] != other["hit"] or row["calls"] != other["calls"]:
+        same_hit = row["hit"] == other["hit"]
+        left = as_float(row["best"])
+        right = as_float(other["best"])
+        same_energy = left is not None and right is not None and agree(left, right)
+        if not same_hit or (left is not None and right is not None and not same_energy):
             b2_mismatch.append(seed)
+        elif row["calls"] != other["calls"] and same_energy:
+            b2_wall_calls.append(seed)
     if losses or nonphysical:
         verdict = "FIX"
     elif real_time or memory_fail:
@@ -210,6 +236,7 @@ def search_cell(name: str, rows: dict[str, dict[str, str]], censored: int) -> di
         "time_real_regression": real_time,
         "memory_failure": memory_fail,
         "b2_call_or_hit_mismatch": b2_mismatch,
+        "b2_same_energy_call_difference": b2_wall_calls,
         "verdict": verdict,
     }
 
@@ -265,28 +292,37 @@ def slab_summary(rows: list[dict[str, str]]) -> dict[str, object]:
     }
 
 
-def focus(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+GFN2_FIELDS = (
+    "cell",
+    "arm",
+    "seed",
+    "hit",
+    "physical_hit",
+    "best",
+    "calls",
+    "calls_to_hit",
+    "censored",
+    "detached",
+    "connected",
+    "nn_min_A",
+    "nn_max_A",
+    "scc_converged",
+    "max_force_eV_A",
+    "force_ok",
+    "sp_energy_eV",
+    "scc_rejected",
+    "geometry_rejected",
+    "wall_s",
+)
+
+
+def gfn2_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
     wanted = [
         row
         for row in rows
-        if row["cell"] == "gfn2-si10" and row["seed"] == "2000" and row["phase"] == ""
+        if row["cell"].startswith("gfn2-") and row["phase"] == ""
     ]
-    fields = (
-        "arm",
-        "hit",
-        "physical_hit",
-        "best",
-        "calls",
-        "censored",
-        "detached",
-        "nn_min_A",
-        "nn_max_A",
-        "scc_converged",
-        "max_force_eV_A",
-        "sp_energy_eV",
-        "connected",
-    )
-    return [{key: row.get(key, "") for key in fields} for row in wanted]
+    return [{key: row.get(key, "") for key in GFN2_FIELDS} for row in wanted]
 
 
 def markdown(payload: dict[str, object]) -> str:
@@ -331,7 +367,8 @@ def markdown(payload: dict[str, object]) -> str:
             f"expected rejections {cell['expected_rejections'] or 'none'}; "
             f"B non-physical {cell['b_nonphysical'] or 'none'}; "
             f"energy agree {cell['energy_agree']}/{cell['energy_compared']}; "
-            f"B2 mismatches {cell['b2_call_or_hit_mismatch'] or 'none'}"
+            f"B2 hit or energy mismatches {cell['b2_call_or_hit_mismatch'] or 'none'}; "
+            f"B2 same-energy call differences {cell['b2_same_energy_call_difference'] or 'none'}"
         )
     slab = payload["slab"]
     lines.extend(
@@ -349,34 +386,38 @@ def markdown(payload: dict[str, object]) -> str:
         lines.append(
             f"| {arm} | {slab['combined_engine'][arm]} | {slab['withgrad_engine'][arm]} | {slab['grad_only_engine'][arm]} |"
         )
-    lines.extend(["", "## GFN2 Si10 seed 2000", ""])
-    focus_rows = payload["gfn2_si10_seed_2000"]
-    if not focus_rows:
-        lines.append("No row has been recorded.")
-    else:
-        by_arm = {row["arm"]: row for row in focus_rows}
-        if "A" in by_arm and "B" in by_arm:
-            lines.append(
-                "Arm A best {abest} eV, detached {adet}, calls {acalls}. "
-                "Arm B best {bbest} eV, detached {bdet}, calls {bcalls}, "
-                "fresh SCC {bscc}. The temperature is the 300 K default.".format(
-                    abest=by_arm["A"]["best"],
-                    adet=by_arm["A"]["detached"],
-                    acalls=by_arm["A"]["calls"],
-                    bbest=by_arm["B"]["best"],
-                    bdet=by_arm["B"]["detached"],
-                    bcalls=by_arm["B"]["calls"],
-                    bscc=by_arm["B"]["scc_converged"],
-                )
-            )
-            lines.append("")
+    lines.extend(["", "## GFN2 best geometries", ""])
+    detail = payload["gfn2_rows"]
+    seed_2000 = [row for row in detail if row["cell"] == "gfn2-si10" and row["seed"] == "2000"]
+    by_arm = {row["arm"]: row for row in seed_2000}
+    if "A" in by_arm and "B" in by_arm:
         lines.append(
-            "| Arm | Hit | Physical | Best | Calls | Censored | Detached | NN min A | NN max A | SCC | Max force | Fresh eV |"
+            "Si10 seed 2000, 300 K. Arm A best {abest} eV, detached {adet}, calls {acalls}. "
+            "Arm B best {bbest} eV, detached {bdet}, calls {bcalls}, fresh SCC {bscc}.".format(
+                abest=by_arm["A"]["best"],
+                adet=by_arm["A"]["detached"],
+                acalls=by_arm["A"]["calls"],
+                bbest=by_arm["B"]["best"],
+                bdet=by_arm["B"]["detached"],
+                bcalls=by_arm["B"]["calls"],
+                bscc=by_arm["B"]["scc_converged"],
+            )
         )
-        lines.append("| --- | --- | --- | ---: | ---: | --- | --- | ---: | ---: | --- | ---: | ---: |")
-        for row in payload["gfn2_si10_seed_2000"]:
+        if by_arm["A"]["best"] != by_arm["B"]["best"]:
+            lines.append("The arms recorded different best energies, so B did not keep A's geometry.")
+        lines.append("")
+    if not detail:
+        lines.append("No GFN2 row has been recorded.")
+    else:
+        lines.append(
+            "| Cell | Seed | Arm | Hit | Physical | Best | Calls | Censored | Detached | NN min | NN max | SCC | Force | Fresh eV |"
+        )
+        lines.append(
+            "| --- | ---: | --- | --- | --- | ---: | ---: | --- | --- | ---: | ---: | --- | ---: | ---: |"
+        )
+        for row in detail:
             lines.append(
-                "| {arm} | {hit} | {physical_hit} | {best} | {calls} | {censored} | {detached} | {nn_min_A} | {nn_max_A} | {scc_converged} | {max_force_eV_A} | {sp_energy_eV} |".format(
+                "| {cell} | {seed} | {arm} | {hit} | {physical_hit} | {best} | {calls} | {censored} | {detached} | {nn_min_A} | {nn_max_A} | {scc_converged} | {max_force_eV_A} | {sp_energy_eV} |".format(
                     **row
                 )
             )
@@ -401,20 +442,16 @@ def main() -> None:
     rows = load(args.rows)
     censored: dict[str, int] = defaultdict(int)
     for row in rows:
-        if row["kind"] != "slab" and row["censored"] == "true":
+        if row["kind"] != "slab" and row["phase"] == "" and row["censored"] == "true":
             censored[row["cell"]] += 1
-    cells = []
-    grouped = by_arm(rows)
-    names = []
-    for row in rows:
-        if row["kind"] != "slab" and row["cell"] not in names:
-            names.append(row["cell"])
-    for name in names:
-        cells.append(search_cell(name, grouped.get(name, {}), censored[name]))
+    grouped = index_search(rows)
+    cells = [
+        search_cell(name, grouped.get(name, {}), censored[name]) for name in SEARCH_CELLS
+    ]
     payload = {
         "cells": cells,
         "slab": slab_summary(rows),
-        "gfn2_si10_seed_2000": focus(rows),
+        "gfn2_rows": gfn2_rows(rows),
     }
     args.json.parent.mkdir(parents=True, exist_ok=True)
     args.json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
