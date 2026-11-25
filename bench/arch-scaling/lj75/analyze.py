@@ -103,7 +103,8 @@ def load_rows(path: Path) -> list[dict[str, str]]:
 
 
 def summarize_scaling(path: Path) -> None:
-    rows = load_rows(path)
+    # Blank session is the original ladder. Later sessions are separate.
+    rows = [r for r in load_rows(path) if not (r.get("session") or "")]
     by_workers: dict[int, list[dict[str, str]]] = {}
     for r in rows:
         by_workers.setdefault(int(r["workers"]), []).append(r)
@@ -226,15 +227,180 @@ def summarize_warmstart(path: Path) -> None:
     )
 
 
+def session_of(row: dict[str, str]) -> str:
+    return row.get("session") or ""
+
+
+def hit_walls(rows: list[dict[str, str]]) -> list[float]:
+    return [
+        float(r["wall_to_hit_s"])
+        for r in rows
+        if r["hit"] == "1" and r["wall_to_hit_s"]
+    ]
+
+
+def calls_of(rows: list[dict[str, str]]) -> list[float]:
+    return [float(r["calls_to_hit"]) for r in rows]
+
+
+def provenance(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return "empty"
+    def uniq(key: str) -> str:
+        return "|".join(sorted({r.get(key) or "" for r in rows}))
+
+    return (
+        f"rev={uniq('revision')} nproc={uniq('nproc')} cpu={uniq('cpu_model')} "
+        f"pin={uniq('pinned_cores')} over={uniq('oversubscribed')}"
+    )
+
+
+def summarize_followup(path: Path) -> None:
+    """p=1 ladder plus the same-VM p=2 control.
+
+    Efficiency is T1/(p*Tp) on hit-conditioned wall-to-hit medians.
+    Oversubscribed rungs (p > nproc) are excluded. Misses stay at
+    budget+1 for the calls-to-hit median and the Mann-Whitney test.
+    """
+    rows = load_rows(path)
+    known = {"", "primary", "control"}
+    bad = sorted({session_of(r) for r in rows} - known)
+    if bad:
+        raise SystemExit(f"unexpected session values: {bad}")
+
+    original: dict[int, list[dict[str, str]]] = {}
+    for r in rows:
+        if session_of(r) == "":
+            original.setdefault(int(r["workers"]), []).append(r)
+    primary = [r for r in rows if session_of(r) == "primary"]
+    control = [r for r in rows if session_of(r) == "control"]
+    if any(int(r["workers"]) != 1 for r in primary):
+        raise SystemExit("primary session is only the p=1 rung")
+    if any(int(r["workers"]) != 2 for r in control):
+        raise SystemExit("control session is only the p=2 rung")
+
+    t1 = hit_walls(primary)
+    base_hits = sum(r["hit"] == "1" for r in primary)
+    base_n = len(primary)
+    base_calls = calls_of(primary)
+
+    groups: list[tuple[str, int, list[dict[str, str]], str]] = [
+        ("primary", 1, primary, "definition")
+    ]
+    for workers in sorted(original):
+        groups.append(("original", workers, original[workers], "original"))
+    if control:
+        groups.append(("control", 2, control, "control"))
+
+    print(
+        "label,workers,n,hits,hit_rate,hit_ci95,wall_to_hit_med_s,wall_to_hit_ci95,"
+        "calls_to_hit_med,calls_to_hit_ci95,fisher_p_vs_p1,mwu_U_vs_p1,mwu_p_vs_p1,"
+        "eff,eff_ci95,eff_basis,oversubscribed,provenance"
+    )
+    for label, workers, grp, basis in groups:
+        if not grp:
+            continue
+        n = len(grp)
+        hits_vec = [1.0 if r["hit"] == "1" else 0.0 for r in grp]
+        hits = int(sum(hits_vec))
+        hr_est, hr_lo, hr_hi = bootstrap_ci(hits_vec, statistics.mean)
+        calls_vec = calls_of(grp)
+        c_est, c_lo, c_hi = bootstrap_ci(calls_vec, statistics.median)
+        walls = hit_walls(grp)
+        if walls:
+            wh_est, wh_lo, wh_hi = bootstrap_ci(walls, statistics.median)
+            wh_s = f"{wh_est:.3f}"
+            wh_ci = f"[{wh_lo:.3f}; {wh_hi:.3f}]"
+        else:
+            wh_s, wh_ci = "NA", "NA"
+        over = grp[0]["oversubscribed"]
+        if not primary:
+            fisher_s, u_s, mwu_s = "NA", "NA", "NA"
+        elif label == "primary":
+            fisher_s, u_s, mwu_s = "1", "NA", "1"
+        else:
+            fisher_s = f"{paired_stats.fisher_exact(hits, n, base_hits, base_n):.6g}"
+            u_stat, mwu_p = mann_whitney_u(calls_vec, base_calls)
+            u_s = f"{u_stat:.1f}"
+            mwu_s = f"{mwu_p:.6g}"
+
+        excluded = over == "true"
+        if label == "primary" and walls:
+            eff_s, eff_ci, eff_basis = "1.000", "[1.000; 1.000]", "definition"
+        elif excluded or not t1 or not walls:
+            eff_s, eff_ci, eff_basis = "NA", "NA", "excluded" if excluded else basis
+        else:
+            eff = bootstrap_ratio_ci(t1, walls, workers)
+            assert eff is not None
+            eff_s = f"{eff[0]:.3f}"
+            eff_ci = f"[{eff[1]:.3f}; {eff[2]:.3f}]"
+            eff_basis = basis
+        print(
+            f"{label},{workers},{n},{hits}/{n},{hr_est:.3f},"
+            f"[{hr_lo:.3f}; {hr_hi:.3f}],{wh_s},{wh_ci},"
+            f"{c_est:.0f},[{c_lo:.0f}; {c_hi:.0f}],{fisher_s},{u_s},{mwu_s},"
+            f"{eff_s},{eff_ci},{eff_basis},{over},{provenance(grp)}"
+        )
+
+    print("EXCLUDED p=16 from efficiency because p > nproc (oversubscribed)")
+    if not control or 2 not in original or not primary:
+        print("AGREEMENT NA: need primary p=1, original p=2, and control p=2")
+        return
+
+    orig = original[2]
+    c_hits = sum(r["hit"] == "1" for r in control)
+    o_hits = sum(r["hit"] == "1" for r in orig)
+    fisher_p = paired_stats.fisher_exact(c_hits, len(control), o_hits, len(orig))
+    u_stat, mwu_p = mann_whitney_u(calls_of(control), calls_of(orig))
+    c_walls = hit_walls(control)
+    o_walls = hit_walls(orig)
+    ratio = bootstrap_ratio_ci(c_walls, o_walls, 1) if c_walls and o_walls else None
+    if ratio is None:
+        ratio_s = "NA"
+        wall_state = "missing"
+    else:
+        ratio_s = f"{ratio[0]:.3f} [{ratio[1]:.3f}; {ratio[2]:.3f}]"
+        wall_state = "covers-1" if ratio[1] <= 1.0 <= ratio[2] else "excludes-1"
+    hits_state = "same" if fisher_p > 0.05 else "different"
+    calls_state = "same" if mwu_p > 0.05 else "different"
+    print(
+        f"COMPARE control_vs_original_p2 hits={c_hits}/{len(control)} vs "
+        f"{o_hits}/{len(orig)} fisher_p={fisher_p:.6g} mwu_U={u_stat:.1f} "
+        f"mwu_p={mwu_p:.6g} wall_median_ratio={ratio_s} "
+        f"hits={hits_state} calls={calls_state} wall={wall_state}"
+    )
+    if hits_state == "same" and calls_state == "same" and wall_state == "covers-1":
+        print(
+            "AGREE: original-session p=2 and control p=2 agree on hits, "
+            "calls-to-hit, and the hit-conditioned wall median"
+        )
+    elif wall_state == "missing":
+        print("INCONCLUSIVE: control or original p=2 has no hit-conditioned wall")
+    else:
+        parts = []
+        if hits_state != "same":
+            parts.append("hits")
+        if calls_state != "same":
+            parts.append("calls-to-hit")
+        if wall_state != "covers-1":
+            parts.append("hit-conditioned wall median")
+        print(
+            "DISAGREE: original-session p=2 and control p=2 differ on "
+            + ", ".join(parts)
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("mode", choices=("scaling", "warmstart"))
+    parser.add_argument("mode", choices=("scaling", "warmstart", "followup"))
     parser.add_argument("rows", type=Path)
     args = parser.parse_args()
     if args.mode == "scaling":
         summarize_scaling(args.rows)
-    else:
+    elif args.mode == "warmstart":
         summarize_warmstart(args.rows)
+    else:
+        summarize_followup(args.rows)
 
 
 if __name__ == "__main__":

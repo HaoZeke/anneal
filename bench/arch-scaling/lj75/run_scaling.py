@@ -15,7 +15,13 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "scripts" / "paper_0120"))
 import run_panel  # noqa: E402
 
-BUDGET = run_panel.PAPER_BUDGETS["lj75"]
+def load_budgets():
+    return run_panel.PAPER_BUDGETS
+
+
+BUDGET = load_budgets()["lj75"]
+if BUDGET != 4_000_000:
+    raise SystemExit(f"lj75 budget {BUDGET} is not 4000000")
 SEEDS = list(range(2000, 2012))
 DEFAULT_RUNGS = [8, 16, 4, 2, 1]
 
@@ -48,6 +54,7 @@ ROW_FIELDS = [
     "cpu_model",
     "pinned_cores",
     "oversubscribed",
+    "session",
 ]
 
 
@@ -75,11 +82,34 @@ def target_binary() -> Path:
     return Path(meta["target_directory"]) / "release" / "examples" / "arch_lj75_bench"
 
 
-def load_done(path: Path) -> set[tuple[str, int]]:
+def load_done(path: Path) -> set[tuple[str, str, int]]:
     if not path.is_file():
         return set()
     with path.open(newline="") as handle:
-        return {(r["arm"], int(r["seed"])) for r in csv.DictReader(handle)}
+        return {
+            ((r.get("session") or ""), r["arm"], int(r["seed"]))
+            for r in csv.DictReader(handle)
+        }
+
+
+def ensure_header(path: Path) -> None:
+    """Add trailing columns. Do not rewrite existing data lines."""
+    if not path.is_file() or path.stat().st_size == 0:
+        return
+    raw = path.read_bytes()
+    nl = raw.find(b"\n")
+    if nl < 0:
+        raise RuntimeError(f"{path} has no header newline")
+    header = raw[:nl].decode("ascii")
+    if header.endswith("\r"):
+        raise RuntimeError(f"{path} header is CRLF")
+    want = ",".join(ROW_FIELDS)
+    if header == want:
+        return
+    old = header.split(",")
+    if ROW_FIELDS[: len(old)] != old:
+        raise RuntimeError(f"unexpected header in {path}: {header}")
+    path.write_bytes(want.encode("ascii") + raw[nl:])
 
 
 def append_row(path: Path, row: dict[str, object]) -> None:
@@ -101,6 +131,7 @@ def run_job(
     nproc: int,
     model: str,
     rows_path: Path,
+    session: str,
 ) -> None:
     oversubscribed = workers > nproc
     max_core = min(workers, nproc) - 1
@@ -167,12 +198,13 @@ def run_job(
         "cpu_model": model,
         "pinned_cores": pinned,
         "oversubscribed": "true" if oversubscribed else "false",
+        "session": session,
     }
     append_row(rows_path, row)
     print(
-        f"comm-p{workers} seed={seed} hit={row['hit']} calls={row['calls_to_hit']} "
-        f"wall={row['wall_s']}s cpu={row['cpu_s']}s rss={row['peak_rss_anon_kib']}KiB "
-        f"best={row['best_energy']}",
+        f"session={session or '-'} comm-p{workers} seed={seed} hit={row['hit']} "
+        f"calls={row['calls_to_hit']} wall={row['wall_s']}s cpu={row['cpu_s']}s "
+        f"rss={row['peak_rss_anon_kib']}KiB pin={pinned} best={row['best_energy']}",
         flush=True,
     )
 
@@ -194,12 +226,32 @@ def main() -> None:
         type=Path,
         default=Path(__file__).resolve().parent / "rows.csv",
     )
+    parser.add_argument(
+        "--session",
+        default="",
+        help="Session tag stored on rows that are not the control rung",
+    )
+    parser.add_argument(
+        "--control-workers",
+        type=int,
+        default=0,
+        help="Worker count whose rows receive --control-session",
+    )
+    parser.add_argument(
+        "--control-session",
+        default="",
+        help="Session tag for the same-VM control rung",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the serial order and do not launch the driver",
+    )
     args = parser.parse_args()
+    if args.control_session and args.control_workers <= 0:
+        raise SystemExit("--control-session requires --control-workers")
 
     rungs = [int(x) for x in args.rungs.split(",") if x]
-    binary = target_binary()
-    if not binary.is_file():
-        raise SystemExit(f"missing binary: {binary}")
     revision = git_head()
     nproc = os.cpu_count() or 1
     model = cpu_model()
@@ -214,12 +266,45 @@ def main() -> None:
     else:
         jobs = [(workers, seed) for workers in rungs for seed in SEEDS]
 
+    planned: list[tuple[int, int, str, str]] = []
     for workers, seed in jobs:
+        if args.control_session and workers == args.control_workers:
+            session = args.control_session
+        else:
+            session = args.session
         arm = f"comm-p{workers}"
-        if (arm, seed) in done:
+        planned.append((workers, seed, session, arm))
+
+    print(
+        f"revision={revision} nproc={nproc} cpu_model={model} budget={BUDGET} "
+        f"jobs={len(planned)}",
+        flush=True,
+    )
+    if args.dry_run:
+        for workers, seed, session, arm in planned:
+            oversubscribed = workers > nproc
+            max_core = min(workers, nproc) - 1
+            pinned = "0" if max_core == 0 else f"0-{max_core}"
+            skip = (session, arm, seed) in done
+            print(
+                f"plan session={session or '-'} arm={arm} seed={seed} "
+                f"pin={pinned} oversubscribed={str(oversubscribed).lower()} "
+                f"skip={str(skip).lower()}",
+                flush=True,
+            )
+        return
+
+    binary = target_binary()
+    if not binary.is_file():
+        raise SystemExit(f"missing binary: {binary}")
+    ensure_header(args.rows)
+    for workers, seed, session, arm in planned:
+        if (session, arm, seed) in done:
             continue
-        run_job(binary, workers, seed, revision, nproc, model, args.rows)
-        done.add((arm, seed))
+        run_job(
+            binary, workers, seed, revision, nproc, model, args.rows, session
+        )
+        done.add((session, arm, seed))
 
 
 if __name__ == "__main__":
