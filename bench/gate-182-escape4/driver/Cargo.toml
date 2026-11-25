@@ -1,0 +1,14 @@
+[package]
+name = "gate182-driver"
+version = "0.1.0"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+anneal-core = { path = "../../.." }
+eindir-core = { version = "0.6.0", features = ["capi"] }
+ndarray = "0.17"
+rand = "0.9"
+rgmin = "0.5.0"
+rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }
