@@ -118,6 +118,8 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
             paths.append(directory / "rows-for-cluster.csv")
         rows = []
         for path in paths:
+            if b"\r" in path.read_bytes():
+                raise SystemExit(f"{path} contains CR")
             with path.open(newline="") as handle:
                 reader = csv.DictReader(handle)
                 if tuple(reader.fieldnames or ()) not in (ROW_FIELDS, CURRENT_ROW_FIELDS):
