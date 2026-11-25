@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import json
 import os
 import runpy
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -19,6 +21,13 @@ import pytest
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE))
+
+HAS_RUST_188 = shutil.which("rustup") is not None and subprocess.run(
+    ["rustup", "run", "1.88.0", "rustc", "-V"],
+    capture_output=True,
+    check=False,
+).returncode == 0
+HAS_CHEMPARSEPLOT = importlib.util.find_spec("chemparseplot") is not None
 
 import check_cuh2_blobs
 import coverage_receipts
@@ -255,6 +264,10 @@ def test_tally_covers_hits_misses_and_missing(tmp_path: Path) -> None:
         hq_sci_tally.seed_file(empty, "absent", 0)
 
 
+@pytest.mark.skipif(
+    not HAS_RUST_188,
+    reason="requires the rustup 1.88.0 toolchain",
+)
 def test_coverage_receipt_writes_both_toolchains(tmp_path: Path) -> None:
     lines = {
         "data": [
@@ -523,6 +536,10 @@ def test_redact_main_rewrites_a_home_path(tmp_path: Path) -> None:
         sys.argv = old
 
 
+@pytest.mark.skipif(
+    not HAS_CHEMPARSEPLOT,
+    reason="requires chemparseplot",
+)
 def test_house_drawers_write_pdfs(tmp_path: Path) -> None:
     os.environ["PYTHONHASHSEED"] = "0"
     os.environ["SOURCE_DATE_EPOCH"] = "0"
