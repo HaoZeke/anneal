@@ -188,6 +188,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=Path(__file__).resolve().parent)
     parser.add_argument("--target-dir", type=Path, required=True)
     parser.add_argument("--binary", type=Path)
+    parser.add_argument("--seeds", type=int, nargs="+", default=list(SEEDS))
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[3]
     engine = os.environ.get("RGPOT_XTB_ENGINE")
@@ -203,7 +204,7 @@ def main() -> None:
     rows = load_rows(rows_path)
     runs = out / "runs"
     runs.mkdir(exist_ok=True)
-    for seed in SEEDS:
+    for seed in args.seeds:
         if seed in rows:
             print(f"seed {seed}: already complete", flush=True)
             continue
