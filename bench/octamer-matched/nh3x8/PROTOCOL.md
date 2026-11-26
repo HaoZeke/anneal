@@ -26,17 +26,19 @@ Thread-count environment variables are fixed at one.
 The configuration is `Config::recommended_molecular` with energy scale 1 eV,
 as selected by the paper executable at `examples/gfn2_mol_h2h.rs:443`.
 The harness changes only `target_energy`, setting it to
-`(-35.470769324714 + 0.000001) * 27.21138505` eV. The ledger therefore returns
-at the first recorded energy at or below the threshold. It otherwise stops at
-the budget.
+`(-35.470769324714 + 0.000001) * 27.21138505` eV. The hop returns when the
+loose incumbent reaches that threshold. Otherwise the hop spends the calls
+it can see, and the final polish spends the reserved tail of the same budget.
 
 `run_campaign.py` creates a temporary example from the paper executable,
 adds the target, builds it, and removes the temporary source before running.
 It makes no library-source change. Seeds are written to `results.csv`
-atomically after each process exits. A hit records the charged count at the
-target. A miss records 332676 as `calls_to_hit`. Each row also records the stop
+atomically after each process exits. A hit records `energy_calls` as
+`calls_to_hit`. On a finished hit that total is the budget, 332675, because
+the crossing is inside the final polish and the polish spends the reserved
+tail. A miss records 332676 as `calls_to_hit`. Each row also records the stop
 reason, best energy, wall time, binary digest, feature set, and source
-revision.
+revision. `README.md` names the lines.
 
 ## Analysis
 
@@ -46,7 +48,7 @@ with two-sided Wilson 95% intervals. Calls-to-hit are reported with a
 10000-resample percentile bootstrap interval for the median, using random seed
 20261123 and linear quantiles. Misses are represented as 332676.
 
-The arm comparison uses a two-sided Fisher exact test for hit counts and a
-two-sided Mann--Whitney test for calls. The report also counts anneal hits at
-or before 134305 calls, the minimum recorded CREST call count, and reports the
-anneal median under the same miss convention.
+Hit counts are compared with a two-sided Fisher exact test. Anneal and CREST
+call counts are not compared. The CREST `calls` column is a full-run total,
+and CREST first-hit counts are not recorded for NH3. The anneal median uses
+the miss value 332676.

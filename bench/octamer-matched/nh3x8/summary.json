@@ -1,0 +1,63 @@
+{
+  "budget": 332675,
+  "miss_calls": 332676,
+  "target_eV": -965.2087349031361,
+  "anneal": {
+    "hits": 10,
+    "n": 12,
+    "wilson_95": [
+      0.5519691377470266,
+      0.9530348578161463
+    ],
+    "median_calls_to_hit": 332675.0,
+    "bootstrap_median_95": [
+      332675.0,
+      332675.0
+    ]
+  },
+  "crest": {
+    "hits": 6,
+    "n": 6,
+    "seeds": [
+      17000,
+      17001,
+      17002,
+      17003,
+      17004,
+      17005
+    ],
+    "hit_definition": "hit column, reference within tolerance",
+    "calls_are": "full-run totals"
+  },
+  "tests": {
+    "table_rows": [
+      "anneal hits, anneal misses",
+      "CREST hits, CREST misses"
+    ],
+    "table": [
+      [
+        10,
+        2
+      ],
+      [
+        6,
+        0
+      ]
+    ],
+    "fisher_odds_ratio": 0.0,
+    "fisher_odds_ratio_infinite": false,
+    "fisher_p": 0.5294117647058824,
+    "mann_whitney": "not_computed"
+  },
+  "call_accounting": {
+    "search_calls": 331075,
+    "polish_calls": 1600,
+    "energy_calls": 332675,
+    "run_txt_seeds": "2002-2011"
+  },
+  "bootstrap": {
+    "samples": 10000,
+    "seed": 20261123,
+    "quantile_method": "linear"
+  }
+}
