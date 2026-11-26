@@ -172,11 +172,16 @@ print("1" if on(shared) or on(pyframework) else "0")
     if libdir.is_empty() || ldversion.is_empty() {
         panic!("feature `python` needs LIBDIR and LDVERSION from `{python}`");
     }
-    println!("cargo:rustc-link-search=native={libdir}");
+    // `rustc-link-search` and `rustc-link-lib` apply to the cdylib as well
+    // as to tests. Pass `-L` and `-l` only to test, bench, and example
+    // binaries. `cargo test` builds examples with `test = true`, and those
+    // link this crate without `cfg(test)`.
+    let mut flags = Vec::new();
+    flags.push(format!("-L{libdir}"));
     // The unversioned shared object can live in LIBPL while LIBDIR has only
     // the versioned soname. Search that directory when it names somewhere else.
     if !libpl.is_empty() && libpl != libdir {
-        println!("cargo:rustc-link-search=native={libpl}");
+        flags.push(format!("-L{libpl}"));
     }
     let lib_name = format!("python{ldversion}");
     if shared && os == "linux" {
@@ -192,20 +197,30 @@ print("1" if on(shared) or on(pyframework) else "0")
         } else {
             format!("-l{lib_name}")
         };
-        println!("cargo:rustc-link-arg=-Wl,--no-as-needed");
-        println!("cargo:rustc-link-arg={link_arg}");
-        println!("cargo:rustc-link-arg=-Wl,--as-needed");
+        flags.push("-Wl,--no-as-needed".to_string());
+        flags.push(link_arg);
+        flags.push("-Wl,--as-needed".to_string());
     } else if shared {
-        println!("cargo:rustc-link-lib=dylib={lib_name}");
+        flags.push(format!("-l{lib_name}"));
     } else {
-        println!("cargo:rustc-link-lib=static={lib_name}");
+        let archive = format!("lib{lib_name}.a");
+        if config_dir_has(&archive, libdir, libpl) {
+            flags.push(format!("-l:{archive}"));
+        } else {
+            flags.push(format!("-l{lib_name}"));
+        }
     }
     // python-build-standalone, which GitHub's setup-python installs, records
-    // `@rpath/libpythonX.Y.dylib`. The test harness is not next to that
+    // `@rpath/libpythonX.Y.dylib`. The test binary is not next to that
     // library, so the rpath has to name LIBDIR.
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{libdir}");
+    flags.push(format!("-Wl,-rpath,{libdir}"));
     if !framework.is_empty() {
-        println!("cargo:rustc-link-arg=-Wl,-rpath,{framework}");
+        flags.push(format!("-Wl,-rpath,{framework}"));
+    }
+    for flag in &flags {
+        println!("cargo:rustc-link-arg-tests={flag}");
+        println!("cargo:rustc-link-arg-benches={flag}");
+        println!("cargo:rustc-link-arg-examples={flag}");
     }
 }
 
