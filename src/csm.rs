@@ -8,8 +8,9 @@
 //! projects onto the `D_5h`, `C_5` and `C_i` templates at orientations from
 //! the inertia tensor plus one fixed one-fifth turn.
 //! [`crate::csm::propose_for`] with detected symmetry on instead projects,
-//! in the input frame, onto the operations detected on the structure that
-//! keep every atom within its class. Neither draws a random number.
+//! in the input frame, onto the operations detected on the structure whose
+//! same-class RMS is under 0.25. A short swap of two classes can pass that
+//! bound. Neither draws a random number.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -256,7 +257,10 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
 ///
 /// A detected projection keeps only operations that carry every atom onto
 /// the atoms of its own class, and its [`GroupProjection::group`] is
-/// `"detected"`.
+/// `"detected"`. The same-class test is an RMS under 0.25 on unit-radius
+/// coordinates ([`DETECTION_TOLERANCE`]). A swap of two atoms of different
+/// classes still passes when those atoms lie closer than that, because each
+/// image is scored against the nearest atom of its own class.
 pub fn propose_for(
     detected_symmetry: bool,
     x: ArrayView1<'_, f64>,
@@ -303,7 +307,10 @@ fn conjugate_ops(ops: &[[[f64; 3]; 3]], rotation: &[[f64; 3]; 3]) -> Vec<[[f64; 
         .collect()
 }
 
-/// Largest deviation, on unit-radius coordinates, of a detected operation.
+/// Largest same-class RMS, on unit-radius coordinates, that
+/// [`preserves_classes`] accepts. Detection uses the same cap. A class
+/// swap closer than this still passes, because each image is scored
+/// against the nearest atom of its own class.
 const DETECTION_TOLERANCE: f64 = 0.25;
 
 /// The closed operation set detected on `x` whose every element carries each
@@ -354,6 +361,10 @@ fn detected_ops(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<Vec<[[f64; 3]
 /// distance from each operated atom to the nearest atom of its class is
 /// under [`DETECTION_TOLERANCE`], the measure the detector applies to the
 /// whole cloud.
+///
+/// The comparison is strict and the bound is 0.25. A swap of two atoms of
+/// different classes passes when they lie closer than that bound. A wider
+/// separation, such as an octahedron axis against its equator, does not.
 fn preserves_classes(op: &[[f64; 3]; 3], centred: &[[f64; 3]], classes: &[u32]) -> bool {
     let n = centred.len();
     let mut total = 0.0;

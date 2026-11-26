@@ -816,6 +816,15 @@ Covered under [[file:catalog.org::*Stall escapes][stall escapes]]
 in the archive search's near-miss push
 (src/methods/archive_search.rs:122).
 
+The continuous-symmetry class gate, =preserves_classes= in =src/csm.rs=,
+keeps an operation when the RMS distance from each operated atom to the
+nearest atom of its own class is under 0.25 on unit-radius coordinates
+(=DETECTION_TOLERANCE=). A swap of two atoms of different classes still
+passes when those atoms lie closer than 0.25, because each image is
+scored only against its own class. An octahedron axis against its
+equator stays above the bound. The number is the detector's deviation
+cap.
+
 ** Census calibration
 
 What it is: derives the fixed census radius (the distance below which
