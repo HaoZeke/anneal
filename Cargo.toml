@@ -39,6 +39,8 @@ include = [
     "/Cargo.toml",
     "/LICENSE.txt",
     "/README.md",
+    "/bench/arch-chains/lj/arch_chains_lj.rs",
+    "/bench/arch-scaling/throughput/arch_throughput.rs",
     "/bench/lj104-lattice/v2/h2h_cap.f90",
     "/benches/**",
     "/build.rs",

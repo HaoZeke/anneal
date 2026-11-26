@@ -21,6 +21,8 @@ const REQUIRED_EXACT_FILES: &[&str] = &[
     "Cargo.toml",
     "LICENSE.txt",
     "README.md",
+    "bench/arch-chains/lj/arch_chains_lj.rs",
+    "bench/arch-scaling/throughput/arch_throughput.rs",
     "bench/lj104-lattice/v2/h2h_cap.f90",
     "build.rs",
     "cbindgen.toml",
@@ -74,7 +76,10 @@ fn skip_repackage_in_unpacked_crate(test_name: &str) -> bool {
 
 fn is_blocked_packaged_path(line: &str) -> bool {
     (line.starts_with("paper/") && line != "paper/seeds.toml")
-        || (line.starts_with("bench/") && line != "bench/lj104-lattice/v2/h2h_cap.f90")
+        || (line.starts_with("bench/")
+            && line != "bench/lj104-lattice/v2/h2h_cap.f90"
+            && line != "bench/arch-chains/lj/arch_chains_lj.rs"
+            && line != "bench/arch-scaling/throughput/arch_throughput.rs")
         || (line.starts_with("docs/") && line != "docs/source/conf.py")
         || line.starts_with("branding/")
         || line.starts_with("experiments/")
