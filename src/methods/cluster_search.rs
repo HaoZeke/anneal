@@ -3085,8 +3085,13 @@ mod tests {
     use crate::potentials::PairPotential;
     use ndarray::Array1;
 
-    /// Preset hashes and one recommended Lennard-Jones trace, measured on
-    /// develop ade36267 with the option off.
+    /// Preset hashes and one recommended Lennard-Jones trace, with the
+    /// option off, measured on develop ade36267.
+    ///
+    /// The molecular digest is not compared raw. A `featomic` build selects
+    /// SOAP packing for that preset and changes its keying and merge radius,
+    /// so a digest pinned without the feature fails CI. Restoring those two
+    /// fields from [`Config::for_molecular`] is the distance-keyed document.
     #[test]
     fn polish_off_presets_match_develop() {
         assert!(!Config::recommended(8).polish_on_improve);
@@ -3100,10 +3105,13 @@ mod tests {
             Config::recommended(8).resolved_sha256().unwrap(),
             "2787e86e47a5fc7b0c5444bc59e7ff4d4f6b6ea73a3426ad6047ed5d6cfb21d5"
         );
+        let molecular = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        let bare = Config::for_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        let mut distance_keyed = molecular;
+        distance_keyed.keying = bare.keying;
+        distance_keyed.merge_radius = bare.merge_radius;
         assert_eq!(
-            Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
-                .resolved_sha256()
-                .unwrap(),
+            distance_keyed.resolved_sha256().unwrap(),
             "4856a5a88eb0b87d0ec02a86a816587a4e0cf6a1643d73cecce35bf382826c14"
         );
         assert_eq!(
