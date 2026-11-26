@@ -45,6 +45,9 @@ CMAKE_FLAGS=(
 )
 
 LOCAL=${GMIN_TARBALL:-}
+# GitHub macOS images run bash 3.2. With set -u, that bash rejects
+# "${name[@]}" when the array is empty. Later bash expands it to
+# no words. The loops below run only when a patch was passed.
 EXTRA_PATCHES=()
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -96,9 +99,11 @@ KEY_ARGS=(
   --input "$CAP_SOURCE"
   --input "$PATCH"
 )
-for extra in "${EXTRA_PATCHES[@]}"; do
-  KEY_ARGS+=(--input "$extra")
-done
+if [[ ${#EXTRA_PATCHES[@]} -gt 0 ]]; then
+  for extra in "${EXTRA_PATCHES[@]}"; do
+    KEY_ARGS+=(--input "$extra")
+  done
+fi
 KEY_ARGS+=(
   "--option=FC=$FC_BIN"
   "--option=CC=$CC_BIN"
@@ -141,9 +146,11 @@ if (( need_rebuild )); then
     ./wales/HiRE
   got=$(python3 "$PIN" read-svnrev "$SRC/wales/GMIN/source/SVNREV")
   patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$PATCH"
-  for extra in "${EXTRA_PATCHES[@]}"; do
-    patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$extra"
-  done
+  if [[ ${#EXTRA_PATCHES[@]} -gt 0 ]]; then
+    for extra in "${EXTRA_PATCHES[@]}"; do
+      patch -p1 --forward --batch -d "$SRC/wales/GMIN" < "$extra"
+    done
+  fi
   cp "$CAP_SOURCE" "$SRC/wales/GMIN/source/h2h_cap.f90"
   build=$SRC/wales/GMIN/build/gfortran
   mkdir -p "$build"
@@ -169,9 +176,11 @@ fi
   echo "build_key=$BUILD_KEY"
   echo "cap=${CAP_SOURCE#"$ROOT"/} $(sha256sum "$CAP_SOURCE" | awk '{print $1}')"
   echo "patch=${PATCH#"$ROOT"/} $(sha256sum "$PATCH" | awk '{print $1}')"
-  for extra in "${EXTRA_PATCHES[@]}"; do
-    echo "patch=${extra#"$ROOT"/} $(sha256sum "$extra" | awk '{print $1}')"
-  done
+  if [[ ${#EXTRA_PATCHES[@]} -gt 0 ]]; then
+    for extra in "${EXTRA_PATCHES[@]}"; do
+      echo "patch=${extra#"$ROOT"/} $(sha256sum "$extra" | awk '{print $1}')"
+    done
+  fi
   echo "cmake=${CMAKE_FLAGS[*]}"
   echo "gfortran=$GFORTRAN_VER"
   echo "fflags=$FFLAGS_VAL"
