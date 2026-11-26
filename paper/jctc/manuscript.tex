@@ -42,10 +42,10 @@ Lennard-Jones, short-ranged Morse, and rigid water clusters on which a
 reference basin-hopping program at one documented input hits no seed.
 Removing the former structure templates costs hits on a short-ranged Morse
 cluster.
-On tight-binding clusters the hit counts are 1 of 12 against 4 of 12 and
-the difference is not significant, and the search wins on the ten-atom
-carbon ring and, with the opt-in \texttt{polish\_on\_improve} option, on
-the water octamer.
+On tight-binding clusters anneal finds the water hexamer in 1 of 12 runs
+and CREST in 4 of 12, a difference that is not significant.
+The search wins on the ten-atom carbon ring and, with the opt-in
+\texttt{polish\_on\_improve} option, on the water octamer.
 \end{abstract}
 
 \section{Introduction}
@@ -969,7 +969,7 @@ C\(_{20}\) & \(1\times 10^{5}\) & 78581.5 & 0/12 & 0/12 & 1 \\
 % crest table: end
 
 \section{Conclusions}
-At arm-specific work definitions it reaches funnel-trapped references on
+At arm-specific work definitions anneal reaches funnel-trapped references on
 LJ\(_{98}\), M\(_{55}\) and M\(_{80}\) at \(\rho=14\), and rigid
 (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\), where the corresponding GMIN
 arms at one documented input hit no seed.

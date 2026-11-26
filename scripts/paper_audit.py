@@ -1611,6 +1611,7 @@ def gmin_develop_prose(audit: Audit, panel: object, groups: dict) -> None:
                     "numeric ceiling in the table, from the start this code writes for the seed.")
     audit.said(COVER, "At arm-specific work definitions the search reaches Lennard-Jones, Morse,\n"
                       "and rigid-water minima that trap the corresponding GMIN arms.")
+    audit.said(TEX, "At arm-specific work definitions anneal reaches funnel-trapped references on")
 
 
 def gmin_rerun(audit: Audit) -> None:
@@ -3115,11 +3116,7 @@ def manuscript_ase(audit: Audit) -> None:
     ase_hit_clusters = [s for s in (*ASE_PANEL, *MORSE_PANEL) if hits(s, "ase_bh") or hits(s, "ase_mh")]
     ase_hit_count = sum(hits(s, arm) for s in (*ASE_PANEL, *MORSE_PANEL) for arm in ASE_ARMS)
     only_lj55_once = ase_hit_clusters == ["lj55"] and ase_hit_count == 1
-    conclusion_tail = "LJ\\(_{55}\\), once;" if only_lj55_once else "some other ASE cluster;"
     abstract_tail = "one Lennard-Jones minimum, once." if only_lj55_once else "some other ASE outcome."
-    audit.said(TEX, f"it reaches {words[atomic_reached]} of {words[len(ASE_PANEL)]}\n"
-                    f"atomic and all {words[morse_reached]} Morse references, while the ASE optimizers reach only\n"
-                    f"{conclusion_tail}")
     audit.said(TEX, f"the search reaches {words[atomic_reached]} of\n"
                     f"{words[len(ASE_PANEL)]} atomic and all {words[morse_reached]} Morse references, while the two "
                     f"Atomic Simulation\nEnvironment optimizers reach {abstract_tail}")
@@ -7403,10 +7400,10 @@ def crest_table(audit: Audit) -> None:
     audit.cell(TEX, "the hexamer charges one count", "1", float(len(charged)))
     records = octamer_records(audit)
     for path in (TEX, COVER):
-        audit.said(path, f"On tight-binding clusters the hit counts are {hits_of(anneal)} of {len(anneal)} against "
-                         f"{hits_of(crest)} of {len(crest)} and the difference is not significant, and the search "
-                         "wins on the ten-atom carbon ring and, with the opt-in \\texttt{polish\\_on\\_improve} option, on "
-                         "the water octamer.")
+        audit.said(path, f"On tight-binding clusters anneal finds the water hexamer in {hits_of(anneal)} of "
+                         f"{len(anneal)} runs and CREST in {hits_of(crest)} of {len(crest)}, a difference that is not "
+                         "significant. The search wins on the ten-atom carbon ring and, with the opt-in "
+                         "\\texttt{polish\\_on\\_improve} option, on the water octamer.")
     if records is not None:
         water, nh3 = records["h2o8"], records["nh3"]
         audit.said(TEX, f"On GFN2-xTB clusters CREST hits the water hexamer on {hits_of(crest)} of {len(crest)} runs "
