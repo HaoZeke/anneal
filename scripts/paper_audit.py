@@ -177,8 +177,14 @@ KNOWN_GAPS = {
     "bench/copper-slab/rows.csv": "revision and host unrecorded (no revision or host column)",
     "bench/growpal-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/h2o-octamer/ladder.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/h2o-octamer/results.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/h2o16-crest/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/nh3-octamer/ladder.csv": "revision and host unrecorded (no revision or host column)",
     "bench/nh3-octamer/results.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/nh3-tetramer/results.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/water-h2o16/results.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/water-h2o20-goat/results.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
 }
 
@@ -1566,6 +1572,8 @@ def gmin_develop_data(audit: Audit, panel: object) -> None:
                  TEX, "driver switches stay in the Supporting Information", "absent",
                  "absent" if "H2H_" not in audit.text(TEX) and "h2h\\_" not in audit.text(TEX) else "present")
     refs = {row[0]: row[3] for row in panel.SYSTEMS}
+    audit.said(SI, f"\\({refs['lj102']:.6f}\\) at LJ\\(_{{102}}\\), \\({refs['lj103']:.6f}\\) at LJ\\(_{{103}}\\),\n"
+                   f"\\({refs['lj150']:.6f}\\) at LJ\\(_{{150}}\\), ")
     audit.said(SI, f"\\({refs['au55']:.8f}\\)~eV at Au\\(_{{55}}\\), \\({refs['m55r6']:.6f}\\) and "
                    f"\\({refs['m55r14']:.6f}\\) at M\\(_{{55}}\\) (\\(\\rho=6\\) and 14), and \\({refs['m80r6']:.6f}\\) and "
                    f"\\({refs['m80r14']:.6f}\\) at M\\(_{{80}}\\) (\\(\\rho=6\\) and 14).")
@@ -2105,6 +2113,9 @@ def manuscript_knockouts(audit: Audit) -> None:
         audit.record(re.search(rf"(?m)^{re.escape(line)}$", data) is not None,
                      "examples/h2h_gmin_tip4p.data", f"TIP4P GMIN input sets {line}",
                      line, "set" if line in data else "absent")
+    temperature = re.search(r"(?m)^TEMPERATURE ([0-9.]+)$", data)
+    if temperature:
+        audit.said(TEX, f"at a fixed temperature of {float(temperature.group(1)):g}~kJ/mol and")
     audit.record(re.search(r"(?m)^RADIUS\b", data) is None,
                  "examples/h2h_gmin_tip4p.data", "TIP4P GMIN input sets no radius",
                  "absent", "absent" if re.search(r"(?m)^RADIUS\b", data) is None else "present")
@@ -2482,6 +2493,16 @@ def template_era(audit: Audit) -> None:
     audit.said(TEX, "On LJ\\(_{38}\\), both revisions hit every seed, but their median call costs\n"
                     "are 10615.5 and 127839.5 combined energy-and-gradient passes\n"
                     "\\((p=4.9\\times 10^{-4})\\).")
+    lj75_before = sum(r["hit"] == "1" for r in lines["lj75"]["before"])
+    lj75_after = sum(r["hit"] == "1" for r in lines["lj75"]["after"])
+    lj38_before = era.calls(lines["lj38"]["before"], 0.5)
+    lj38_after = era.calls(lines["lj38"]["after"], 0.5)
+
+    def calls_text(value: float) -> str:
+        return f"{value:.1f}" if abs(value - round(value)) > 1e-6 else str(int(round(value)))
+
+    audit.said(TEX, f"LJ\\(_{{75}}\\) hits fall from {lj75_before} of 12 to {lj75_after}, while the LJ\\(_{{38}}\\) "
+                    f"median call\ncost rises from {calls_text(lj38_before)} to {calls_text(lj38_after)}.")
     audit.said(TEX, "That comparison spans every code change between the two revisions, so it\n"
                     "supports a change across revisions rather than an isolated template effect.")
     audit.said(TEX, "this code reports a median of 127839.5 combined energy-and-gradient passes to the minimum, while "
@@ -3088,6 +3109,20 @@ def manuscript_ase(audit: Audit) -> None:
                     "but runs reaching the shared cap are censored.")
     audit.said(TEX, "Because the starts are unpaired and cap-censored outcomes occur, no\n"
                     "cross-arm significance test is reported for the ASE tables.")
+    words = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
+    atomic_reached = sum(hits(s, "recommended") > 0 for s in ASE_PANEL)
+    morse_reached = sum(hits(s, "recommended") > 0 for s in MORSE_PANEL)
+    ase_hit_clusters = [s for s in (*ASE_PANEL, *MORSE_PANEL) if hits(s, "ase_bh") or hits(s, "ase_mh")]
+    ase_hit_count = sum(hits(s, arm) for s in (*ASE_PANEL, *MORSE_PANEL) for arm in ASE_ARMS)
+    only_lj55_once = ase_hit_clusters == ["lj55"] and ase_hit_count == 1
+    conclusion_tail = "LJ\\(_{55}\\), once;" if only_lj55_once else "some other ASE cluster;"
+    abstract_tail = "one Lennard-Jones minimum, once." if only_lj55_once else "some other ASE outcome."
+    audit.said(TEX, f"it reaches {words[atomic_reached]} of {words[len(ASE_PANEL)]}\n"
+                    f"atomic and all {words[morse_reached]} Morse references, while the ASE optimizers reach only\n"
+                    f"{conclusion_tail}")
+    audit.said(TEX, f"the search reaches {words[atomic_reached]} of\n"
+                    f"{words[len(ASE_PANEL)]} atomic and all {words[morse_reached]} Morse references, while the two "
+                    f"Atomic Simulation\nEnvironment optimizers reach {abstract_tail}")
     audit.said(TEX, "No cross-arm test is reported: starts differ; every arm has the same numeric call\n"
                     "ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.")
     audit.said(SI, "Every arm within a cluster has the same numeric call ceiling and wall cap.")
@@ -3812,6 +3847,27 @@ def crest_equal_bench(audit: Audit) -> None:
     unconverged = sorted(r["seed"] for r in rows if r["arm"] == "anneal" and not r["gap_Eh"])
     audit.said(CREST_EQUAL_README, f"Anneal seed {unconverged[0]} polished without converging")
     audit.record(len(unconverged) == 1, where, "unconverged anneal polishes", " ".join(unconverged), "one")
+    runner = audit.text("scripts/crest_equal/run_panel.py")
+    ceiling = re.search(r"ceiling of (\d+) calls", runner)
+    cap = int(ceiling.group(1)) if ceiling else 0
+    audit.record(ceiling is not None, "scripts/crest_equal/run_panel.py", "the driver names its call ceiling",
+                 f"ceiling of {cap} calls", ceiling.group(0) if ceiling else "absent")
+    anneal_charge = sorted({int(r["charged"]) for r in rows if r["arm"] == "anneal"})
+    crest_charge = [int(r["charged"]) for r in rows if r["arm"] == "crest"]
+    audit.record(len(anneal_charge) == 1, where, "one charged count on every seed of this code",
+                 " ".join(map(str, anneal_charge)), "one count")
+    audit.said(SI, f"with a budget of {panel.BUDGET} calls and is charged {anneal_charge[0]} on every seed.")
+    audit.said(SI, f"at a length of {panel.CREST_LEN_PS:.2f}~ps and is charged {min(crest_charge)} to "
+                   f"{max(crest_charge)} calls.")
+    audit.said(SI, f"the driver ceiling was {cap} calls, so the {panel.BUDGET} in the budget column of the CREST "
+                   "rows is a label.")
+    exponent = int(round(-math.log10(panel.HIT_TOL_EH)))
+    audit.record(abs(panel.HIT_TOL_EH - 10.0 ** (-exponent)) < 1e-15, where, "the hexamer hit window is a power of ten",
+                 f"1e-{exponent}", f"{panel.HIT_TOL_EH:.3g}")
+    audit.said(SI, f"within \\(10^{{-{exponent}}}\\)~Eh of the prism")
+    audit.said(SI, f"seed {unconverged[0]} of this code, whose polish did not converge, is a miss.")
+    audit.said(SI, f"A CREST arm at {panel.CREST_WALL_LEN_PS:.2f}~ps, the shortest length that finished,")
+    audit.said(SI, f"the {panel.CREST_LEN_PS:.2f}~ps arm, whose calls are nearest those of this code.")
 
 
 def gad_published(audit: Audit) -> None:
@@ -4951,6 +5007,7 @@ def covalent_gfn2(audit: Audit) -> None:
                      f"{s_row['system']} {s_row['code']} seed {s_row['seed']} rgpot_revision",
                      want_rgpot or "empty", s_row.get("rgpot_revision", "") or "empty")
     gfn2_revision_tables(audit, path, header, paper[-1][0] + 1, rows, crest)
+    covalent_protocol(audit, rows)
 
 
 GFN2_SYSTEMS = {"Si10": "si10", "C10": "c10", "C20": "c20"}
@@ -5027,6 +5084,38 @@ def gfn2_revision_tables(audit: Audit, path: str, header: str, after: int, rows:
         audit.said(path, sentence.format(fisher_p=fisher_p, mw_p=mw_p, **gfn2_sentence_fields(a, c)))
     below = sum(float(x["best"]) < float(y["best"]) for x in anneal("c20", "5351f272") for y in crest("c20"))
     audit.cell(f"{path} C20 5351f272", "anneal below CREST seed pairs", "134", below)
+
+
+def covalent_protocol(audit: Audit, rows: list[dict[str, str]]) -> None:
+    """The printed covalent settings, from the driver and the zero-call row."""
+    dropped = [r for r in rows if r["system"] == "si10" and r["code"] == "crest" and int(float(r["charged"])) == 0]
+    audit.record(len(dropped) == 1, "bench/covalent-h2h/gfn2/rows.csv", "one Si10 CREST row is charged no call",
+                 "1", str(len(dropped)))
+    if len(dropped) == 1:
+        audit.said(SI, f"on seed {dropped[0]['seed']} xtb's SCC did not converge on the start, so that CREST run "
+                       "made no call and is dropped.")
+    driver = audit.text("scripts/covalent_h2h/gfn2_crest.py")
+    etemp = float(re.search(r"^ETEMP = ([0-9.]+)", driver, re.M).group(1))
+    budget = int(re.search(r"^BUDGET = (\d+)", driver, re.M).group(1))
+    exponent = int(round(math.log10(budget)))
+    audit.record(10 ** exponent == budget, "scripts/covalent_h2h/gfn2_crest.py",
+                 "the covalent budget is a power of ten", f"10^{exponent}", str(budget))
+    audit.said(SI, f"at an electronic temperature of {etemp:.0f}~K.")
+    audit.said(SI, f"at \\(10^{{{exponent}}}\\) calls and stops at the")
+    tol = float(re.search(r"DEFAULT_HIT_TOL: float = ([0-9.eE+-]+)", audit.text("scripts/target_tol.py")).group(1))
+    tol_exp = int(round(-math.log10(tol)))
+    audit.record("HIT_TOL = DEFAULT_HIT_TOL" in driver and abs(tol - 10.0 ** (-tol_exp)) < 1e-15,
+                 "scripts/covalent_h2h/gfn2_crest.py", "the covalent hit window is the shared tolerance",
+                 f"1e-{tol_exp}", f"{tol:.3g}")
+    audit.said(SI, f"within \\(10^{{-{tol_exp}}}\\)~eV of the lowest minimum any run reached.")
+    command = driver.split("command = [", 1)[1].split("]", 1)[0]
+    flags = re.findall(r'"([^"]+)"', command)
+    if "-xnam" in flags:
+        flags = flags[:flags.index("-xnam")]
+    flags = flags[1:]
+    audit.record(bool(flags), "scripts/covalent_h2h/gfn2_crest.py", "the CREST command lists its flags",
+                 " ".join(flags), " ".join(flags) or "absent")
+    audit.said(SI, "\\texttt{" + " ".join(flag.replace("--", "-{}-") for flag in flags) + "}")
 
 
 COVALENT_SYSTEMS = {"Si10": "sw10", "Si13": "sw13", "Si20": "sw20", "C10": "tc10", "C20": "tc20"}
@@ -6075,6 +6164,159 @@ def science_claims(audit: Audit) -> None:
     audit.said(TEX, "We present a template-free basin-hopping search")
 
 
+def printed_definitions(audit: Audit) -> None:
+    """Printed definition numbers, read from the same source literals the method checks name."""
+    preset = audit.text("src/methods/cluster_hopping/preset.rs")
+    config = audit.text("src/methods/cluster_hopping/config.rs")
+    moves = audit.text("src/methods/cluster_hopping/moves.rs")
+    hop = audit.text("src/methods/cluster_hopping.rs")
+    soap = audit.text("src/soap.rs")
+    lattice = audit.text("src/methods/lattice_search.rs")
+    kernel = audit.text("src/movekernel.rs")
+    allocate = audit.text("src/allocate.rs")
+    two_phase = audit.text("src/methods/two_phase.rs")
+    tip4p = audit.text("src/potentials/gmin_tip4p.rs")
+
+    def literal(text: str, name: str) -> float:
+        found = re.search(rf"{name}: f64 = ([0-9.eE+-]+);", text)
+        return float(found.group(1)) if found else float("nan")
+
+    temperature = literal(preset, "TEMPERATURE")
+    audit.said(TEX, f"runs at \\(T={temperature:g}\\).")
+    audit.said(TEX, f"With \\(T={temperature:g}\\) in reduced units")
+    audit.said(TEX, f"at the reduced temperature\n\\({temperature:g}\\).")
+    cutoff = literal(preset, "NEIGHBOUR_CUTOFF")
+    audit.said(TEX, f"separation is below \\({cutoff:g}\\).")
+    audit.said(TEX, f"cutoff of \\({literal(preset, 'SYMMETRISE_CUTOFF'):g}\\),")
+    radius = literal(preset, "MERGE_RADIUS")
+    audit.said(TEX, f"radius \\({radius:g}\\) is treated as a return")
+    audit.said(SI, f"radius \\(\\rho_m={radius:g}\\).")
+    step = literal(preset, "ALL_POINTS_STEP")
+    audit.said(TEX, f"\\((-{step:g},{step:g})\\)")
+    height = literal(preset, "BIAS_HEIGHT")
+    audit.said(TEX, f"of amplitude \\({height:g}\\)")
+    audit.said(SI, f"w_0 = {height:g}")
+    shell = re.search(r"shell \* \(([0-9.]+) \+ ([0-9.]+) \* rng", kernel)
+    audit.record(shell is not None, "src/movekernel.rs", "the shell radius is two literals",
+                 "0.85 + 0.20", shell.group(0) if shell else "absent")
+    if shell:
+        audit.said(TEX, f"{shell.group(1)} + {shell.group(2)}\\,U(0,1)")
+    burst = re.search(r"while hops < (\d+) && rng\.random::<f64>\(\) < ([0-9.]+) / ([0-9.]+)", moves)
+    audit.record(burst is not None, "src/methods/cluster_hopping/moves.rs",
+                 "a burst continues at the printed odds", "hops and a ratio", burst.group(0) if burst else "absent")
+    if burst:
+        extra = int(burst.group(1)) - 1
+        audit.said(TEX, f"probability \\({int(float(burst.group(2)))}/{int(float(burst.group(3)))}\\)")
+        audit.said(TEX, f"m\\in\\{{0,\\ldots,{extra}\\}}")
+    lowest = re.search(r"let new_lowest = if RIGID \{ 5\.0e-2 \} else \{ ([0-9.eE+-]+) \};", hop)
+    audit.record(lowest is not None, "src/methods/cluster_hopping.rs", "a new lowest is the printed drop",
+                 "1e-9", lowest.group(1) if lowest else "absent")
+    if lowest:
+        drop = int(round(-math.log10(float(lowest.group(1)))))
+        audit.said(TEX, f"fell by more than \\(10^{{-{drop}}}\\).")
+        audit.said(TEX, f"E_{{\\mathrm{{held}}}} - 10^{{-{drop}}}")
+    patience = re.search(r"escape_stall_patience: ([0-9_]+),", config)
+    if patience:
+        calls = int(patience.group(1).replace("_", ""))
+        audit.said(TEX, f"S - S_{{\\star}} \\ge {calls}.")
+        audit.said(TEX, f"q \\ge \\max({calls},\\, 2\\, q_{{\\mathrm{{long}}}}).")
+    tabu = re.search(r"tabu_capacity: (\d+),", config)
+    if tabu:
+        audit.said(TEX, f"up to {NUMBER_WORDS[int(tabu.group(1))]} basins")
+        audit.said(TEX, f"m < {tabu.group(1)}")
+    interval = re.search(r"interval: (\d+)", config)
+    if interval:
+        audit.said(TEX, f"runs every {NUMBER_WORDS[int(interval.group(1))]} quenches.")
+    gamma = re.search(r"bias_gamma: ([0-9.]+),", config)
+    if gamma:
+        audit.said(SI, f"\\gamma = {float(gamma.group(1)):g}")
+    warmup = re.search(r"bayes_warmup: (\d+),", config)
+    if warmup:
+        audit.said(TEX, f"the first {warmup.group(1)} observed full relaxations")
+        audit.said(SI, f"after {warmup.group(1)} observations")
+    cap = re.search(r"const PENTAGON_CAP: f64 = ([0-9.]+);", soap)
+    rmsd = literal(preset, "SOAP_RMSD")
+    audit.record(cap is not None and "n > 13" in soap, "src/soap.rs", "the fivefold step uses the printed caps",
+                 "0.75 above 13 and 0.35 at or below", cap.group(1) if cap else "absent")
+    if cap:
+        audit.said(TEX, f"displacement is \\({float(cap.group(1)):g}\\) in reduced units.")
+        audit.said(SI, f"{float(cap.group(1)):g},&N>13,\\\\{rmsd:g},&N\\leq13")
+    hollow = re.search(r"hollow_cutoff: ([0-9.]+) \* r", lattice)
+    clearance = re.search(r"clearance: ([0-9.]+) \* r", lattice)
+    if hollow:
+        audit.said(SI, f"at most \\({hollow.group(1)}\\,\\ell\\)")
+    if clearance:
+        audit.said(SI, f"within \\({clearance.group(1)}\\,\\ell\\)")
+    block = re.search(r"DEFAULT_SURFACE_BLOCK: usize = (\d+);", two_phase)
+    if block:
+        audit.said(TEX, f"holds it for {block.group(1)} hops.")
+        audit.said(TEX, f"a block of {block.group(1)} hops")
+    size = re.search(r"if n_points < (\d+) \{", config)
+    if size:
+        audit.said(TEX, f"Below {size.group(1)} atoms the quench chooses a surface")
+        audit.said(TEX, f"At {size.group(1)} atoms and above the penalty is absent")
+        audit.said(TEX, f"N < {size.group(1)}")
+    relative = re.search(r"TwoPhase::relative\(([0-9.]+),", config)
+    if relative:
+        audit.said(TEX, f"D(x) &= {relative.group(1)} \\max")
+    audit.record("mu: vec![0.0; n_arms]," in allocate and "kappa: vec![1e-6; n_arms]," in allocate
+                 and "alpha: vec![1.0; n_arms]," in allocate and "beta: vec![1.0; n_arms]," in allocate,
+                 "src/allocate.rs", "the depth prior is the printed Normal-Gamma",
+                 "0, 1e-6, 1, 1", "present")
+    kappa = re.search(r"kappa: vec!\[([0-9.eE+-]+);", allocate)
+    if kappa:
+        exponent = int(round(-math.log10(float(kappa.group(1)))))
+        audit.said(TEX, f"\\mu_k = 0, \\quad \\kappa_k = 10^{{-{exponent}}}, \\quad \\alpha_k = 1, \\quad \\beta_k = 1.")
+    rigid = audit.text("src/methods/rigid_quench.rs")
+    stall = audit.text("src/methods/stall_archive.rs")
+    stagnation = re.search(r"STAGNATION_HOPS: usize = (\d+);", rigid)
+    if stagnation:
+        audit.said(TEX, f"h - h_{{\\star}} > {stagnation.group(1)}.")
+    seats = re.search(r"pub const SEATS: usize = (\d+);", stall)
+    memory = re.search(r"pub const MEMORY: usize = (\d+);", stall)
+    if seats:
+        audit.said(TEX, f"the {NUMBER_WORDS[int(seats.group(1))]} lowest distinct minima")
+    if memory:
+        audit.said(TEX, f"one of its last {NUMBER_WORDS[int(memory.group(1))]} stall destinations")
+    screen = re.search(r"rec\.bayes_threshold - ([0-9.]+) / ([0-9.]+)", hop)
+    if screen:
+        audit.said(SI, f"\\frac{{{int(float(screen.group(1)))}}}{{{int(float(screen.group(2)))}}}")
+    exploration = re.search(r"bayes_exploration: ([0-9.]+),", config)
+    if exploration:
+        audit.said(SI, f"a fraction \\({float(exploration.group(1)):g}\\) is finished")
+    window = re.search(r"const WINDOW: usize = (\d+);", hop)
+    warm = re.search(r"const WARMUP: usize = (\d+);", hop)
+    if window:
+        audit.said(SI, f"the last {window.group(1)} partial relaxations")
+    if warm:
+        audit.said(SI, f"until {warm.group(1)} full relaxations")
+    margin = literal(preset, "SCREEN_MARGIN")
+    audit.said(SI, f"\\Delta_s={margin:g}")
+    orders = re.search(r"orders: vec!\[([0-9, ]+)\]", moves)
+    if orders:
+        listed = ", ".join(part.strip() for part in orders.group(1).split(",") if part.strip())
+        head, last = listed.rsplit(", ", 1)
+        audit.said(TEX, f"order \\({head},\\) and \\({last}\\)")
+        audit.said(SI, f"m\\in\\{{{orders.group(1).split(',')[0].strip()},\\ldots,{orders.group(1).split(',')[-1].strip()}\\}}")
+    coordination = re.search(r"interior_coordination: (\d+),", lattice)
+    if coordination:
+        audit.said(SI, f"fewer than {coordination.group(1)} neighbors")
+    audit.said(SI, f"root-mean-square displacement \\({literal(preset, 'SOAP_RMSD'):g}\\)")
+    audit.said(SI, f"at most \\({literal(preset, 'SYMMETRISE_CUTOFF'):g}\\)")
+    if tabu:
+        audit.said(SI, f"at most {tabu.group(1)} descriptors")
+    audit.record("self.alpha[arm] += 0.5;" in allocate, "src/allocate.rs", "one observation adds half a shape",
+                 "0.5", "present" if "self.alpha[arm] += 0.5;" in allocate else "absent")
+    audit.said(TEX, "\\alpha' &= \\alpha + 1/2")
+    audit.record("4184.0_f64 / 1000.0" in tip4p, "src/potentials/gmin_tip4p.rs",
+                 "the thermochemical calorie is 4184 joule", "4184/1000",
+                 "present" if "4184.0_f64 / 1000.0" in tip4p else "absent")
+    kcal = 4184.0 / 1000.0
+    audit.said(TEX, f"thermochemical calorie \\({kcal:.3f}\\)~kJ:")
+    audit.said(TEX, f"E \\le E_{{\\mathrm{{ref}}}} + {kcal * 1.0e-3:.6f}~\\mathrm{{kJ\\,mol^{{-1}}}}")
+    audit.said(TEX, f"which is \\({1.0e-3:.3f}\\)~kcal/mol.")
+
+
 def manuscript_new(audit: Audit) -> None:
     """The abstract split, the added panels, the definitions, the priors, and the host paragraph."""
     gmin_panel_groups(audit)
@@ -6089,6 +6331,7 @@ def manuscript_new(audit: Audit) -> None:
     for fragment in ("bias_gamma: 5.0,", "tabu_capacity: 8,", "ContinuousSymmetry::Measure { interval: 10 };",
                      "prior_soap: true,", "calibrated_screen: true,"):
         audit.said(config, fragment)
+    printed_definitions(audit)
     for fragment in ("cfg.bayes_screen = true;",
                      "bayes_exploration: 0.1,",
                      "bayes_warmup: 300,"):
@@ -7067,6 +7310,69 @@ def octamer_records(audit: Audit) -> dict[str, dict[str, object]] | None:
     return {"h2o8": water, "nh3": nh3}
 
 
+def _calls_text(value: float) -> str:
+    return f"{value:.1f}" if abs(value - round(value)) > 1e-6 else str(int(round(value)))
+
+
+def removed_crest_arms(audit: Audit) -> None:
+    """The budgets the CREST table leaves out, from the committed rows."""
+    h2o = audit.rows("bench/h2o-octamer/results.csv")
+    h2o_crest = [r for r in h2o if r["arm"] == "crest"]
+    h2o_med = median([float(r["calls"]) for r in h2o_crest])
+    nh3 = audit.rows("bench/nh3-tetramer/results.csv")
+    nh3_crest = [r for r in nh3 if r["arm"] == "crest" and r["row"] == "original"]
+    nh3_med = median([float(r["calls"]) for r in nh3_crest])
+    h2o_calls = {int(float(r["calls"])) for r in h2o if r["arm"] == "anneal"}
+    ladder = audit.rows("bench/h2o-octamer/ladder.csv")
+    ladder_budgets = {int(r["budget"]) for r in ladder}
+    named = h2o_calls | ladder_budgets
+    audit.record(4000 in named and 16000 in named and 4000 < h2o_med and 16000 < h2o_med,
+                 "bench/h2o-octamer/results.csv", "4000 and 16000 sit below the CREST median",
+                 f"4000 16000 below {_calls_text(h2o_med)}",
+                 " ".join(str(v) for v in sorted(named)))
+    nh3_anneal = {int(float(r["calls"])) for r in nh3 if r["arm"] == "anneal"}
+    audit.record(nh3_anneal == {4000}, "bench/nh3-tetramer/results.csv",
+                 "this code is charged 4000 on the tetramer", "4000", " ".join(map(str, sorted(nh3_anneal))))
+    audit.said(SI, f"the CREST medians are {_calls_text(h2o_med)} and {_calls_text(nh3_med)} calls, against "
+                   "4000 or 16000 calls for this code")
+    audit.said(SI, "and 4000 in \\path{bench/nh3-tetramer/}")
+    octamer = audit.rows("bench/nh3-octamer/results.csv")
+    oct_crest = median([float(r["calls"]) for r in octamer if r["arm"] == "crest"])
+    oct_anneal = {int(float(r["calls"])) for r in octamer if r["arm"] == "anneal"}
+    audit.record(4000 in oct_anneal and 16000 in oct_anneal and max(4000, 16000) < oct_crest,
+                 "bench/nh3-octamer/results.csv", "4000 and 16000 sit below the CREST median",
+                 f"below {_calls_text(oct_crest)}", " ".join(map(str, sorted(oct_anneal))))
+    audit.said(SI, "at 4000 and 16000 calls are removed in the same way.")
+    readme = audit.text("bench/h2o-octamer/README.md")
+    window = re.search(r"within\s+([0-9.eE+-]+)\s+Eh", readme)
+    tol = float(window.group(1)) if window else float("nan")
+    audit.record(window is not None, "bench/h2o-octamer/README.md", "the hit window is recorded",
+                 "within N Eh", window.group(0) if window else "absent")
+    crest_calls = {r["seed"]: int(float(r["calls"])) for r in h2o_crest}
+    matched: dict[str, list[dict[str, str]]] = {}
+    for row in ladder:
+        if int(row["budget"]) == crest_calls.get(row["seed"]):
+            matched.setdefault(row["seed"], []).append(row)
+    anneal_hits = sum(any(float(row["delta_Eh"]) <= tol for row in group) for group in matched.values())
+    crest_hits = sum(hits_of([row]) for row in h2o_crest if row["seed"] in matched)
+    seed_word = NUMBER_WORDS[len(matched)] if len(matched) < len(NUMBER_WORDS) else str(len(matched))
+    audit.said(SI, f"holds {seed_word} seeds, and this code hits {anneal_hits} of {len(matched)} and CREST "
+                   f"{crest_hits} of {len(matched)}.")
+    for path in ("bench/h2o16-crest/seeds.csv", "bench/water-h2o16/results.csv"):
+        columns = set(audit.rows(path)[0])
+        audit.record("calls" not in columns and "charged" not in columns, path, "no call column",
+                     "absent", " ".join(sorted(columns)))
+    h2o20 = [r for r in audit.rows("bench/water-h2o20-goat/results.csv") if r["arm"] == "crest"]
+    blank = bool(h2o20) and all(r["calls_to_first_hit"] in ("", "none") for r in h2o20)
+    audit.record(blank, "bench/water-h2o20-goat/results.csv", "CREST rows give no call count",
+                 "none", "none" if blank else "a call count")
+    audit.said(SI, "The (H\\(_2\\)O)\\(_{16}\\) and (H\\(_2\\)O)\\(_{20}\\) records give no CREST call count")
+    reference = audit.text("scripts/covalent_h2h/gfn2_crest.py").split("REFERENCE = {", 1)[1].split("}", 1)[0]
+    audit.record("si13" not in reference, "scripts/covalent_h2h/gfn2_crest.py", "Si13 has no reference entry",
+                 "absent", "absent" if "si13" not in reference else "present")
+    audit.said(SI, "the Si\\(_{13}\\) record has no valid reference.")
+
+
 def crest_table(audit: Audit) -> None:
     """tab:crest and its prose, recomputed from the GFN2-xTB rows; the hexamer counts from rows.csv directly."""
     table = load_script("crest_table_audit", "paper/jctc/scripts/crest_table.py")
@@ -7130,6 +7436,7 @@ def crest_table(audit: Audit) -> None:
         for path in (TEX, SI, COVER):
             found = gone.lower() in collapse(audit.text(path)).lower()
             audit.record(not found, path, f"the text does not say {gone}", "absent", "present" if found else "absent")
+    removed_crest_arms(audit)
 
 
 def gmin_tuned(audit: Audit) -> None:
