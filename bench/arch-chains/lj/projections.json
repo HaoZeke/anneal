@@ -1,0 +1,28 @@
+[
+  {
+    "system": "lj75",
+    "n_points": 75,
+    "cal_budget": 100000,
+    "full_budget": 4000000,
+    "cal_arm_wall_s": {
+      "comm": 21.795112332,
+      "indep": 21.493137629,
+      "single": 24.098550405
+    },
+    "projected_per_seed_s": 2695.47201464,
+    "projected_system_s": 32345.66417568
+  },
+  {
+    "system": "lj98",
+    "n_points": 98,
+    "cal_budget": 100000,
+    "full_budget": 4000000,
+    "cal_arm_wall_s": {
+      "comm": 28.5537332,
+      "indep": 28.356587399,
+      "single": 42.976904959
+    },
+    "projected_per_seed_s": 3995.48902232,
+    "projected_system_s": 47945.86826784
+  }
+]
