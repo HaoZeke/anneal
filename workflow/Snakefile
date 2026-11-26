@@ -1112,6 +1112,7 @@ sys.modules[_g2_spec.name] = g2_protocol
 _g2_spec.loader.exec_module(g2_protocol)
 g2_protocol.reject_cap_override(config)
 _G2_CELLS = g2_protocol.cells()
+_G2_AMEND_A1 = g2_protocol.amendment_cells()
 
 
 rule g2_budget_cell:
@@ -1157,4 +1158,54 @@ rule g2_budget:
         """
         set -euo pipefail
         python3 scripts/g2_budget/record_rule.py --list > {output}
+        """
+
+
+# Amendment A1, after preregistration 1308d867. lj75 and lj150 on ase_mh
+# only, the same runner and the same CPU_CAP_S stop as ase_mh on lj98,
+# lj104 and au55. Rows stay in rows-ljfix-budget.csv under the system
+# label. This target is separate from rule g2_budget.
+rule g2_amend_a1_cell:
+    output:
+        "bench/g2-budget/amend-a1/{system}/{arm}/seed{seed}.json",
+    wildcard_constraints:
+        system="lj75|lj150",
+        arm="ase_mh",
+        seed="200[0-9]|201[01]",
+    params:
+        budget=lambda wildcards: g2_protocol.AMENDMENT_BUDGETS[wildcards.system],
+        stop_rule=lambda wildcards: g2_protocol.stop_rule(wildcards.system, wildcards.arm),
+        cpu_cap_s=lambda wildcards: g2_protocol.cpu_cap_s(wildcards.system, wildcards.arm),
+        rows=lambda wildcards: f"bench/ase-{wildcards.system}/rows-ljfix-budget.csv",
+        shapes=lambda wildcards: f"bench/ase-{wildcards.system}/shapes-ljfix-budget.jsonl",
+    threads: 1
+    resources:
+        cpus_per_task=1,
+    shell:
+        """
+        set -euo pipefail
+        python3 scripts/g2_budget/run_cell.py \
+            --system {wildcards.system} \
+            --arm {wildcards.arm} \
+            --seed {wildcards.seed} \
+            --stamp {output}
+        """
+
+
+rule g2_amend_a1:
+    input:
+        expand(
+            "bench/g2-budget/amend-a1/{system}/{arm}/seed{seed}.json",
+            zip,
+            system=[cell.system for cell in _G2_AMEND_A1],
+            arm=[cell.arm for cell in _G2_AMEND_A1],
+            seed=[cell.seed for cell in _G2_AMEND_A1],
+        ),
+    output:
+        "bench/g2-budget/amend-a1.list",
+    threads: 1
+    shell:
+        """
+        set -euo pipefail
+        python3 scripts/g2_budget/record_rule.py --amendment > {output}
         """

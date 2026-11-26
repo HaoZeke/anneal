@@ -1639,6 +1639,8 @@
     "fetch_paper_data": "downloads the paper data set",
     "paper_0120": "the headline panel on the 0.12.0 release build against stored develop rows, no competitor",
     "g2_budget": "pre-registered G2 budget-stop campaign target; the campaign has no rows yet",
-    "g2_budget_cell": "one pre-registered G2 budget-stop cell; the campaign has no rows yet"
+    "g2_budget_cell": "one pre-registered G2 budget-stop cell; the campaign has no rows yet",
+    "g2_amend_a1": "amendment A1 target for lj75 and lj150 on ase_mh, reported apart from the five-system campaign",
+    "g2_amend_a1_cell": "one amendment A1 cell, lj75 or lj150 on ase_mh"
   }
 }

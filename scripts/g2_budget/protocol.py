@@ -24,6 +24,28 @@ ARMS = ("ase_bh", "ase_mh", "anneal")
 ANNEAL_PRESET = "for_cluster"
 CAPPED_SYSTEMS = frozenset({"lj98", "lj104", "au55"})
 CAPPED_ARMS = frozenset({"ase_mh", "anneal"})
+# Amendment A1, after preregistration 1308d867. These systems are not
+# part of SYSTEMS. Budgets and references are the values already scored
+# in this repository. lj75 comes from scripts/ase_lj75/run_one.py
+# (PAPER_BUDGETS and REFERENCE), which scripts/ase_nonlj/cpu_cap_spec.py
+# loads for the capped-shard harness. lj150 comes from
+# scripts/ase_panel/run_one.py SYSTEMS. Both references are the Cambridge
+# Cluster Database values listed in scripts/gmin_panel/run_panel.py.
+AMENDMENT_ID = "A1"
+AMENDMENT_SYSTEMS = ("lj75", "lj150")
+AMENDMENT_ARM = "ase_mh"
+AMENDMENT_BUDGETS = {
+    "lj75": 4_000_000,
+    "lj150": 4_000_000,
+}
+AMENDMENT_REFERENCES = {
+    "lj75": -397.492331,
+    "lj150": -893.310258,
+}
+AMENDMENT_ATOMS = {
+    "lj75": 75,
+    "lj150": 150,
+}
 CORES = 1
 SERIAL = True
 ONE_PER_VM = True
@@ -53,6 +75,12 @@ class Cell:
 
 
 def stop_rule(system: str, arm: str) -> str:
+    if system in AMENDMENT_SYSTEMS:
+        if arm != AMENDMENT_ARM:
+            raise ValueError(
+                f"amendment {AMENDMENT_ID} accepts {system} only on {AMENDMENT_ARM}"
+            )
+        return "cap"
     if system not in PAPER_BUDGETS:
         raise ValueError(f"unknown system {system}")
     if arm not in ARMS:
@@ -88,19 +116,48 @@ def cells() -> tuple[Cell, ...]:
     return tuple(found)
 
 
+def amendment_cells() -> tuple[Cell, ...]:
+    found = []
+    for system in AMENDMENT_SYSTEMS:
+        rule = stop_rule(system, AMENDMENT_ARM)
+        for seed in SEEDS:
+            found.append(Cell(
+                system,
+                AMENDMENT_ARM,
+                seed,
+                AMENDMENT_BUDGETS[system],
+                rule,
+                CPU_CAP_S if rule == "cap" else None,
+                None,
+                CORES,
+                WALL_CAP_S,
+            ))
+    return tuple(found)
+
+
 def find_cell(system: str, arm: str, seed: int) -> Cell:
     for cell in cells():
+        if cell.system == system and cell.arm == arm and cell.seed == seed:
+            return cell
+    for cell in amendment_cells():
         if cell.system == system and cell.arm == arm and cell.seed == seed:
             return cell
     raise ValueError(f"unknown cell {system} {arm} {seed}")
 
 
-def pairs(system: str) -> tuple[tuple[str, str], ...]:
+def _arms_for(system: str) -> tuple[str, ...]:
+    if system in AMENDMENT_SYSTEMS:
+        return (AMENDMENT_ARM,)
     if system not in PAPER_BUDGETS:
         raise ValueError(f"unknown system {system}")
+    return ARMS
+
+
+def pairs(system: str) -> tuple[tuple[str, str], ...]:
+    arms = _arms_for(system)
     found = []
-    for index, left in enumerate(ARMS):
-        for right in ARMS[index + 1:]:
+    for index, left in enumerate(arms):
+        for right in arms[index + 1:]:
             if stop_rule(system, left) == stop_rule(system, right):
                 found.append((left, right))
     return tuple(found)
@@ -115,15 +172,18 @@ def assert_pair(system: str, left: str, right: str) -> None:
         )
 
 
-def rows_path(root: Path, system: str) -> Path:
-    if system not in PAPER_BUDGETS:
+def _require_system(system: str) -> None:
+    if system not in PAPER_BUDGETS and system not in AMENDMENT_SYSTEMS:
         raise ValueError(f"unknown system {system}")
+
+
+def rows_path(root: Path, system: str) -> Path:
+    _require_system(system)
     return Path(root) / "bench" / f"ase-{system}" / ROWS_NAME
 
 
 def shapes_path(root: Path, system: str) -> Path:
-    if system not in PAPER_BUDGETS:
-        raise ValueError(f"unknown system {system}")
+    _require_system(system)
     return Path(root) / "bench" / f"ase-{system}" / SHAPES_NAME
 
 
@@ -144,7 +204,7 @@ def reject_cap_override(config) -> None:
 
 
 def cell_record(cell: Cell) -> dict:
-    return {
+    record = {
         "system": cell.system,
         "arm": cell.arm,
         "seed": cell.seed,
@@ -159,3 +219,6 @@ def cell_record(cell: Cell) -> dict:
         "rows": f"bench/ase-{cell.system}/{ROWS_NAME}",
         "shapes": f"bench/ase-{cell.system}/{SHAPES_NAME}",
     }
+    if cell.system in AMENDMENT_SYSTEMS:
+        record["amendment"] = AMENDMENT_ID
+    return record

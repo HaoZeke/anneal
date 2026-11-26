@@ -59,3 +59,36 @@ The scope-1 projections are lower bounds, because ASE MH duplicate checks grow a
 LJ98 minima hopping is at least 22 h per seed. LJ104 minima hopping is at least 25 h per seed. Au55 minima hopping is at least 1.9-4.3 h per seed. Basin hopping fits in hours.
 
 The cap is 43200 s of process CPU for minima hopping and for_cluster on lj98, lj104, and au55. LJ98 and LJ104 minima hopping are above 12 h per seed on these lower bounds. A seed that reaches the cap before the call budget is a censored miss.
+
+## Amendment A1 (post-registration)
+
+This section is added after 1308d867. It does not change the five preregistered systems or their arms.
+
+Amendment A1 covers lj75 and lj150 on `ase_mh` only. `ase_bh` and `anneal` are rejected for both systems. Seeds are 2000-2011. The runner is `scripts/g2_budget/run_cell.py`, the same runner as the preregistered cells. The stop rule is the budget-or-cap rule `ase_mh` already uses on lj98, lj104, and au55: a seed stops on a hit, on the call budget, or at the 43200 s process-CPU cap, whichever comes first. A capped seed resumes from its checkpoint. CPU seconds are the sum of the segments.
+
+The call budgets are 4_000_000 for lj75 and 4_000_000 for lj150. The lj75 budget is `PAPER_BUDGETS` in `scripts/ase_lj75/run_one.py`, which `scripts/ase_nonlj/cpu_cap_spec.py` loads for the capped-shard harness. The lj150 budget is `SYSTEMS` in `scripts/ase_panel/run_one.py`. The reference energies are the Cambridge Cluster Database values already listed in `scripts/gmin_panel/run_panel.py`: -397.492331 for lj75 and -893.310258 for lj150. The same lj75 reference is `REFERENCE` in `scripts/ase_lj75/run_one.py`. The same lj150 reference is the lj150 entry of `scripts/ase_panel/run_one.py`.
+
+Rows are appended to `bench/ase-lj75/rows-ljfix-budget.csv` and `bench/ase-lj150/rows-ljfix-budget.csv`. Shapes are appended to the matching `shapes-ljfix-budget.jsonl` files. The row columns stay the preregistered columns. The system label is lj75 or lj150. Each shape carries `amendment` `A1`. These cells are reported separately from the five preregistered systems. They are not in `rule g2_budget`. `rule g2_amend_a1` runs them.
+
+## Runner setup
+
+A fresh checkout needs the Python extension and the panel evaluator before the runner tests can import a search.
+
+```
+pip install maturin
+maturin develop --release
+```
+
+The documented equivalent from the install notes is:
+
+```
+pip install "maturin>=1.5,<2"
+maturin develop --release --features python
+```
+
+Au55 cells also need the panel evaluator:
+
+```
+cargo build --release --example asg_eval
+export ASG_EVAL="$PWD/target/release/examples/asg_eval"
+```

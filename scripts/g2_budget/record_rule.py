@@ -34,15 +34,24 @@ protocol = _protocol()
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Emit one pre-registered G2 budget-stop cell.")
     parser.add_argument("--list", action="store_true")
+    parser.add_argument("--amendment", action="store_true")
     parser.add_argument("--system")
     parser.add_argument("--arm")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--stamp")
     args = parser.parse_args(argv)
+    if args.list and args.amendment:
+        parser.error("--list does not include the amendment")
     if args.list:
         if args.system or args.arm or args.seed is not None or args.stamp:
             parser.error("--list does not take a cell")
         for cell in protocol.cells():
+            print(json.dumps(protocol.cell_record(cell), sort_keys=True))
+        return 0
+    if args.amendment:
+        if args.system or args.arm or args.seed is not None or args.stamp:
+            parser.error("--amendment does not take a cell")
+        for cell in protocol.amendment_cells():
             print(json.dumps(protocol.cell_record(cell), sort_keys=True))
         return 0
     if not args.system or not args.arm or args.seed is None or not args.stamp:

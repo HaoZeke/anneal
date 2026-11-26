@@ -283,13 +283,40 @@ def _positions(values, n: int) -> np.ndarray:
     return np.ascontiguousarray(array)
 
 
+def _system_spec(panel, cell) -> dict:
+    """Panel spec for one cell.
+
+    The five preregistered systems keep the panel dict object. lj150 is
+    already on that panel. lj75 is not, so the amendment constants fill it.
+    """
+    known = panel.SYSTEMS.get(cell.system)
+    if cell.system in protocol.AMENDMENT_SYSTEMS:
+        expected = {
+            "n": int(protocol.AMENDMENT_ATOMS[cell.system]),
+            "budget": int(protocol.AMENDMENT_BUDGETS[cell.system]),
+            "reference": float(protocol.AMENDMENT_REFERENCES[cell.system]),
+            "kind": "lj",
+        }
+        if known is None:
+            return expected
+        if (
+            int(known["n"]) != expected["n"]
+            or int(known["budget"]) != expected["budget"]
+            or float(known["reference"]) != expected["reference"]
+            or known.get("kind") != "lj"
+        ):
+            raise RuntimeError("amendment spec differs from the panel")
+        return known
+    return panel.SYSTEMS[cell.system]
+
+
 def _ase_setup(cell, panel, potential, state):
     import ase
     from ase import Atoms
 
     if ase.__version__ != panel.ASE_VERSION:
         raise RuntimeError(f"ASE {panel.ASE_VERSION} required, found {ase.__version__}")
-    spec = panel.SYSTEMS[cell.system]
+    spec = _system_spec(panel, cell)
     server = None
     if spec["kind"] == "lj":
         panel.check_lj()
@@ -870,7 +897,7 @@ def _worker_main(workdir: str) -> int:
 
 def _publish_job(work: Path, cell, cap_s) -> None:
     panel, _potential = _libraries()
-    spec = panel.SYSTEMS[cell.system]
+    spec = _system_spec(panel, cell)
     payload = {
         "system": cell.system,
         "seed": int(cell.seed),

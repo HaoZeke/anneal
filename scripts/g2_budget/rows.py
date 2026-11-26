@@ -234,12 +234,21 @@ def _shape_body(row: dict[str, str], segments: int, shape_extra) -> dict:
     return shape
 
 
+def _with_amendment(cell, shape_extra):
+    if cell.system not in protocol.AMENDMENT_SYSTEMS:
+        return shape_extra
+    extra = dict(shape_extra or {})
+    extra["amendment"] = protocol.AMENDMENT_ID
+    return extra
+
+
 def _commit(root: Path, cell, row: dict[str, str], segments: int, shape_extra=None) -> None:
     """Write the shape first and the row second.
 
     A retry that finds the shape and not the row writes the row when the
     shape is the same record, and rejects the seed when it is not.
     """
+    shape_extra = _with_amendment(cell, shape_extra)
     rows_path = protocol.rows_path(root, cell.system)
     shapes_path = protocol.shapes_path(root, cell.system)
     if rows_path.name != protocol.ROWS_NAME or protocol.is_scope1_rows(rows_path):
