@@ -10,9 +10,7 @@ The invocation is `crest start.xyz --gfn2 -T 1 --legacy` with the GFN2 evaluator
 
 The recorded total for seed 17000 is 127141. This rerun counted 151538. The command, the binaries, the rigid-repack start, and the one-thread setting are the recorded ones. Metadynamics velocities are not pinned, so a call total is one sample and need not repeat 127141. This sample was still optimizing when the counter reached the budget. The first hit is call 131547, before that cap. On this seed the short timing trial was charged against the cap, so the counted total stops 200 calls short of 151738. Later seeds do not charge that trial.
 
-## Seeds 17000–17007
-
-Seeds 17008–17011 were not started. The run window closed after seed 17007.
+## Seeds 17000–17011
 
 | seed | first_hit_call | total_calls | hit | best / Eh |
 | --- | --- | --- | --- | --- |
@@ -24,5 +22,9 @@ Seeds 17008–17011 were not started. The run window closed after seed 17007.
 | 17005 | 151739 | 151738 | 0 | −40.681245390898 |
 | 17006 | 91817 | 139177 | 1 | −40.681335988082 |
 | 17007 | 151739 | 151738 | 0 | −40.681245466346 |
+| 17008 | 151739 | 151738 | 0 | −40.681245423782 |
+| 17009 | 151739 | 151738 | 0 | −40.603591290126 |
+| 17010 | 151739 | 151738 | 0 | −40.681245330059 |
+| 17011 | 151696 | 151738 | 1 | −40.681335265487 |
 
-Six of the eight seeds hit. Seeds 17005 and 17007 ran to the budget without an intact geometry at the threshold. On seeds 17003–17006 the wall clock is longer than the cpu time; the call counts are the evaluations.
+Seven of the twelve seeds hit. Seeds 17005, 17007, 17008, 17009, and 17010 ran to the budget without an intact geometry at the threshold. On seeds 17003–17006 the wall clock is longer than the cpu time; the call counts are the evaluations.
