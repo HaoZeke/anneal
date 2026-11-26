@@ -245,7 +245,8 @@ fn the_archive_search_settles_a_forced_overrun_exactly() {
         None,
         &mut archive,
         &mut rng,
-    );
+    )
+    .expect("archive search");
     assert_forced_overrun(
         "archive_search",
         &ledger,
