@@ -4037,35 +4037,19 @@ pub(crate) fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> S
 /// that build). Those stay `ValueError`. Anything else is an internal
 /// failure and must not be reported as bad input.
 fn panic_is_bad_input(msg: &str) -> bool {
-    const MARKERS: &[&str] = &[
-        "call floor must be a positive distance",
-        "call-floor elements must name every point",
-        "continuous-symmetry interval must be positive",
-        "continuous-symmetry projection requires a free non-periodic point set",
-        "continuous-symmetry classes must match n_points",
-        "delayed acceptance needs a single chain",
-        "shape keying needs the `ira` feature",
-        "screen_steps must be strictly less than relax_steps",
-        "length_scale must be finite and positive",
-        "energy_scale must be finite and positive",
-        "species must not be empty",
-        "species must have known covalent radii",
-        "a rigid cluster needs at least two bodies",
-        "checkpoint interval must be positive",
-        "a shared bias and a replica ladder are different things",
-        "interleaved TIP4P state is 6 per molecule",
-        "block TIP4P state is 6 per molecule",
-    ];
-    MARKERS.iter().any(|marker| msg.contains(marker))
+    crate::panic_class::panic_is_bad_input(msg)
 }
 
-fn search_panic_error(payload: Box<dyn std::any::Any + Send>) -> PyErr {
-    let msg = panic_payload_message(payload);
+fn reported_panic(msg: String) -> PyErr {
     if panic_is_bad_input(&msg) {
         PyValueError::new_err(msg)
     } else {
         PyRuntimeError::new_err(msg)
     }
+}
+
+fn search_panic_error(payload: Box<dyn std::any::Any + Send>) -> PyErr {
+    reported_panic(panic_payload_message(payload))
 }
 
 fn scaled_cluster_preset(
@@ -5037,8 +5021,12 @@ fn cluster_search(
 /// iterations/evaluations. `fg_fn` is either a Python callable
 /// `fg_fn(x) -> (energy, gradient)` (each call is one evaluation) or a native
 /// cluster potential (`PairPotential`, `BinaryLennardJones`, `SuttonChen`,
-/// `Gupta`, `Tip4pCluster`, or `GminTip4p`). Returns a dict with `x`,
-/// `energy`, and `calls`.
+/// `Gupta`, `Tip4pCluster`, or `GminTip4p`). A bad `gtol`, method, species
+/// length, or dimension is `ValueError` before the kernel runs. A panic
+/// inside the kernel is `ValueError` only when its text is an input
+/// contract, the same list `cluster_search` uses, and `RuntimeError`
+/// otherwise: an internal failure is not bad input. Returns a dict with
+/// `x`, `energy`, and `calls`.
 #[pyfunction]
 #[pyo3(signature = (fg_fn, x0, gtol, max_iter = 10000, method = "lbfgs", species = None))]
 fn quench(
@@ -5106,7 +5094,7 @@ fn quench(
             }))
             .map_err(panic_payload_message)
         })
-        .map_err(PyValueError::new_err)?
+        .map_err(reported_panic)?
     } else {
         let mut failure: Option<PyErr> = None;
         let fg = |v: ArrayView1<f64>| {
@@ -5139,7 +5127,7 @@ fn quench(
             return Err(err);
         }
         let (energy, x, _) =
-            ran.map_err(|payload| PyValueError::new_err(panic_payload_message(payload)))?;
+            ran.map_err(|payload| reported_panic(panic_payload_message(payload)))?;
         (energy, x)
     };
     let out = PyDict::new(py);

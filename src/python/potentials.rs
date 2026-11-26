@@ -49,6 +49,14 @@ fn check_len(slice: &[f64], expected: usize, label: &str) -> PyResult<()> {
     Ok(())
 }
 
+/// Copy `x` and check its length. The kernel then runs without the GIL, so
+/// it must not borrow the numpy array.
+fn owned_coords(x: &PyReadonlyArray1<'_, f64>, expected: usize, label: &str) -> PyResult<Vec<f64>> {
+    let slice = x.as_slice()?;
+    check_len(slice, expected, label)?;
+    Ok(slice.to_vec())
+}
+
 /// Pairwise Lennard-Jones or Morse cluster potential over `n_points` atoms.
 #[pyclass(name = "PairPotential", module = "anneal._core")]
 #[derive(Clone)]
@@ -150,10 +158,10 @@ impl PyPairPotential {
         py_bounds_from(py, Objective::bounds(&self.inner))
     }
 
-    fn eval(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points, "PairPotential")?;
-        Ok(Objective::eval(&self.inner, ArrayView1::from(slice)))
+    fn eval(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        let owned = owned_coords(&x, 3 * self.inner.n_points, "PairPotential")?;
+        let inner = &self.inner;
+        Ok(py.detach(move || Objective::eval(inner, ArrayView1::from(&owned))))
     }
 
     fn grad<'py>(
@@ -161,9 +169,9 @@ impl PyPairPotential {
         py: Python<'py>,
         x: PyReadonlyArray1<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points, "PairPotential")?;
-        let g = Gradient::grad(&self.inner, ArrayView1::from(slice));
+        let owned = owned_coords(&x, 3 * self.inner.n_points, "PairPotential")?;
+        let inner = &self.inner;
+        let g = py.detach(move || Gradient::grad(inner, ArrayView1::from(&owned)));
         Ok(super::py_view1(py, g.view()))
     }
 
@@ -172,9 +180,9 @@ impl PyPairPotential {
         py: Python<'py>,
         x: PyReadonlyArray1<'py, f64>,
     ) -> PyResult<(f64, Bound<'py, PyArray1<f64>>)> {
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points, "PairPotential")?;
-        let (e, g) = self.inner.value_and_gradient(ArrayView1::from(slice));
+        let owned = owned_coords(&x, 3 * self.inner.n_points, "PairPotential")?;
+        let inner = &self.inner;
+        let (e, g) = py.detach(move || inner.value_and_gradient(ArrayView1::from(&owned)));
         Ok((e, super::py_view1(py, g.view())))
     }
 
@@ -183,8 +191,8 @@ impl PyPairPotential {
         to_py_objective(py, slf.as_any(), &bounds)
     }
 
-    fn __call__(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        self.eval(x)
+    fn __call__(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        self.eval(py, x)
     }
 
     fn __repr__(&self) -> String {
@@ -345,10 +353,10 @@ impl PyBinaryLennardJones {
         py_bounds_from(py, Objective::bounds(&self.inner))
     }
 
-    fn eval(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points(), "BinaryLennardJones")?;
-        Ok(Objective::eval(&self.inner, ArrayView1::from(slice)))
+    fn eval(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        let owned = owned_coords(&x, 3 * self.inner.n_points(), "BinaryLennardJones")?;
+        let inner = &self.inner;
+        Ok(py.detach(move || Objective::eval(inner, ArrayView1::from(&owned))))
     }
 
     fn grad<'py>(
@@ -356,9 +364,9 @@ impl PyBinaryLennardJones {
         py: Python<'py>,
         x: PyReadonlyArray1<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points(), "BinaryLennardJones")?;
-        let g = Gradient::grad(&self.inner, ArrayView1::from(slice));
+        let owned = owned_coords(&x, 3 * self.inner.n_points(), "BinaryLennardJones")?;
+        let inner = &self.inner;
+        let g = py.detach(move || Gradient::grad(inner, ArrayView1::from(&owned)));
         Ok(super::py_view1(py, g.view()))
     }
 
@@ -367,9 +375,9 @@ impl PyBinaryLennardJones {
         py: Python<'py>,
         x: PyReadonlyArray1<'py, f64>,
     ) -> PyResult<(f64, Bound<'py, PyArray1<f64>>)> {
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points(), "BinaryLennardJones")?;
-        let (e, g) = self.inner.value_and_gradient(ArrayView1::from(slice));
+        let owned = owned_coords(&x, 3 * self.inner.n_points(), "BinaryLennardJones")?;
+        let inner = &self.inner;
+        let (e, g) = py.detach(move || inner.value_and_gradient(ArrayView1::from(&owned)));
         Ok((e, super::py_view1(py, g.view())))
     }
 
@@ -378,8 +386,8 @@ impl PyBinaryLennardJones {
         to_py_objective(py, slf.as_any(), &bounds)
     }
 
-    fn __call__(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        self.eval(x)
+    fn __call__(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        self.eval(py, x)
     }
 
     fn __repr__(&self) -> String {
@@ -471,10 +479,10 @@ impl PySuttonChen {
         py_bounds_from(py, Objective::bounds(&self.inner))
     }
 
-    fn eval(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points, "SuttonChen")?;
-        Ok(Objective::eval(&self.inner, ArrayView1::from(slice)))
+    fn eval(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        let owned = owned_coords(&x, 3 * self.inner.n_points, "SuttonChen")?;
+        let inner = &self.inner;
+        Ok(py.detach(move || Objective::eval(inner, ArrayView1::from(&owned))))
     }
 
     fn grad<'py>(
@@ -482,9 +490,9 @@ impl PySuttonChen {
         py: Python<'py>,
         x: PyReadonlyArray1<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points, "SuttonChen")?;
-        let g = Gradient::grad(&self.inner, ArrayView1::from(slice));
+        let owned = owned_coords(&x, 3 * self.inner.n_points, "SuttonChen")?;
+        let inner = &self.inner;
+        let g = py.detach(move || Gradient::grad(inner, ArrayView1::from(&owned)));
         Ok(super::py_view1(py, g.view()))
     }
 
@@ -493,9 +501,9 @@ impl PySuttonChen {
         py: Python<'py>,
         x: PyReadonlyArray1<'py, f64>,
     ) -> PyResult<(f64, Bound<'py, PyArray1<f64>>)> {
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points, "SuttonChen")?;
-        let (e, g) = self.inner.value_and_gradient(ArrayView1::from(slice));
+        let owned = owned_coords(&x, 3 * self.inner.n_points, "SuttonChen")?;
+        let inner = &self.inner;
+        let (e, g) = py.detach(move || inner.value_and_gradient(ArrayView1::from(&owned)));
         Ok((e, super::py_view1(py, g.view())))
     }
 
@@ -504,8 +512,8 @@ impl PySuttonChen {
         to_py_objective(py, slf.as_any(), &bounds)
     }
 
-    fn __call__(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        self.eval(x)
+    fn __call__(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        self.eval(py, x)
     }
 
     fn __repr__(&self) -> String {
@@ -621,13 +629,13 @@ impl PyGupta {
         py_bounds_from(py, Objective::bounds(&self.inner))
     }
 
-    fn eval(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+    fn eval(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
         if crate::potentials::cluster_kernels().is_none() {
             return Err(PyRuntimeError::new_err("Gupta requires rgpot kernels"));
         }
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points(), "Gupta")?;
-        Ok(Objective::eval(&self.inner, ArrayView1::from(slice)))
+        let owned = owned_coords(&x, 3 * self.inner.n_points(), "Gupta")?;
+        let inner = &self.inner;
+        Ok(py.detach(move || Objective::eval(inner, ArrayView1::from(&owned))))
     }
 
     fn grad<'py>(
@@ -638,9 +646,9 @@ impl PyGupta {
         if crate::potentials::cluster_kernels().is_none() {
             return Err(PyRuntimeError::new_err("Gupta requires rgpot kernels"));
         }
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points(), "Gupta")?;
-        let g = Gradient::grad(&self.inner, ArrayView1::from(slice));
+        let owned = owned_coords(&x, 3 * self.inner.n_points(), "Gupta")?;
+        let inner = &self.inner;
+        let g = py.detach(move || Gradient::grad(inner, ArrayView1::from(&owned)));
         Ok(super::py_view1(py, g.view()))
     }
 
@@ -652,9 +660,9 @@ impl PyGupta {
         if crate::potentials::cluster_kernels().is_none() {
             return Err(PyRuntimeError::new_err("Gupta requires rgpot kernels"));
         }
-        let slice = x.as_slice()?;
-        check_len(slice, 3 * self.inner.n_points(), "Gupta")?;
-        let (e, g) = self.inner.value_and_gradient(ArrayView1::from(slice));
+        let owned = owned_coords(&x, 3 * self.inner.n_points(), "Gupta")?;
+        let inner = &self.inner;
+        let (e, g) = py.detach(move || inner.value_and_gradient(ArrayView1::from(&owned)));
         Ok((e, super::py_view1(py, g.view())))
     }
 
@@ -663,8 +671,8 @@ impl PyGupta {
         to_py_objective(py, slf.as_any(), &bounds)
     }
 
-    fn __call__(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        self.eval(x)
+    fn __call__(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        self.eval(py, x)
     }
 
     fn __repr__(&self) -> String {
@@ -749,10 +757,10 @@ impl PyTip4pCluster {
         Ok(PyArray1::from_vec(py, folded))
     }
 
-    fn eval(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        let slice = x.as_slice()?;
-        check_len(slice, 6 * self.inner.n_molecules, "Tip4pCluster")?;
-        Ok(Objective::eval(&self.inner, ArrayView1::from(slice)))
+    fn eval(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        let owned = owned_coords(&x, 6 * self.inner.n_molecules, "Tip4pCluster")?;
+        let inner = &self.inner;
+        Ok(py.detach(move || Objective::eval(inner, ArrayView1::from(&owned))))
     }
 
     fn grad<'py>(
@@ -760,9 +768,9 @@ impl PyTip4pCluster {
         py: Python<'py>,
         x: PyReadonlyArray1<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let slice = x.as_slice()?;
-        check_len(slice, 6 * self.inner.n_molecules, "Tip4pCluster")?;
-        let g = Gradient::grad(&self.inner, ArrayView1::from(slice));
+        let owned = owned_coords(&x, 6 * self.inner.n_molecules, "Tip4pCluster")?;
+        let inner = &self.inner;
+        let g = py.detach(move || Gradient::grad(inner, ArrayView1::from(&owned)));
         Ok(super::py_view1(py, g.view()))
     }
 
@@ -771,9 +779,9 @@ impl PyTip4pCluster {
         py: Python<'py>,
         x: PyReadonlyArray1<'py, f64>,
     ) -> PyResult<(f64, Bound<'py, PyArray1<f64>>)> {
-        let slice = x.as_slice()?;
-        check_len(slice, 6 * self.inner.n_molecules, "Tip4pCluster")?;
-        let (e, g) = self.inner.value_and_gradient(ArrayView1::from(slice));
+        let owned = owned_coords(&x, 6 * self.inner.n_molecules, "Tip4pCluster")?;
+        let inner = &self.inner;
+        let (e, g) = py.detach(move || inner.value_and_gradient(ArrayView1::from(&owned)));
         Ok((e, super::py_view1(py, g.view())))
     }
 
@@ -782,8 +790,8 @@ impl PyTip4pCluster {
         to_py_objective(py, slf.as_any(), &bounds)
     }
 
-    fn __call__(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        self.eval(x)
+    fn __call__(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        self.eval(py, x)
     }
 
     fn __repr__(&self) -> String {
@@ -825,10 +833,10 @@ impl PyGminTip4p {
         py_bounds_from(py, Objective::bounds(&self.inner))
     }
 
-    fn eval(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        let slice = x.as_slice()?;
-        check_len(slice, 6 * self.inner.n_molecules(), "GminTip4p")?;
-        Ok(Objective::eval(&self.inner, ArrayView1::from(slice)))
+    fn eval(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        let owned = owned_coords(&x, 6 * self.inner.n_molecules(), "GminTip4p")?;
+        let inner = &self.inner;
+        Ok(py.detach(move || Objective::eval(inner, ArrayView1::from(&owned))))
     }
 
     fn grad<'py>(
@@ -836,9 +844,9 @@ impl PyGminTip4p {
         py: Python<'py>,
         x: PyReadonlyArray1<'py, f64>,
     ) -> PyResult<Bound<'py, PyArray1<f64>>> {
-        let slice = x.as_slice()?;
-        check_len(slice, 6 * self.inner.n_molecules(), "GminTip4p")?;
-        let g = Gradient::grad(&self.inner, ArrayView1::from(slice));
+        let owned = owned_coords(&x, 6 * self.inner.n_molecules(), "GminTip4p")?;
+        let inner = &self.inner;
+        let g = py.detach(move || Gradient::grad(inner, ArrayView1::from(&owned)));
         Ok(super::py_view1(py, g.view()))
     }
 
@@ -847,9 +855,9 @@ impl PyGminTip4p {
         py: Python<'py>,
         x: PyReadonlyArray1<'py, f64>,
     ) -> PyResult<(f64, Bound<'py, PyArray1<f64>>)> {
-        let slice = x.as_slice()?;
-        check_len(slice, 6 * self.inner.n_molecules(), "GminTip4p")?;
-        let (e, g) = self.inner.value_and_gradient(ArrayView1::from(slice));
+        let owned = owned_coords(&x, 6 * self.inner.n_molecules(), "GminTip4p")?;
+        let inner = &self.inner;
+        let (e, g) = py.detach(move || inner.value_and_gradient(ArrayView1::from(&owned)));
         Ok((e, super::py_view1(py, g.view())))
     }
 
@@ -858,8 +866,8 @@ impl PyGminTip4p {
         to_py_objective(py, slf.as_any(), &bounds)
     }
 
-    fn __call__(&self, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
-        self.eval(x)
+    fn __call__(&self, py: Python<'_>, x: PyReadonlyArray1<'_, f64>) -> PyResult<f64> {
+        self.eval(py, x)
     }
 
     fn __repr__(&self) -> String {

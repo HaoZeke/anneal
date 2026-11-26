@@ -439,13 +439,14 @@ jobs:
         run: python -m venv .venv
 
       # The array-API loss and setting tests skip without array-api-strict,
-      # so the step stops here if it does not import. It asks only for numpy,
-      # unpinned, so the main suite still runs on the newest numpy.
+      # and the ASE calculator tests skip without ase, so the step stops
+      # here if either does not import. It asks only for numpy, unpinned,
+      # so the main suite still runs on the newest numpy.
       - name: Install maturin + pytest + array-api-strict + mypy
         run: |
           .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy scipy sympy array-api-strict mypy "tomli>=2; python_version < '3.11'"
-          .venv/bin/python -c "import array_api_strict, mypy"
+          .venv/bin/python -m pip install "maturin>=1.5,<2" pytest numpy scipy sympy array-api-strict mypy "ase>=3.23,<3.30" "tomli>=2; python_version < '3.11'"
+          .venv/bin/python -c "import array_api_strict, mypy, ase"
 
       # Build graphkey into the live extension so the ras=True mapping tests
       # exercise ArchiveOutcome instead of accepting the feature-disabled error.

@@ -199,6 +199,7 @@ pub mod nng_rpc;
 pub mod noise_accept;
 /// Packing mutates: twin a dense plane, or close orbits on a new basin.
 pub mod packing;
+mod panic_class;
 /// The pure-Rust SA driver loop.
 /// Multi-step paths between minima, where one hop cannot cross.
 pub mod path;
