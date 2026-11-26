@@ -15,6 +15,8 @@ crate-type = ["cdylib"]
 # maturin and CI pass `--features python`; the module is always the
 # Python build of anneal-core.
 python = []
+# Residual archive search. The default wheel leaves this off.
+graphkey = ["anneal-core/graphkey"]
 
 [dependencies]
 # [[[cog

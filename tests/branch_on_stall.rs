@@ -77,7 +77,11 @@ fn a_branch_that_never_fires_leaves_the_walk_unchanged() {
     let mut on = off.clone();
     on.branch_on_stall = true;
     let budget = 6_000;
-    assert!(same(&search(&off, budget), &search(&on, budget)));
+    let disabled = search(&off, budget);
+    let enabled = search(&on, budget);
+    assert!(same(&disabled, &enabled));
+    assert_eq!((disabled.branch_draws, disabled.branch_spent), (0, 0));
+    assert_eq!((enabled.branch_draws, enabled.branch_spent), (0, 0));
 }
 
 #[test]
@@ -92,6 +96,8 @@ fn a_branch_stays_inside_the_budget_and_repeats() {
     let again = search(&on, budget);
     assert!(same(&first, &again));
     assert!(first.charged <= budget);
+    assert!(first.branch_draws > 0);
+    assert!(first.branch_spent > 0);
     // The branches spend calls the walk would have hopped with.
     assert!(
         first.hops < walk.hops,

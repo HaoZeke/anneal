@@ -6,6 +6,19 @@ import pytest
 
 from anneal import Config, Ledger, cluster_search
 
+CHARGE_KEYS = (
+    "screen", "full", "check", "closure", "quench", "settle", "lattice", "reoccupy", "probe",
+)
+
+
+def _named_charges(split: dict) -> int:
+    return sum(split[key] for key in CHARGE_KEYS)
+
+
+def _internal_charges(split: dict) -> int:
+    """Charges that do not enter the Python objective."""
+    return split["lattice"] + split["reoccupy"] + split["quench"] + split["settle"]
+
 
 def lj_energy(x: np.ndarray) -> float:
     p = np.asarray(x, dtype=np.float64).reshape(-1, 3)
@@ -374,8 +387,18 @@ def test_cluster_search_species_and_rigid_charts():
 def test_cluster_search_ras_true_uses_archive_outcome():
     from anneal._core import cluster_search as core_cluster_search
 
+    calls = {"energy": 0, "gradient": 0}
+
+    def energy(x):
+        calls["energy"] += 1
+        return lj_energy(x)
+
+    def gradient(x):
+        calls["gradient"] += 1
+        return lj_grad(x)
+
     try:
-        out = core_cluster_search(lj_energy, lj_grad, 4, 800, seed=0, ras=True)
+        out = core_cluster_search(energy, gradient, 4, 800, seed=0, ras=True)
     except ValueError as exc:
         assert "graphkey" in str(exc)
         return
@@ -384,11 +407,183 @@ def test_cluster_search_ras_true_uses_archive_outcome():
     assert "charged" in out
     assert "floors" in out
     assert "returned" in out
+    split = out["ledger"]
+    callbacks = calls["energy"] + calls["gradient"]
+    assert out["charged"] == split["spent"]
+    assert _named_charges(split) == split["spent"]
+    assert split["callbacks"] == callbacks
+    assert (
+        callbacks + _internal_charges(split) + split["probe_unbacked"]
+        == split["spent"] + split["split_extras"]
+    )
+    assert split["split_extras"] > 0
+    screened_out = out["ledger"]["screened_out"]
+    assert (
+        isinstance(screened_out, int)
+        and 0 <= screened_out <= out["ledger"]["screen"]
+    )
+    assert out["branch_on_stall"] is False
+    assert out["ledger"]["branch_draws"] == 0
+    assert out["ledger"]["branch_spent"] == 0
     assert "events" in out
     assert "nve_unavailable" in out
     assert out["nve_unavailable"] is False
     assert out["charged"] > 0
     assert out["floors"] >= 1
+
+    finite_gradients = 10
+    gradient_calls = 0
+
+    def failing_gradient(x):
+        nonlocal gradient_calls
+        gradient_calls += 1
+        if gradient_calls > finite_gradients:
+            return np.full_like(np.asarray(x, dtype=np.float64), np.nan)
+        return lj_grad(x)
+
+    confirmed = core_cluster_search(
+        lj_energy, failing_gradient, 4, 300, seed=0, ras=True
+    )
+    assert confirmed["ledger"]["check"] > 0
+
+    polished = core_cluster_search(lj_energy, lj_grad, 3, 50_000, seed=0, ras=True)
+    polished_split = polished["ledger"]
+    assert polished_split["full"] > 0
+    assert _named_charges(polished_split) == polished_split["spent"]
+    assert (
+        polished_split["callbacks"]
+        + _internal_charges(polished_split)
+        + polished_split["probe_unbacked"]
+        == polished_split["spent"] + polished_split["split_extras"]
+    )
+
+
+def _missing_archive(exc):
+    return isinstance(exc, ValueError) and "graphkey" in str(exc)
+
+
+def test_cluster_search_maps_a_non_finite_start_to_value_error():
+    def energy(_x):
+        return float("nan")
+
+    def gradient(x):
+        return np.zeros_like(np.asarray(x, dtype=np.float64))
+
+    with pytest.raises(ValueError, match="no finite start"):
+        cluster_search(energy, gradient, 4, 200, seed=0)
+
+    # A build without archive search refuses ras before the objective runs.
+    # With it, the same miss must be ValueError, not an abort.
+    try:
+        cluster_search(energy, gradient, 4, 200, seed=0, ras=True)
+    except ValueError as exc:
+        if _missing_archive(exc):
+            pytest.skip("archive search is not in this build")
+        assert "no finite start" in str(exc)
+    else:
+        raise AssertionError("archive search returned from an always-missing objective")
+
+
+def test_archive_search_keyboard_interrupt_is_not_a_panic():
+    calls = {"n": 0}
+
+    def energy(_x):
+        calls["n"] += 1
+        raise KeyboardInterrupt
+
+    def gradient(x):
+        return lj_grad(x)
+
+    # Budget below the gradient probe, so the first energy call is the
+    # paired evaluation. An ending error there used to fail the charge
+    # check before the interrupt was re-raised.
+    try:
+        cluster_search(energy, gradient, 4, 3, seed=0, ras=True)
+    except KeyboardInterrupt:
+        assert calls["n"] == 1
+        return
+    except ValueError as exc:
+        if _missing_archive(exc):
+            pytest.skip("archive search is not in this build")
+        raise
+    raise AssertionError("archive search returned after a keyboard interrupt")
+
+
+def test_archive_search_callback_error_is_not_a_panic():
+    calls = {"n": 0}
+
+    def energy(_x):
+        calls["n"] += 1
+        raise SystemExit("callback failed")
+
+    def gradient(x):
+        return lj_grad(x)
+
+    try:
+        cluster_search(energy, gradient, 4, 3, seed=0, ras=True)
+    except SystemExit as exc:
+        assert "callback failed" in str(exc)
+        assert calls["n"] == 1
+        return
+    except ValueError as exc:
+        if _missing_archive(exc):
+            pytest.skip("archive search is not in this build")
+        raise
+    raise AssertionError("archive search returned after an ending callback error")
+
+
+@pytest.mark.parametrize("budget", [200, 50_003])
+def test_archive_search_maps_a_non_finite_start_to_value_error(budget):
+    def energy(_x):
+        return float("nan")
+
+    def gradient(x):
+        return np.zeros_like(np.asarray(x, dtype=np.float64))
+
+    # 200 leaves the short walk. The gradient probe spends three charges
+    # before the archive walk, so 50003 leaves 50000 and takes the long walk.
+    # Both must raise ValueError when every opening quench is missing.
+    try:
+        cluster_search(energy, gradient, 4, budget, seed=0, ras=True)
+    except ValueError as exc:
+        if _missing_archive(exc):
+            pytest.skip("archive search is not in this build")
+        assert "no finite start" in str(exc)
+    else:
+        raise AssertionError(
+            f"archive search returned from an always-missing objective at budget {budget}"
+        )
+
+
+def test_cluster_search_ras_reports_nonzero_branch_counters():
+    from anneal._core import cluster_search as core_cluster_search
+
+    def energy(x):
+        x = np.asarray(x, dtype=np.float64)
+        return float(np.sum((x**2 - 1.0) ** 2))
+
+    def gradient(x):
+        x = np.asarray(x, dtype=np.float64)
+        return 4.0 * x * (x**2 - 1.0)
+
+    try:
+        out = core_cluster_search(
+            energy,
+            gradient,
+            3,
+            50_000,
+            seed=0,
+            ras=True,
+            branch_on_stall=True,
+        )
+    except ValueError as exc:
+        assert "graphkey" in str(exc)
+        return
+    ledger = out["ledger"]
+    assert out["branch_on_stall"] is True
+    assert ledger["branch_draws"] > 0
+    assert ledger["branch_spent"] > 0
+    assert 0 < ledger["screened_out"] <= ledger["screen"]
 
 
 def flexible_water(x: np.ndarray, molecules: int):
@@ -485,3 +680,56 @@ def test_cluster_search_auto_quench_takes_tric_for_a_slow_gradient():
     call, step = out["quench_seconds"]
     assert out["local_step"] == "tric", (call, step)
     assert call > step
+
+
+def test_cluster_search_reports_where_the_budget_went():
+    def energy(x):
+        return flexible_water(x, 2)[0]
+
+    def grad(x):
+        return flexible_water(x, 2)[1]
+
+    kwargs = dict(start=WATER_DIMER, species=[8, 1, 1] * 2, groups=[[0, 1, 2], [3, 4, 5]], seed=2)
+    out = cluster_search(energy, grad, 6, 600, local_step="tric", **kwargs)
+    split = out["ledger"]
+    assert out["branch_on_stall"] is False
+    assert set(split) == {
+        "spent", "screen", "full", "check", "closure", "quench", "settle", "lattice",
+        "reoccupy", "probe", "probe_unbacked", "callbacks", "split_extras", "quenches",
+        "converged", "capped",
+        "screened_out", "returned", "branch_draws", "branch_spent", "overlap_rejected", "basins",
+    }
+    for key in split:
+        assert f"``{key}``" in (cluster_search.__doc__ or "")
+    assert "``ledger``" in cluster_search.__doc__.split("Returns a dict with")[1]
+    assert "``branch_on_stall``" in cluster_search.__doc__.split("Returns a dict with")[1]
+    assert 0 < split["spent"] <= 600
+    assert _named_charges(split) == split["spent"]
+    assert (
+        split["callbacks"] + _internal_charges(split) + split["probe_unbacked"]
+        == split["spent"] + split["split_extras"]
+    )
+    assert split["quenches"] == split["converged"] + split["capped"] > 0
+    assert split["basins"] >= 1
+    assert out["hops"] >= split["screened_out"] + split["returned"]
+
+
+def test_an_early_gradient_probe_counts_the_unbacked_charges():
+    import warnings
+
+    def energy(x):
+        return lj_energy(x)
+
+    def gradient(x):
+        raise RuntimeError("probe stopped")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        out = cluster_search(energy, gradient, 4, 8, seed=1)
+    split = out["ledger"]
+    assert split["probe"] == 3
+    assert split["probe_unbacked"] == 2
+    assert (
+        split["callbacks"] + _internal_charges(split) + split["probe_unbacked"]
+        == split["spent"] + split["split_extras"]
+    )
