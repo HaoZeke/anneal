@@ -383,14 +383,89 @@ def _stat_cpu(pid: int) -> float:
     return ticks / os.sysconf("SC_CLK_TCK")
 
 
-def test_capped_au55_ase_cell_under_counts_child_cpu(tmp_path, monkeypatch):
-    """A capped Au55 minima-hopping cell must include evaluator CPU.
+# Forwards to the real evaluator. The first geometry burns one clock
+# tick in this process so the child's CPU is visible on any machine.
+_TICK_EVAL = """\
+import os
+import sys
+import time
 
-    The parent process clock is the ASE optimizer. Gupta runs in the
-    asg_eval child. Recording only the parent leaves that child out.
+def ticks():
+    text = open("/proc/self/stat", encoding="ascii").read()
+    end = text.rfind(")")
+    fields = text[end + 2:].split()
+    return int(fields[11]) + int(fields[12])
+
+def burn_one_tick():
+    start = ticks()
+    deadline = time.perf_counter() + 2.0
+    step = 0
+    while ticks() == start:
+        step += 1
+        if time.perf_counter() >= deadline:
+            raise SystemExit("child cpu tick did not advance")
+    return step
+
+def serve(inner, system):
+    import subprocess
+    proc = subprocess.Popen(
+        [inner, "serve", system],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    burned = False
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    while True:
+        line = sys.stdin.readline()
+        if line == "":
+            break
+        if line.strip() != "quit" and not burned:
+            burn_one_tick()
+            burned = True
+        proc.stdin.write(line)
+        proc.stdin.flush()
+        if line.strip() == "quit":
+            break
+        reply = proc.stdout.readline()
+        if reply == "":
+            raise SystemExit("evaluator closed stdout")
+        sys.stdout.write(reply)
+        sys.stdout.flush()
+    proc.wait(timeout=5)
+
+def main():
+    inner = os.environ["ASG_EVAL_INNER"]
+    if len(sys.argv) > 1 and sys.argv[1] == "serve":
+        serve(inner, sys.argv[2])
+        return
+    os.execv(inner, [inner, *sys.argv[1:]])
+
+if __name__ == "__main__":
+    main()
+"""
+
+
+def _write_tick_eval(path: Path) -> None:
+    path.write_text("#!" + sys.executable + "\n" + _TICK_EVAL, newline="\n")
+    path.chmod(0o755)
+
+
+def test_capped_au55_ase_cell_under_counts_child_cpu(tmp_path, monkeypatch):
+    """A capped Au55 minima-hopping cell counts the evaluator child.
+
+    The child burns one clock tick, so the check does not depend on
+    how fast a Gupta call finishes. The parent clock is held still.
+    Recorded cpu time is the parent plus that child, and the cap
+    trips on the sum.
     """
     binary = panel_binary()
-    monkeypatch.setenv("ASG_EVAL", str(binary))
+    script = tmp_path / "tick_eval.py"
+    _write_tick_eval(script)
+    monkeypatch.setenv("ASG_EVAL", str(script))
+    monkeypatch.setenv("ASG_EVAL_INNER", str(binary))
     mod = runner()
     _panel, potential = mod._libraries()
     seen = {}
@@ -405,34 +480,39 @@ def test_capped_au55_ase_cell_under_counts_child_cpu(tmp_path, monkeypatch):
         return result
 
     monkeypatch.setattr(potential.AnnealServer, "eval", eval_and_sample)
-    samples = []
-    real_process_time = time.process_time
-
-    def sampling_process_time():
-        value = real_process_time()
-        samples.append(value)
-        return value
-
-    monkeypatch.setattr(mod.time, "process_time", sampling_process_time)
+    meter_obs = []
+    real_cpu = getattr(mod, "_process_cpu_s", None)
+    if real_cpu is not None:
+        def recording_cpu(pid):
+            meter_obs.append(_stat_cpu(int(pid)))
+            return real_cpu(pid)
+        monkeypatch.setattr(mod, "_process_cpu_s", recording_cpu)
+    budgets = dict(PROTOCOL.PAPER_BUDGETS)
+    budgets["au55"] = 8000
+    monkeypatch.setattr(PROTOCOL, "PAPER_BUDGETS", budgets)
     monkeypatch.setattr(PROTOCOL, "CPU_CAP_S", 0)
-    monkeypatch.setattr(mod, "segment_cap_s", lambda cell: 2.0)
+    tick = 1.0 / os.sysconf("SC_CLK_TCK")
+    monkeypatch.setattr(mod, "segment_cap_s", lambda cell: tick)
+    frozen = time.process_time()
+    monkeypatch.setattr(mod.time, "process_time", lambda: frozen)
     row = mod.run_cell("au55", "ase_mh", 2000, tmp_path, tmp_path / "stamp.json")
     assert row is not None
     assert row["stop"] == "cap"
-    assert int(row["calls_reached"]) < PROTOCOL.PAPER_BUDGETS["au55"]
-    child = seen["cpu1"] - seen["cpu0"]
-    parent = samples[-1] - samples[0]
-    recorded = float(row["cpu_s"])
-    assert seen["calls"] > 100
-    assert child >= 0.05
-    assert recorded + 1e-6 >= parent + child - 0.02, (
-        f"recorded {recorded:.6f} parent {parent:.6f} child {child:.6f}"
-    )
+    assert int(row["calls_reached"]) < budgets["au55"]
+    assert seen["calls"] > 0
+    observed = seen["cpu1"] - seen["cpu0"]
+    assert observed > 0.0
     _recorded, shapes = rows_and_shapes(tmp_path, "au55")
     shape = shapes[0]
-    assert abs(float(shape["parent_cpu_s"]) + float(shape["child_cpu_s"]) - recorded) <= 1e-6
-    assert abs(float(shape["child_cpu_s"]) - child) <= 0.04
-    assert abs(float(shape["parent_cpu_s"]) - parent) <= 0.02
+    parent = float(shape["parent_cpu_s"])
+    child = float(shape["child_cpu_s"])
+    recorded = float(row["cpu_s"])
+    assert child > 0.0
+    assert abs(parent + child - recorded) <= 1e-6
+    assert parent < tick
+    assert parent + child + 1e-6 >= tick
+    assert meter_obs[-1] - meter_obs[0] > 0.0
+    assert abs(child - (meter_obs[-1] - meter_obs[0])) <= tick
 
 
 def test_au55_cap_trips_on_parent_plus_child(tmp_path, monkeypatch):
