@@ -81,6 +81,7 @@ CHECKS = (
     audit_mod.conversion_literals,
     audit_mod.own_references,
     audit_mod.build_receipts,
+    audit_mod.cross_document_equations,
     audit_mod.selection_tables,
     audit_mod.gmin_panel_drivers,
     audit_mod.prior_switches,
@@ -4414,3 +4415,47 @@ def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_pa
     with_tip = index()
     assert with_tip.on_remote(optional), "a present optional tip did not join the closure"
     assert not with_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
+
+
+def test_cross_document_equation_references_name_their_document():
+    audit = audit_mod.Audit()
+    audit_mod.cross_document_equations(audit)
+    assert not audit.drifts(), "\n".join(
+        f"{where}  shown={shown}  computed={value}" for _, where, _, shown, value in audit.drifts())
+
+
+def test_stripping_the_si_equation_prefix_is_reported():
+    audit = audit_mod.Audit()
+    macros = audit.text("paper/jctc/macros.tex")
+    assert "\\@sieqref@strip" not in macros
+    audit.text_cache["paper/jctc/macros.tex"] = macros + "\n\\def\\@sieqref@strip S#1\\@nil{#1}\n"
+    audit_mod.cross_document_equations(audit)
+    drifts = [where for _, where, label, _, _ in audit.drifts()
+              if label == "an SI equation reference keeps its S or names the SI"]
+    assert drifts
+    assert all(where.startswith("paper/jctc/manuscript.tex:") for where in drifts)
+
+
+def test_an_si_qualifier_covers_a_stripped_equation_reference():
+    audit = audit_mod.Audit()
+    macros = audit.text("paper/jctc/macros.tex")
+    tex = audit.text("paper/jctc/manuscript.tex")
+    audit.text_cache["paper/jctc/macros.tex"] = macros + "\n\\def\\@sieqref@strip S#1\\@nil{#1}\n"
+    audit.text_cache["paper/jctc/manuscript.tex"] = tex.replace(
+        "equation~\\sieqref{", "SI equation~\\sieqref{").replace(
+        "Equation~\\sieqref{", "SI equation~\\sieqref{")
+    audit_mod.cross_document_equations(audit)
+    assert not [where for _, where, label, _, _ in audit.drifts()
+                if label == "an SI equation reference keeps its S or names the SI"]
+
+
+def test_a_main_text_equation_without_its_name_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text("paper/jctc/si.tex")
+    assert "of the main text" in si
+    audit.text_cache["paper/jctc/si.tex"] = si.replace(" of the main text", "")
+    audit_mod.cross_document_equations(audit)
+    drifts = [where for _, where, label, _, _ in audit.drifts()
+              if label == "a manuscript equation reference names the main text"]
+    assert drifts
+    assert all(where.startswith("paper/jctc/si.tex:") for where in drifts)

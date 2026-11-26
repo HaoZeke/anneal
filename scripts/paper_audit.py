@@ -8093,6 +8093,68 @@ def au55_superseded(audit: Audit) -> None:
                  f"{len(want)} rows", f"{len(got)} rows")
 
 
+_CROSS_EQ_SI = re.compile(r"\\(?:sieqref|siref)\{(eq:[^}]+)\}")
+_CROSS_EQ_MAIN = re.compile(r"\\msref\{(eq:[^}]+)\}")
+_LABEL_NUMBER = re.compile(r"\\csname (si|ms)@([^}]+)\\endcsname\{([^}]+)\}")
+_SIEQ_STRIP = re.compile(r"\\@sieqref@strip\s+S#1\\@nil\{#1\}")
+_MSEQ_SUFFIX = re.compile(
+    r"\\mseqmark#1#2#3\\relax\{.*?\\ifx#1e\\ifx#2q(.*?)\\fi\\fi\}", re.S)
+_SI_QUALIFIER = re.compile(r"\bSI\b|Supporting Information")
+_MAIN_QUALIFIER = re.compile(r"main[- ]text|\bmanuscript\b", re.I)
+
+
+def _label_numbers(text: str, kind: str) -> dict[str, str]:
+    return {label: number for which, label, number in _LABEL_NUMBER.findall(text) if which == kind}
+
+
+def _equation_suffix(si_text: str) -> str:
+    """The words \\msref appends when its label is an equation, with the leading space."""
+    match = _MSEQ_SUFFIX.search(si_text)
+    if match is None:
+        return ""
+    words = " ".join(match.group(1).replace("\\ ", " ").split())
+    return f" {words}" if words else ""
+
+
+def cross_document_equations(audit: Audit) -> None:
+    """A cross-document equation reference renders with its document prefix or a qualifier.
+
+    An SI equation keeps the S written in labels-si.tex, or the sentence names
+    the SI. A manuscript equation cited from the SI names the main text. The
+    same-document \\ref calls are the printed numbers of that document.
+    """
+    strips = _SIEQ_STRIP.search(audit.text("paper/jctc/macros.tex")) is not None
+    suffix = _equation_suffix(audit.text("paper/jctc/si.tex"))
+    si_numbers = _label_numbers(audit.text("paper/jctc/labels-si.tex"), "si")
+    ms_numbers = _label_numbers(audit.text("paper/jctc/labels-manuscript.tex"), "ms")
+    found = 0
+    for path, pattern, kind in (
+            ("paper/jctc/manuscript.tex", _CROSS_EQ_SI, "si"),
+            ("paper/jctc/si.tex", _CROSS_EQ_MAIN, "main")):
+        for number, line in enumerate(audit.text(path).splitlines(), 1):
+            code = re.sub(r"(?<!\\)%.*", "", line)
+            for match in pattern.finditer(code):
+                found += 1
+                label = match.group(1)
+                where = f"{path}:{number}"
+                if kind == "si":
+                    full = si_numbers.get(label)
+                    rendered = "" if full is None else (full[1:] if strips and full.startswith("S") else full)
+                    phrase = collapse(code[:match.start()] + rendered + code[match.end():])
+                    ok = full is not None and (rendered.startswith("S") or _SI_QUALIFIER.search(phrase) is not None)
+                    audit.record(ok, where, "an SI equation reference keeps its S or names the SI",
+                                 rendered or label, "S prefix or an SI qualifier")
+                else:
+                    full = ms_numbers.get(label)
+                    rendered = "" if full is None else full + suffix
+                    phrase = collapse(code[:match.start()] + rendered + code[match.end():])
+                    ok = full is not None and _MAIN_QUALIFIER.search(phrase) is not None
+                    audit.record(ok, where, "a manuscript equation reference names the main text",
+                                 rendered or label, "main text")
+    if not found:
+        audit.record(False, "paper/jctc", "a cross-document equation reference", "present", "none")
+
+
 def run(report: bool = False, write_map: bool = False, pre_submission: bool = False) -> int:
     problems = unauditable()
     if problems:
@@ -8115,7 +8177,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         morse_m70_pair, rerun_summaries,
         append_only_rows, tip4p_unscored, tip4p_r2_rows, pending_text, citation_metadata,
                   figure_source_scripts, bibliography_keys, conversion_literals,
-                  own_references, build_receipts, selection_tables, gmin_panel_drivers, prior_switches,
+                  own_references, build_receipts, cross_document_equations, selection_tables, gmin_panel_drivers, prior_switches,
                   method_definitions, au55_superseded, cap_turn_campaign):
         check(audit)
     if write_map:

@@ -8,7 +8,10 @@
 \graphicspath{{figs/}}
 \input{macros}
 \input{labels-manuscript}
-\newcommand{\msref}[1]{\csname ms@#1\endcsname}
+% A manuscript equation cited here names the main text. A section or a
+% table keeps the printed number.
+\newcommand{\msref}[1]{\csname ms@#1\endcsname\mseqmark#1:\relax}
+\def\mseqmark#1#2#3\relax{\ifx#1e\ifx#2q\ of the main text\fi\fi}
 \title{Template-free basin hopping with adaptive moves for funnelled
 cluster landscapes}
 \author{Rohit Goswami}
