@@ -22,6 +22,9 @@ PAPER_BUDGETS = {
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("ase_bh", "ase_mh", "anneal")
 ANNEAL_PRESET = "for_cluster"
+# for_cluster ends a hop when fewer than one relax step remains.
+# That step is 200 calls (cluster hopping Config relax_steps).
+ANNEAL_STEP_CALLS = 200
 CAPPED_SYSTEMS = frozenset({"lj98", "lj104", "au55"})
 CAPPED_ARMS = frozenset({"ase_mh", "anneal"})
 # Amendment A1, after preregistration 1308d867. These systems are not

@@ -854,7 +854,7 @@ def _worker_search(work: Path) -> None:
                 counter["best_x"] = np.asarray(best, dtype=np.float64).reshape(-1).copy()
         if counter["best"] <= level:
             stop = "hit"
-        elif counter["calls"] >= budget:
+        elif budget - protocol.ANNEAL_STEP_CALLS <= counter["calls"] <= budget:
             stop = "budget"
         else:
             raise RuntimeError(
@@ -864,7 +864,9 @@ def _worker_search(work: Path) -> None:
         raise RuntimeError("anneal did not record an energy")
     if stop == "cap" and counter["calls"] >= budget:
         stop = "budget"
-    if stop == "budget" and counter["calls"] != budget:
+    if stop == "budget" and not (
+        budget - protocol.ANNEAL_STEP_CALLS <= counter["calls"] <= budget
+    ):
         raise RuntimeError(f"budget stop recorded {counter['calls']} calls")
     publish("done", stop)
 

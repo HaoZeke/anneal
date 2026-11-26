@@ -140,7 +140,11 @@ def build_row(
         if production and cpu > wall + CPU_WALL_TOL_S:
             raise ValueError("cpu seconds exceed wall seconds")
     elif stop == "budget":
-        if calls != budget:
+        if cell.arm == "anneal":
+            allowed = budget - protocol.ANNEAL_STEP_CALLS <= calls <= budget
+        else:
+            allowed = calls == budget
+        if not allowed:
             raise ValueError("a budget stop spends the call budget")
     elif stop == "hit":
         if not 0 < calls <= budget:
