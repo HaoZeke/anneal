@@ -14,8 +14,8 @@
 # Each row carries the anneal revision it was measured on. A re-run
 # replaces rows of that revision and leaves the others in seeds.csv.
 set -euo pipefail
-if [[ $(hostname) != bench ]]; then
-  echo "uts hostname is $(hostname), expected bench" >&2
+if [[ $(python3 "$(dirname "$0")/../machine_provenance.py" host-label) != bench ]]; then
+  echo "uts hostname is $(python3 "$(dirname "$0")/../machine_provenance.py" host-label), expected bench" >&2
   exit 2
 fi
 unset H2H_GENERAL H2H_BASIN_STRIDE H2H_BUDGET H2H_BEST H2H_REFERENCE \
@@ -34,7 +34,7 @@ REF38=-130.54001708
 REF55=-191.03085280
 REV=${GOLD_REVISION:-$(git -C "$ROOT" rev-parse --short=12 HEAD)}
 CODE_REVISION=$(git -C "$ROOT" rev-parse HEAD)
-HOST=$(hostname)
+HOST=$(python3 "$(dirname "$0")/../machine_provenance.py" host-label)
 GOLD_HEADER="system,code,seed,budget,hit,evals_to_hit,charged,wall_s,best,pot_s,outside_s,revision,code_revision,gmin_build_key,host,machine_id,cpu_model"
 eval "$(
   PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 - "$GMIN_SVNREV" "$GMIN_SOURCE" <<'PY'
@@ -73,7 +73,7 @@ PY
 # A, p, q, xi, r0. Same printing as run_darby.py's {:.10g}.
 GOLD_ROW="0.2061 10.229 4.036 1.79 2.884"
 
-echo "GOLD_START $(date -u +%Y-%m-%dT%H:%M:%SZ) host=$(hostname)"
+echo "GOLD_START $(date -u +%Y-%m-%dT%H:%M:%SZ) host=$(python3 "$(dirname "$0")/../machine_provenance.py" host-label)"
 echo "HEAD $(git -C "$ROOT" rev-parse HEAD)"
 echo "BIN $BIN"
 echo "GMIN $GMIN"

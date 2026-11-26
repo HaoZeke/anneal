@@ -17,7 +17,7 @@ if [[ ! -e $IRA_LIB_DIR/libira.so ]]; then
   exit 1
 fi
 cd "$ROOT"
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 echo "rustc=$(rustc --version)"
 export HISTORY=${HISTORY:-none}
 export HISTORY_REPLICAS=${HISTORY_REPLICAS:-1}

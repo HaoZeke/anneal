@@ -4,7 +4,7 @@
 # Does not touch ~/anneal-build. Staging tree is ~/build/anneal-hunt.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_tm8k_hunt.sh: run under srun, not on $(hostname)" >&2
+  echo "elja_tm8k_hunt.sh: run under srun, not directly" >&2
   exit 1
 fi
 ROOT=${ANNEAL_ROOT:-$HOME/build/anneal-hunt}
@@ -34,7 +34,7 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/build/anneal-hunt/target}"
 export CARGO_NET_OFFLINE=true
 mkdir -p "$CARGO_TARGET_DIR"
 cd "$ROOT"
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 echo "rustc=$(rustc --version)"
 echo "gcc=$(gcc --version | awk 'NR == 1 { print }')"
 if [[ -f SOURCE_COMMIT ]]; then

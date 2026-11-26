@@ -65,12 +65,12 @@ fn species_rigid_and_molecular_configs_keep_the_preset_law() {
         assert!(rigid.move_library.is_rigid_body(), "{name}");
         assert!(rigid.surfaces.is_empty(), "{name}");
         let body_labels = vec![8_u32, 1, 1, 8];
-        let labelled = rigid.clone().with_species(body_labels, None);
-        assert_eq!(labelled.budget_window, rigid.budget_window, "{name}");
-        assert_eq!(labelled.temperature, rigid.temperature, "{name}");
-        assert!(labelled.move_library.is_rigid_body(), "{name}");
-        let json = labelled.resolved_json().expect("rigid species json");
-        assert_resolved_except_species(labelled, &rigid, name);
+        let labeled = rigid.clone().with_species(body_labels, None);
+        assert_eq!(labeled.budget_window, rigid.budget_window, "{name}");
+        assert_eq!(labeled.temperature, rigid.temperature, "{name}");
+        assert!(labeled.move_library.is_rigid_body(), "{name}");
+        let json = labeled.resolved_json().expect("rigid species json");
+        assert_resolved_except_species(labeled, &rigid, name);
         assert!(
             json.contains("\"budget_window\":false"),
             "{name} resolved {json}"

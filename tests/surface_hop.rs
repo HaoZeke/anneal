@@ -65,7 +65,7 @@ fn one_surface_hop_takes_the_9_6_78_shelf_to_the_global_minimum() {
     );
 }
 
-/// The legacy flag no longer feeds surface analysis back into the search.
+/// The legacy flag does not feed surface analysis back into the search.
 #[test]
 fn surface_hops_run_from_new_bests_only_when_asked() {
     let shelf = structure(include_str!("fixtures/sc96_78_shelf.xyz"));

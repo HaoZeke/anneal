@@ -27,6 +27,7 @@ mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$RUNS" "$LOGS" "$STARTS78"
 cp -a "$HERE/run_sc.py" "$HERE/run_sc_n12.py" \
   "$HERE/run_sc96_gmin.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 chmod +x "$WORK/bin/h2h_sc" "$WORK/bin/GMIN" "$WORK/bin/run_sc96_gmin.py"
 
 # The N=78 starts and the Cambridge energy need numpy and the network, so

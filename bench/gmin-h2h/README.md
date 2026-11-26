@@ -23,11 +23,14 @@ Every new per-seed and summary row keeps `host`, whose value remains the
 compatibility UTS name `bench`. Each row adds:
 
 - `machine_id`: lowercase hexadecimal SHA-256 of the public salt
-  `anneal-bench-machine-id-v1` followed by a NUL byte and the stripped
-  contents of `/etc/machine-id`. If that file is absent or empty, the
-  stripped DMI `/sys/class/dmi/id/product_uuid` is used instead.
-- `cpu_model`: the first CPU model string from `/proc/cpuinfo`, normalized
-  to single spaces.
+  `anneal-bench-machine-id-v1` followed by a NUL byte and the machine
+  identifier. On Linux the identifier is the stripped contents of
+  `/etc/machine-id`; if that file is absent or empty, the stripped DMI
+  `/sys/class/dmi/id/product_uuid` is used instead. On macOS it is the
+  hardware UUID (`IOPlatformUUID`) from `ioreg`.
+- `cpu_model`: the first CPU model string, normalized to single spaces.
+  On Linux it comes from `/proc/cpuinfo`; on macOS from
+  `sysctl -n machdep.cpu.brand_string`.
 
 The patched GMIN per-seed row records two non-overlapping counters:
 

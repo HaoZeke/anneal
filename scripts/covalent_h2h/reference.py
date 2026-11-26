@@ -23,7 +23,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
-from machine_provenance import machine_columns  # noqa: E402
+from machine_provenance import host_label, machine_columns  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 
 SYSTEMS = ("sw10", "sw13", "sw20", "tc10", "tc20")
@@ -140,7 +140,7 @@ def main(argv: list[str]) -> int:
                     budget,
                     f"{best:.8f}",
                     revision,
-                    os.uname().nodename,
+                    host_label(os.uname().nodename),
                     machine["machine_id"],
                     machine["cpu_model"],
                 ]

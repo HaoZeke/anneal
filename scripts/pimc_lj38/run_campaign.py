@@ -40,7 +40,9 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
     if (_candidate / "target_tol.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
+import revision_reach  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 PAPER_BUDGETS = {38: 400_000}
 SEEDS = (2000, 2001, 2002, 2003, 2004, 2005)
@@ -559,7 +561,7 @@ def run_rpqa(
         "stop": stop,
         "reached": str(n),
         "code_revision": code_revision,
-        "host": os.uname().nodename,
+        "host": host_label(os.uname().nodename),
         "_pins": str(n_pins),
     }
     rated = with_rates(row)
@@ -633,7 +635,7 @@ def summarise(rows: list[dict[str, str]], seeds: tuple[int, ...], source: dict[s
                 "anneal_head": head,
                 "code_revision": head if arm == "anneal" else source["rpqa_commit"],
                 "schedule": "",
-                "host": os.uname().nodename,
+                "host": host_label(os.uname().nodename),
             }
         )
     return out
@@ -767,7 +769,7 @@ def anneal_reference(summary_path: Path, rows_dir: Path | None = None) -> tuple[
         root = rows_dir / "lj38"
         named = []
         if root.is_dir():
-            named = [path.name for path in root.iterdir() if path.is_dir() and is_revision(path.name)]
+            named = [path.name for path in root.iterdir() if path.is_dir() and revision_reach.is_full_sha(path.name)]
         preferred = [row for row in anneal_rows if row.get("code_revision") in named]
         if len(preferred) == 1:
             return float(preferred[0]["wall_median_s"]), preferred[0]["anneal_head"]
@@ -813,7 +815,7 @@ def summarise_paper(
             "anneal_head": anneal_head,
             "code_revision": source["rpqa_commit"],
             "schedule": schedule,
-            "host": os.uname().nodename,
+            "host": host_label(os.uname().nodename),
         }
     ]
 
@@ -887,13 +889,9 @@ def seed_path(rows: Path, seed: int, arm: str, n: int = 38) -> Path:
     return rows / f"lj{n}" / f"{arm}-{seed}.row"
 
 
-def is_revision(name: str) -> bool:
-    return len(name) == 40 and not name.strip("0123456789abcdef")
-
-
 def anneal_revision_path(rows: Path, n: int, revision: str, seed: int) -> Path:
     """New anneal measurements sit beside the original row file, keyed by revision."""
-    if not is_revision(revision):
+    if not revision_reach.is_full_sha(revision):
         raise RuntimeError(f"anneal revision {revision!r} is not a commit")
     return rows / f"lj{n}" / revision / f"anneal-{seed}.row"
 
@@ -914,7 +912,7 @@ def revision_from_seeds(
         if item.get("evals_to_hit") != row["evals_to_hit"] or item.get("best") != row["best"]:
             continue
         revision = item.get("code_revision", "")
-        if is_revision(revision):
+        if revision_reach.is_full_sha(revision):
             matches.append(revision)
     if len(set(matches)) != 1:
         raise RuntimeError(f"LJ{n} anneal seed {seed} matches revisions {matches}")
@@ -935,7 +933,7 @@ def load_anneal_revisions(
         if row is None:
             legacy = []
             break
-        if not is_revision(row.get("code_revision", "")):
+        if not revision_reach.is_full_sha(row.get("code_revision", "")):
             if seeds_file is None:
                 raise RuntimeError(f"legacy anneal seed {seed} has no revision")
             row["code_revision"] = revision_from_seeds(seeds_file, n, seed, row)
@@ -947,7 +945,7 @@ def load_anneal_revisions(
         found[legacy[0]["code_revision"]] = legacy
     if root.is_dir():
         for child in sorted(root.iterdir()):
-            if not child.is_dir() or not is_revision(child.name):
+            if not child.is_dir() or not revision_reach.is_full_sha(child.name):
                 continue
             group = []
             for seed in SEEDS:
@@ -1197,7 +1195,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
         return 0
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()

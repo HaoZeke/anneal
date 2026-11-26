@@ -24,7 +24,7 @@ for _candidate in (HERE, HERE.parent):
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import machine_columns  # noqa: E402
+from machine_provenance import host_label, machine_columns  # noqa: E402
 
 # Copied from the Cambridge table before the runs. The fixture must match.
 LOCKED = {
@@ -211,7 +211,7 @@ def seed_table(rows: list[dict]) -> str:
 
 
 def main() -> int:
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()
@@ -263,7 +263,7 @@ def main() -> int:
                         args.max_iter,
                     )
                 row["code_revision"] = args.anneal_revision if arm == "lean" else args.bonobo_revision
-                row["host"] = os.uname().nodename
+                row["host"] = host_label(os.uname().nodename)
                 row.update(machine)
                 rows.append(row)
                 print(

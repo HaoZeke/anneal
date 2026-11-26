@@ -91,11 +91,17 @@ pub const GFN2_MAX_ITERATIONS: i32 = 500;
 /// Receiving-side Euclidean gradient-norm gate for GFN2 stationary points.
 pub const MAX_GRADIENT_NORM: f64 = 1e-5;
 
-/// Hartree in electron-volts.
-pub const HARTREE_EV: f64 = 27.211386245988;
+/// Hartree in electron-volts (CODATA 2018), from `readcon_core::units`.
+pub fn hartree_ev() -> f64 {
+    readcon_core::units::unit_conversion_factor("Hartree", "eV")
+        .expect("Hartree and eV share an energy dimension")
+}
 
-/// Bohr in angstroms.
-pub const BOHR_ANGSTROM: f64 = 0.529177210903;
+/// Bohr in angstroms (CODATA 2018), from `readcon_core::units`.
+pub fn bohr_angstrom() -> f64 {
+    readcon_core::units::unit_conversion_factor("Bohr", "Angstrom")
+        .expect("Bohr and Angstrom share a length dimension")
+}
 
 /// Gradient convergence of the CREST `--opt extreme` reoptimization, Eh/Bohr.
 pub const PRISM_REOPT_GRADIENT_EH_PER_BOHR: f64 = 5.0e-5;
@@ -107,7 +113,7 @@ pub const PRISM_REOPT_GRADIENT_EH_PER_BOHR: f64 = 5.0e-5;
 /// geometry. Zero is the default, so a search that never sets
 /// [`Config::answer_gradient`] does not run this pass.
 pub fn reference_prism_gradient_ev_per_angstrom() -> f64 {
-    PRISM_REOPT_GRADIENT_EH_PER_BOHR * HARTREE_EV / BOHR_ANGSTROM
+    PRISM_REOPT_GRADIENT_EH_PER_BOHR * hartree_ev() / bohr_angstrom()
 }
 
 /// Vacuum box edge used by `molecular_cluster` (A).
@@ -609,14 +615,16 @@ pub const GOOD_TURING_CHECKPOINT_INTERVAL: usize = 1;
 /// Record and quench gradient of the water arms (eV/A).
 ///
 /// This is the `vtight` gradient threshold of xtb, 2e-4 Eh/bohr, in eV/A
-/// with the CODATA 2018 hartree and bohr. The record ranks basins on
+/// with the CODATA 2018 hartree and bohr from `readcon_core::units`. The record ranks basins on
 /// quenched energies, so the quench error has to sit below the gap
 /// between basins. At the GFN2 hexamer minimum the softest projected
 /// Hessian eigenvalue is 0.032 eV/A^2 and the next basin is 4.5 meV up,
 /// so the quadratic model asks for `|g|` below sqrt(0.032 * 0.0045), about
 /// 1.2e-2 eV/A. The molecular preset's 5e-2 left recorded energies up to
 /// 0.3 eV above their own minima and ranked a higher basin first.
-pub const WATER_RECORD_GRADIENT: f64 = 2.0e-4 * 27.211_386_245_988 / 0.529_177_210_903;
+pub fn water_record_gradient() -> f64 {
+    2.0e-4 * hartree_ev() / bohr_angstrom()
+}
 
 /// Energy above the incumbent at which a water walk relaunches from it.
 ///
@@ -666,9 +674,9 @@ pub enum WaterSearchArm {
 ///
 /// The move library is left as the caller set it. The atomic two-phase
 /// surface is not copied onto these arms. Every arm records at
-/// [`WATER_RECORD_GRADIENT`].
+/// [`water_record_gradient`].
 pub fn configure_water_arm(cfg: &mut Config, arm: WaterSearchArm) {
-    cfg.record_gradient = WATER_RECORD_GRADIENT;
+    cfg.record_gradient = water_record_gradient();
     // The split screen does not identify a GFN2 hexamer basin, and a
     // walk that has climbed off its best minimum does not find the prism
     // by sampling that high basin. Both apply to every water arm.
@@ -1435,8 +1443,16 @@ mod water_hexamer_tests {
         ] {
             let mut cfg = Config::recommended_molecular(species.clone(), groups.clone(), 1.0);
             configure_water_arm(&mut cfg, arm);
-            assert_eq!(cfg.record_gradient, WATER_RECORD_GRADIENT);
-            assert!((WATER_RECORD_GRADIENT - 1.0285e-2).abs() < 1e-6);
+            assert_eq!(cfg.record_gradient, water_record_gradient());
+            assert!((water_record_gradient() - 1.0285e-2).abs() < 1e-6);
+            assert_eq!(
+                hartree_ev().to_bits(),
+                (4.359_744_722_207_1e-18_f64 / 1.602_176_634e-19_f64).to_bits()
+            );
+            assert_eq!(
+                bohr_angstrom().to_bits(),
+                (5.291_772_109_03e-11_f64 / 1.0e-10_f64).to_bits()
+            );
             assert!(cfg.target_energy.is_none());
             assert!(cfg.quench_once);
             let weights_improvements = matches!(

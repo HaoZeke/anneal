@@ -6,7 +6,7 @@
 # load libgfortran/libquadmath without a module.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_rebuild_ira.sh: run under srun, not on $(hostname)" >&2
+  echo "elja_rebuild_ira.sh: run under srun, not directly" >&2
   exit 1
 fi
 GCC=${GCC_ROOT:-/opt/ohpc/pub/compiler/gcc/12.4.0}
@@ -19,7 +19,7 @@ if [[ ! -e $SYS/crti.o ]]; then
   exit 1
 fi
 export LIBRARY_PATH="${SYS}:${GCCLIB}:/usr/lib64:${LIBRARY_PATH:-}"
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$(dirname "$0")/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 lscpu | grep -E "Model name|Vendor ID" || true
 if [[ ! -d $IRA/src ]]; then
   echo "missing $IRA/src" >&2

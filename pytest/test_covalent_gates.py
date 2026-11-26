@@ -364,6 +364,20 @@ def test_rescore_preserves_legacy_and_appends_v2_rows(tmp_path, monkeypatch):
     assert {row["code_revision"] for row in written} == {"0" * 40, "1" * 40}
 
 
+def test_gfn2_crest_second_write_appends_without_replacing(tmp_path):
+    crest = load("gfn2_crest_append", "scripts/covalent_h2h/gfn2_crest.py")
+    path = tmp_path / "rows.csv"
+    fields = ["system", "seed"]
+    crest.append_rows(path, fields, [{"system": "si13", "seed": "2000"}])
+    first = path.read_bytes()
+    crest.append_rows(path, fields, [{"system": "si13", "seed": "2000"}])
+    assert path.read_bytes().startswith(first)
+    assert read(path) == [
+        {"system": "si13", "seed": "2000"},
+        {"system": "si13", "seed": "2000"},
+    ]
+
+
 def test_the_committed_panel_is_the_same_on_every_seed(capsys):
     pytest.importorskip("scipy.stats")
     arm_gate.summary(argparse.Namespace(rows=PANEL_ROWS, arms=["develop", "floor"]))

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import csv
 import math
-import re
 import sys
 from pathlib import Path
 
@@ -19,6 +18,7 @@ if str(ROOT / "scripts") not in sys.path:
 from paired_stats import fisher_exact  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import csv_fields  # noqa: E402
+import revision_reach  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 SYSTEMS = ("m38r6", "m38r14", "m55r6", "m55r14")
@@ -117,7 +117,7 @@ def load_rows() -> dict[str, dict[str, list[dict[str, str]]]]:
         charged = int(row["charged"])
         if not 0 < charged <= budget:
             raise SystemExit(f"invalid charged count {row}")
-        if not re.fullmatch(r"[0-9a-f]{40}", row["code_revision"]):
+        if not revision_reach.is_full_sha(row["code_revision"]):
             raise SystemExit(f"invalid revision {row}")
         hit = row["hit"] == "1"
         if row["hit"] not in {"0", "1"} or hit != bool(row["evals_to_hit"]):

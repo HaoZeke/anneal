@@ -182,7 +182,7 @@ if [[ ! -f $SOURCE_COMMIT_FILE ]]; then
   exit 2
 fi
 IFS= read -r SOURCE_COMMIT <"$SOURCE_COMMIT_FILE"
-if [[ ! $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+if ! python3 "$SOURCE_ROOT/scripts/revision_reach.py" full-sha "$SOURCE_COMMIT"; then
   echo "source commit record must contain one full Git object ID" >&2
   exit 2
 fi
@@ -495,7 +495,7 @@ calibration_sha256=$(sha256sum "$CALIBRATION" | awk '{print $1}')
   printf 'qualifier_sha256=%s\n' "$qualifier_sha256"
   printf 'calibration_sha256=%s\n' "$calibration_sha256"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
-  printf 'host=%s\n' "$(hostname)"
+  printf 'host=%s\n' "$(python3 "$SOURCE_ROOT/scripts/machine_provenance.py" host-label)"
 } >"$OUT/run.manifest"
 
 printf 'replicas %s solved %s best %s source %s arm %s\n' \

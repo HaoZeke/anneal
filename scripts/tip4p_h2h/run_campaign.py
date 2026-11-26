@@ -23,6 +23,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 # The (H2O)20 paper ceiling. (H2O)15 is scored at the same ceiling:
 # three of its four hits in the six-seed set fall between the 5e5
@@ -188,8 +189,8 @@ def main() -> int:
     parser.add_argument("--size", type=int)
     parser.add_argument("--seed", type=int)
     args = parser.parse_args()
-    if socket.gethostname() != "bench":
-        print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
+    if host_label(socket.gethostname()) != "bench":
+        print(f"hostname is {host_label(socket.gethostname())}, not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)

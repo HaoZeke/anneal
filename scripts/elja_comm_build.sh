@@ -4,7 +4,7 @@
 # Does not touch ~/anneal-build.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_comm_build.sh: run under srun/sbatch, not on $(hostname)" >&2
+  echo "elja_comm_build.sh: run under srun/sbatch, not directly" >&2
   exit 1
 fi
 ROOT=${ANNEAL_ROOT:-$HOME/build/anneal-hunt}
@@ -43,7 +43,7 @@ if [[ ! -e $IRA_LIB_DIR/libira.so ]]; then
   exit 1
 fi
 cd "$ROOT"
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 echo "rustc=$(rustc --version)"
 echo "source=$(cat SOURCE_COMMIT 2>/dev/null || echo unknown)"
 cargo build --offline --locked --release --features featomic,ira,bank-rpc \

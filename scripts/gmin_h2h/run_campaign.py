@@ -32,7 +32,9 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
-    machine_provenance,
+    host_label,
+    machine_columns,
+    machine_provenance,  # noqa: F401
     read_built_gmin_source,
     require_gmin_build_key,
     validate_saved_gmin_provenance,
@@ -245,7 +247,7 @@ def write_per_seed_row(
             "gmin_build_key": gmin_build_key or row.get("gmin_build_key", ""),
             "anneal_head": resolved_head,
             "code_revision": resolved_code,
-            "host": row.get("host") or os.uname().nodename,
+            "host": row.get("host") or host_label(os.uname().nodename),
             "machine_id": machine_id,
             "cpu_model": cpu_model,
         }
@@ -499,7 +501,7 @@ def summarise(
                     "gmin_revision": resolved_revision,
                     "anneal_head": resolved_head,
                     "code_revision": arm_code_rev,
-                    "host": ";".join(hosts) if hosts else os.uname().nodename,
+                    "host": ";".join(hosts) if hosts else host_label(os.uname().nodename),
                     "machine_id": ";".join(mids) if mids else machine_id,
                     "cpu_model": ";".join(cpus) if cpus else cpu_model,
                 }
@@ -659,7 +661,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
         return 0
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()
@@ -692,7 +694,8 @@ def main(argv: list[str]) -> int:
     except ValueError as error:
         raise SystemExit(str(error)) from error
     head = args.head_file.read_text().strip()
-    machine_id, cpu_model = machine_provenance()
+    machine = machine_columns()
+    machine_id, cpu_model = machine["machine_id"], machine["cpu_model"]
     progress = args.runs.parent / "progress.txt"
     progress.parent.mkdir(parents=True, exist_ok=True)
     order = schedule(sizes, seeds, arms, SCHEDULE_SEED)

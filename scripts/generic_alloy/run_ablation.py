@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Serial ablation of the labelled-cluster search on the Gupta alloys.
+"""Serial ablation of the labeled-cluster search on the Gupta alloys.
 
 Two builds take part: ``develop`` and ``branch``. Each arm is one build
 with an environment. With the priors off (``H2H_PRIORS=0``) the arms are
@@ -53,7 +53,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
-from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
+from machine_provenance import host_label, machine_columns, require_csv_schema  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 WIDE_SEEDS = tuple(range(2000, 2024))
@@ -275,15 +275,6 @@ def schedule(
         rng.shuffle(jobs)
         order.extend(jobs)
     return order
-
-
-def cpu_model() -> str:
-    cpuinfo = Path("/proc/cpuinfo")
-    if cpuinfo.is_file():
-        for line in cpuinfo.read_text().splitlines():
-            if line.startswith("model name"):
-                return line.split(":", 1)[1].strip()
-    return machine_columns()["cpu_model"]
 
 
 def single_thread_env() -> dict[str, str]:
@@ -603,7 +594,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
         return 0
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()
@@ -630,9 +621,9 @@ def main(argv: list[str]) -> int:
     arms = {
         name: (build, priors, homotop, extra) for name, build, priors, homotop, extra in spec["arms"]
     }
-    host = os.uname().nodename
-    cpu = cpu_model()
+    host = host_label(os.uname().nodename)
     machine = machine_columns()
+    cpu = machine["cpu_model"]
     args.rows.parent.mkdir(parents=True, exist_ok=True)
     args.logs.mkdir(parents=True, exist_ok=True)
     done = {

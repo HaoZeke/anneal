@@ -2,6 +2,11 @@
 """The label a benchmark row carries for the machine that made it."""
 
 import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import machine_provenance  # noqa: E402
 
 
 def host_label() -> str:
@@ -10,12 +15,15 @@ def host_label() -> str:
     The machine's own hostname is never written into a row. The bench
     namespace sets the hostname ``bench`` by construction, so that name is
     the one the label may echo; any other hostname is a machine's name, not
-    a property of the run.
+    a property of the run. The name is passed only to
+    ``machine_provenance.host_label``.
     """
     label = os.environ.get("BENCH_HOST", "").strip()
     if label:
         return label
-    return "bench" if os.uname().nodename == "bench" else "unlabelled"
+    if machine_provenance.host_label(os.uname().nodename) == "bench":
+        return "bench"
+    return "unlabelled"
 
 
 def run_host(info: dict) -> str:

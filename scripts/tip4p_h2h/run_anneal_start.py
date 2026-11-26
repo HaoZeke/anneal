@@ -23,6 +23,8 @@ from pathlib import Path
 
 from run_radius import FIELDS, RADII, SEEDS, append_row, lj_container, run_gmin
 from run_start import START_TOL, gmin_start_energy, run_anneal, summarise, write_start
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import host_label  # noqa: E402
 
 ANNEAL_CODE = "anneal-79c13d53"
 SIZES = (15, 20)
@@ -35,8 +37,8 @@ def recorded_rows(path: Path) -> dict[tuple[str, str, str], dict[str, str]]:
 
 
 def main() -> int:
-    if socket.gethostname() != "bench":
-        print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
+    if host_label(socket.gethostname()) != "bench":
+        print(f"hostname is {host_label(socket.gethostname())}, not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)

@@ -4,7 +4,7 @@
 # Same 4e6 one-chain budget as tbl:comb recommended 4/48 and o75-orbit 31/48.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_comm75_one.sh: run under sbatch, not on $(hostname)" >&2
+  echo "elja_comm75_one.sh: run under sbatch, not directly" >&2
   exit 1
 fi
 ROOT=${ANNEAL_ROOT:-$HOME/build/anneal-hunt}
@@ -26,7 +26,7 @@ fi
 export SEED_OFFSET=${SEED_OFFSET:-${SLURM_ARRAY_TASK_ID:-0}}
 OUT=${COMM_OUT:-$ROOT/comm75}
 mkdir -p "$OUT"
-echo "host=$(hostname) job=$SLURM_JOB_ID seed=$SEED_OFFSET"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID seed=$SEED_OFFSET"
 echo "RUN $BIN 75 4000000 1 comm"
 "$BIN" 75 4000000 1 comm | tee "$OUT/seed${SEED_OFFSET}.out"
 if grep -q 'verified -397.492331' "$OUT/seed${SEED_OFFSET}.out" \

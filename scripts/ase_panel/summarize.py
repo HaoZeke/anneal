@@ -19,6 +19,7 @@ if str(ROOT / "scripts") not in sys.path:
 from paired_stats import fisher_exact  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import csv_fields  # noqa: E402
+import revision_reach  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
@@ -125,10 +126,10 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
             or not valid_host
         ):
             raise SystemExit(f"unexpected row {row}")
-        if not re.fullmatch(r"[0-9a-f]{40}", row["code_revision"]):
+        if not revision_reach.is_full_sha(row["code_revision"]):
             raise SystemExit(f"invalid revision {row}")
         if is_rerun:
-            if not re.fullmatch(r"[0-9a-f]{40}", row["harness_blob"]):
+            if not revision_reach.is_full_sha(row["harness_blob"]):
                 raise SystemExit(f"invalid harness blob {row}")
             if row["ase_version"] != ASE_VERSION or not re.fullmatch(r"[0-9a-f]+", row["session"]):
                 raise SystemExit(f"invalid ase version or session {row}")

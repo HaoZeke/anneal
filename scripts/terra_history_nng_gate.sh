@@ -10,6 +10,6 @@ ROOT=${ANNEAL_ROOT:-$HOME/build/anneal-nng-rpc/src}
 export PATH="${HOME}/.cargo/bin:/usr/bin:${PATH}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/build/anneal-nng-rpc/target}"
 cd "$ROOT"
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 cargo test --features history-nng --lib history_nng -- --nocapture
 echo HISTORY_NNG_OK

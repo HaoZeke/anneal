@@ -1685,13 +1685,13 @@ def test_metal_gold_shell_rejects_mismatched_build_key_and_stamps_gmin_provenanc
     svnrev, gmin_source = _write_gmin_meta(tmp_path / "meta", build_key=EXPECTED_KEY)
     shims = tmp_path / "shims"
     shims.mkdir()
-    for cmd_name, body in (
-        ("hostname", "#!/bin/sh\necho bench\n"),
-        ("taskset", '#!/bin/sh\nshift 2\nexec "$@"\n'),
-    ):
+    for cmd_name, body in (("taskset", '#!/bin/sh\nshift 2\nexec "$@"\n'),):
         p = shims / cmd_name
         p.write_text(body)
         p.chmod(0o755)
+    (shims / "sitecustomize.py").write_text(
+        "import socket\nsocket.gethostname = lambda: 'bench'\n"
+    )
 
     fake_bin = tmp_path / "h2h_metal"
     fake_bin.write_text(
@@ -1765,6 +1765,7 @@ def test_metal_gold_shell_rejects_mismatched_build_key_and_stamps_gmin_provenanc
     env.update(
         {
             "PATH": f"{shims}{os.pathsep}{env.get('PATH', '')}",
+            "PYTHONPATH": f"{shims}{os.pathsep}{env.get('PYTHONPATH', '')}",
             "BIN": str(fake_bin),
             "GMIN": str(fake_gmin),
             "WORK": str(tmp_path / "work"),
