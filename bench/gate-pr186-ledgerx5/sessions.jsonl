@@ -1,0 +1,57 @@
+{"key": "a_ref", "value": "c425635bf564a989b180adc3311ded09066f73d6"}
+{"key": "a_tree", "value": "4881d7958b8ee1b16793d9ba98bb612c61ca0bbe"}
+{"key": "b_ref", "value": "452fb3312edcb211530da59647723e6db9b5796d"}
+{"key": "b_tree", "value": "ce5ca62555e072c92435d95a5d0a0c31f775ad0e"}
+{"key": "b_harness_tree", "value": "ce5ca62555e072c92435d95a5d0a0c31f775ad0e"}
+{"key": "harness_revision", "value": "6f7680e67f7839b4bf9ae6b44f73927efeb25f61"}
+{"key": "harness_tree", "value": "08e907c0ae0a12b30e523e843349aa1083211119"}
+{"key": "harness_blobs", "value": "PROTOCOL.md:ee4b87aeb149c58222ec71b4afad3dccc25f5aec run_gate.py:fbe6982ec531286ccabd8a6198297c0d4d5bead2 guard_trace.rs:65ff8d15296b4c0f8a7540499fc0686243327019 analyze.py:3642c96cf2b7efe17d22aa9e92169debe4b3cc2c rdff_count.c:0af1ff4057b501825fad5dc957a4ecbbf5e23704"}
+{"key": "host", "value": "unlabelled"}
+{"key": "machine_id", "value": "3b1b725a97e4e3fc407fe86011128eed3413f48e895d03fa0514e1a70eb8a61a"}
+{"key": "cpu_model", "value": "Intel(R) Xeon(R) Processor"}
+{"key": "seeds", "value": "2000-2011"}
+{"key": "n", "value": "12"}
+{"key": "core", "value": "0"}
+{"key": "threads", "value": "1"}
+{"key": "schedule", "value": "cad24d527dd972c274c37799b7f5b5a232cfb500de0ed4e401a5b49334e095ef"}
+{"key": "a_revision", "value": "c425635bf564a989b180adc3311ded09066f73d6"}
+{"key": "a_tree_resolved", "value": "4881d7958b8ee1b16793d9ba98bb612c61ca0bbe"}
+{"key": "b_revision", "value": "452fb3312edcb211530da59647723e6db9b5796d"}
+{"key": "b_tree_resolved", "value": "ce5ca62555e072c92435d95a5d0a0c31f775ad0e"}
+{"key": "a2_revision", "value": "c425635bf564a989b180adc3311ded09066f73d6"}
+{"key": "a2_tree", "value": "4881d7958b8ee1b16793d9ba98bb612c61ca0bbe"}
+{"key": "build_a", "value": "6cb1f95189fac52297b8349eff62d4b901229698fcb95707f22cb71d9b64e9a3"}
+{"key": "build_b", "value": "34d580edcd78b104704ed7ac9fdad94c7c40b76f6ce5970de0b51af2407d54a5"}
+{"key": "build_a2", "value": "6cb1f95189fac52297b8349eff62d4b901229698fcb95707f22cb71d9b64e9a3"}
+{"key": "ext_a", "value": "0f9c7dad8a78d21a7c6762f8cd43e706df21f569155ce8eab439480ed825ac64"}
+{"key": "ext_b", "value": "d5154211020ca4c43c46c3a3209df7cf13e13c6d5890d7476e206ade38fe8475"}
+{"key": "ext_a2", "value": "0f9c7dad8a78d21a7c6762f8cd43e706df21f569155ce8eab439480ed825ac64"}
+{"key": "ncpu", "value": "8"}
+{"key": "mem_kib", "value": "49342816"}
+{"key": "live_develop", "value": "c425635bf564a989b180adc3311ded09066f73d6"}
+{"key": "p_ref", "value": "3f4cfa63245e3d5e27158af565a26d48e4ff9b74"}
+{"key": "p_tree", "value": "57c31d79842ff962d417bd1c5dd54f3c4ac3b7c1"}
+{"key": "build_p", "value": "04dca719f5c8ac444842c8e564242992f62d355827148079961ae381fdbd1cb4"}
+{"key": "ext_p", "value": "d7ad8d44377c0c57726ac592a474a0de25f32fa3b53e46d078d130b799525c4f"}
+{"key": "balance_rq3", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_915", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_xld", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_fluvastatin", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_z34", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_amprenavir", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_lopinavir", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_lorlatinib", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_lj38", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_m38r14d", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_lj75", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_lj98", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_m80r6", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_au55", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "balance_hexamer", "value": "0:A=6 1:B=6 2:Ap=6 3:Ap=6 4:B=6 5:A=6"}
+{"key": "budget_lj38", "value": "400000"}
+{"key": "budget_m38r14d", "value": "400000"}
+{"key": "budget_lj75", "value": "4000000"}
+{"key": "budget_lj98", "value": "4000000"}
+{"key": "budget_m80r6", "value": "4000000"}
+{"key": "budget_au55", "value": "1000000"}
+{"key": "budget_hexamer", "value": "500000"}
