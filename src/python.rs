@@ -2989,6 +2989,17 @@ impl PyClusterConfig {
         self.inner.tabu_on_stall
     }
 
+    /// Polish the incumbent when a hop improves it.
+    #[getter]
+    fn polish_on_improve(&self) -> bool {
+        self.inner.polish_on_improve
+    }
+
+    #[setter]
+    fn set_polish_on_improve(&mut self, on: bool) {
+        self.inner.polish_on_improve = on;
+    }
+
     /// Cost-asymmetric Bayes-screen threshold, if that screen is on.
     #[getter]
     fn bayes_threshold(&self) -> f64 {
@@ -3549,6 +3560,10 @@ fn rigid_probe(
 ///     search, the temperature and deposit height are read from the opening
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
+///   polish_on_improve: `Config::polish_on_improve`. When a hop improves
+///     the incumbent, polish that point at the component gradient
+///     tolerance and charge every evaluation. Unset keeps the preset's,
+///     which is off.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3579,6 +3594,7 @@ fn rigid_probe(
     ring_moves = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
+    polish_on_improve = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3605,6 +3621,7 @@ fn cluster_search(
     ring_moves: Option<bool>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
+    polish_on_improve: Option<bool>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
     use crate::methods::tric_opt::LocalStep;
@@ -3820,6 +3837,9 @@ fn cluster_search(
         if let Some(labels) = species {
             cfg = cfg.with_species(labels, sigmas);
         }
+    }
+    if let Some(polish) = polish_on_improve {
+        cfg.polish_on_improve = polish;
     }
     let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());

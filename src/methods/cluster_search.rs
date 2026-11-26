@@ -1517,6 +1517,9 @@ pub fn search<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    if cfg.polish_on_improve {
+        return search_polishing(objective, cfg, ledger, seed);
+    }
     let search_started = Instant::now();
     let mut stats = RelaxStats::default();
     let requested_reserve = molecular_answer_reserve(cfg, ledger);
@@ -1612,6 +1615,9 @@ where
 {
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
+    if cfg.polish_on_improve {
+        return search_from_polishing(objective, cfg, ledger, start, seed);
+    }
     let search_started = Instant::now();
     let mut stats = RelaxStats::default();
     let requested_reserve = molecular_answer_reserve(cfg, ledger);
@@ -1643,6 +1649,148 @@ where
             &mut rng,
         )
     };
+    if let Some(hold) = hold.as_mut() {
+        ledger.release_tail(hold);
+    }
+    let mut out = searched?;
+    if hold.is_some() {
+        finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
+    }
+    Ok(finish_search(
+        objective,
+        cfg,
+        ledger,
+        out,
+        stats,
+        search_started,
+    ))
+}
+
+fn bind_improve_polish<'a, O>(
+    objective: &'a O,
+    cfg: &'a Config,
+    side: &'a RefCell<RelaxStats>,
+) -> impl FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + 'a
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    move |led, state| {
+        let mut stats = side.borrow_mut();
+        polish_improved_answer(objective, cfg, led, &mut stats, state)
+    }
+}
+
+fn fold_polish_stats(stats: &mut RelaxStats, side: RefCell<RelaxStats>) {
+    stats.overlap_rejected += side.into_inner().overlap_rejected;
+}
+
+fn search_polishing<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    seed: u64,
+) -> Result<(Outcome, RelaxStats), SearchError>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let search_started = Instant::now();
+    let mut stats = RelaxStats::default();
+    let requested_reserve = molecular_answer_reserve(cfg, ledger);
+    let mut hold = (requested_reserve > 0).then(|| {
+        ledger.keep_answer_seats(crate::methods::stall_archive::SEATS);
+        ledger.hold_tail(requested_reserve)
+    });
+    let side = RefCell::new(RelaxStats::default());
+    let searched = {
+        let paid = PaidCheck::default();
+        let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
+        let mut grad = gated_grad(objective, &paid);
+        let mut energy_anchor = None;
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if CallWall::of(cfg).refuses(x) {
+                    return None;
+                }
+                if !led.charge() {
+                    return None;
+                }
+                evaluated_pair(objective, x, &mut energy_anchor)
+                    .map(|(energy, gradient, _)| (energy, gradient))
+            };
+        let mut polish = bind_improve_polish(objective, cfg, &side);
+        crate::methods::cluster_hopping::optimize_with_energy_gradient_polished(
+            cfg,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            Some(&mut energy_grad),
+            Some(&mut polish),
+            seed,
+        )
+    };
+    fold_polish_stats(&mut stats, side);
+    if let Some(hold) = hold.as_mut() {
+        ledger.release_tail(hold);
+    }
+    let mut out = searched?;
+    if hold.is_some() {
+        finish_molecular_answers(objective, cfg, ledger, &mut stats, &mut out);
+    }
+    Ok(finish_search(
+        objective,
+        cfg,
+        ledger,
+        out,
+        stats,
+        search_started,
+    ))
+}
+
+fn search_from_polishing<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+) -> Result<(Outcome, RelaxStats), SearchError>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let search_started = Instant::now();
+    let mut stats = RelaxStats::default();
+    let requested_reserve = molecular_answer_reserve(cfg, ledger);
+    let mut hold = (requested_reserve > 0).then(|| {
+        ledger.keep_answer_seats(crate::methods::stall_archive::SEATS);
+        ledger.hold_tail(requested_reserve)
+    });
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let side = RefCell::new(RelaxStats::default());
+    let searched = {
+        let paid = PaidCheck::default();
+        let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
+        let mut grad = gated_grad(objective, &paid);
+        let mut energy_anchor = None;
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if !led.charge() {
+                    return None;
+                }
+                evaluated_pair(objective, x, &mut energy_anchor)
+                    .map(|(energy, gradient, _)| (energy, gradient))
+            };
+        let mut polish = bind_improve_polish(objective, cfg, &side);
+        crate::methods::cluster_hopping::run_with_energy_gradient_polished(
+            cfg,
+            start,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            Some(&mut energy_grad),
+            Some(&mut polish),
+            &mut rng,
+        )
+    };
+    fold_polish_stats(&mut stats, side);
     if let Some(hold) = hold.as_mut() {
         ledger.release_tail(hold);
     }
@@ -1743,11 +1891,27 @@ fn polish_answer_walled<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    polish_answer_walled_at::<O, false>(objective, ledger, stats, start, tolerance, max_iter, wall)
+}
+
+fn polish_answer_walled_at<O, const STOP: bool>(
+    objective: &O,
+    ledger: &mut Ledger,
+    stats: &mut RelaxStats,
+    start: ArrayView1<f64>,
+    tolerance: f64,
+    max_iter: usize,
+    wall: CallWall<'_>,
+) -> Option<(f64, Array1<f64>)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let mut opt = WarmLbfgs::default();
     opt.gtol = tolerance;
     let mut anchor = None;
     let mut failure = None;
     let mut evaluated = false;
+    let mut hit = None;
     let (energy, state, _) = opt.minimize(start, max_iter, |point| {
         let answered = charge_rejecting_repeat_failure(
             objective,
@@ -1761,8 +1925,15 @@ where
             &mut failure,
         )?;
         evaluated = true;
+        if STOP && answered.2 && ledger.below_target(answered.0) {
+            hit = Some((answered.0, point.to_owned()));
+            return None;
+        }
         Some((answered.0, answered.1))
     });
+    if let Some(found) = hit {
+        return Some(found);
+    }
     (evaluated && energy.is_finite()).then_some((energy, state))
 }
 
@@ -1784,18 +1955,72 @@ pub fn polish_answer<O>(
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
+    polish_answer_at::<O, false>(objective, ledger, start, tolerance, max_iter)
+}
+
+fn polish_answer_at<O, const STOP: bool>(
+    objective: &O,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    tolerance: f64,
+    max_iter: usize,
+) -> Option<(f64, Array1<f64>)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
     let mut opt = WarmLbfgs::default();
     opt.gtol = tolerance;
     let mut anchor = None;
     let mut evaluated = false;
+    let mut hit = None;
     let (energy, state, _) = opt.minimize(start, max_iter, |v| {
         if !ledger.charge() {
             return None;
         }
         evaluated = true;
-        evaluated_pair(objective, v, &mut anchor).map(|(energy, gradient, _)| (energy, gradient))
+        let (energy, gradient, _) = evaluated_pair(objective, v, &mut anchor)?;
+        if STOP && ledger.below_target(energy) {
+            hit = Some((energy, v.to_owned()));
+            return None;
+        }
+        Some((energy, gradient))
     });
+    if let Some(found) = hit {
+        return Some(found);
+    }
     (evaluated && energy.is_finite()).then_some((energy, state))
+}
+
+/// Polishes `start` at the component gradient tolerance and stops on the
+/// first evaluation at or below the ledger's target.
+///
+/// An open wall charges like [`polish_answer`]. Any other wall charges like
+/// [`polish_answer_walled`]. Neither path holds a tail or grants calls.
+fn polish_improved_answer<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    stats: &mut RelaxStats,
+    start: ArrayView1<f64>,
+) -> Option<(f64, Array1<f64>)>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let Ok(tolerance) = crate::catalog::molecular::component_gradient_tolerance(start.len()) else {
+        return None;
+    };
+    let max_iter = ledger.remaining();
+    if max_iter == 0 {
+        return None;
+    }
+    match CallWall::of(cfg) {
+        CallWall::Open => {
+            polish_answer_at::<O, true>(objective, ledger, start, tolerance, max_iter)
+        }
+        wall => polish_answer_walled_at::<O, true>(
+            objective, ledger, stats, start, tolerance, max_iter, wall,
+        ),
+    }
 }
 
 /// [`search_from`] with a checkpoint after each block of charged work.
@@ -1818,6 +2043,17 @@ where
 {
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
+    if cfg.polish_on_improve {
+        return search_from_with_checkpoint_polishing(
+            objective,
+            cfg,
+            ledger,
+            start,
+            seed,
+            checkpoint_interval,
+            checkpoint,
+        );
+    }
     let search_started = Instant::now();
     let mut stats = RelaxStats::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
@@ -1878,6 +2114,9 @@ where
 {
     let flexible = cfg.with_flexible_molecules(start);
     let cfg = flexible.as_ref().unwrap_or(cfg);
+    if cfg.polish_on_improve {
+        return search_from_with_history_polishing(objective, cfg, ledger, start, seed, history);
+    }
     let mut stats = RelaxStats::default();
     let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
     let paid = PaidCheck::default();
@@ -1894,6 +2133,95 @@ where
             &mut rng,
         )?
     };
+    Ok((out, stats))
+}
+
+fn search_from_with_checkpoint_polishing<O, H>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+    checkpoint_interval: usize,
+    checkpoint: &mut H,
+) -> Result<(Outcome, RelaxStats), SearchError>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    let search_started = Instant::now();
+    let mut stats = RelaxStats::default();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let side = RefCell::new(RelaxStats::default());
+    let out = {
+        let paid = PaidCheck::default();
+        let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
+        let mut grad = gated_grad(objective, &paid);
+        let mut energy_anchor = None;
+        let mut energy_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| -> Option<(f64, Array1<f64>)> {
+                if !led.charge() {
+                    return None;
+                }
+                evaluated_pair(objective, x, &mut energy_anchor)
+                    .map(|(energy, gradient, _)| (energy, gradient))
+            };
+        let mut polish = bind_improve_polish(objective, cfg, &side);
+        crate::methods::cluster_hopping::run_with_energy_gradient_at_checkpoints_polished(
+            cfg,
+            start,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            Some(&mut energy_grad),
+            Some(&mut polish),
+            &mut rng,
+            checkpoint_interval,
+            checkpoint,
+        )?
+    };
+    fold_polish_stats(&mut stats, side);
+    Ok(finish_search(
+        objective,
+        cfg,
+        ledger,
+        out,
+        stats,
+        search_started,
+    ))
+}
+
+fn search_from_with_history_polishing<O>(
+    objective: &O,
+    cfg: &Config,
+    ledger: &mut Ledger,
+    start: ArrayView1<f64>,
+    seed: u64,
+    history: Option<&mut dyn HistoryHook>,
+) -> Result<(Outcome, RelaxStats), SearchError>
+where
+    O: DifferentiableObjective<f64> + ?Sized,
+{
+    let mut stats = RelaxStats::default();
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let paid = PaidCheck::default();
+    let side = RefCell::new(RelaxStats::default());
+    let out = {
+        let mut relax = warm_relax_with(objective, cfg, &mut stats, seed, paid.clone());
+        let mut grad = gated_grad(objective, &paid);
+        let mut polish = bind_improve_polish(objective, cfg, &side);
+        crate::methods::cluster_hopping::run_with_history_polished(
+            cfg,
+            start,
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            history,
+            Some(&mut polish),
+            &mut rng,
+        )?
+    };
+    fold_polish_stats(&mut stats, side);
     Ok((out, stats))
 }
 
@@ -2756,6 +3084,130 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    /// Preset hashes and one recommended Lennard-Jones trace, measured on
+    /// develop ade36267 with the option off.
+    #[test]
+    fn polish_off_presets_match_develop() {
+        assert!(!Config::recommended(8).polish_on_improve);
+        assert!(
+            !Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
+                .polish_on_improve
+        );
+        assert!(!Config::recommended_tip4p(4).polish_on_improve);
+        assert!(!Config::with_scales(8, 1.0, 1.0).polish_on_improve);
+        assert_eq!(
+            Config::recommended(8).resolved_sha256().unwrap(),
+            "2787e86e47a5fc7b0c5444bc59e7ff4d4f6b6ea73a3426ad6047ed5d6cfb21d5"
+        );
+        assert_eq!(
+            Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
+                .resolved_sha256()
+                .unwrap(),
+            "4856a5a88eb0b87d0ec02a86a816587a4e0cf6a1643d73cecce35bf382826c14"
+        );
+        assert_eq!(
+            Config::recommended_tip4p(4).resolved_sha256().unwrap(),
+            "635043b2fc1dd81cfd65a8c9cb2ef40844b06d14102bbeff900f49c93385fc49"
+        );
+        assert_eq!(
+            Config::with_scales(8, 1.0, 1.0).resolved_sha256().unwrap(),
+            "9a215d925e37c3b07f2ac27fda4ddf1fae2a98fa60b6b7cd3df8d9ef71d57027"
+        );
+        let recommended = Config::recommended(4);
+        assert!(
+            !recommended
+                .resolved_json()
+                .unwrap()
+                .contains("polish_on_improve")
+        );
+        let mut on = recommended.clone();
+        on.polish_on_improve = true;
+        assert!(
+            on.resolved_json()
+                .unwrap()
+                .contains("\"polish_on_improve\":true")
+        );
+        let potential = PairPotential::lennard_jones(4);
+        let mut ledger = Ledger::new(2_000);
+        let (out, _) =
+            search_lennard_jones(&potential, &recommended, &mut ledger, 1).expect("search");
+        assert_eq!(ledger.spent(), 2000);
+        assert_eq!(format!("{:?}", out.stop), "Some(Budget)");
+        assert_eq!(
+            format!("{:?}", ledger.encounters()),
+            "[(57, -5.999999998900713), (706, -5.9999999998457785)]"
+        );
+        assert_eq!(out.best, ledger.encounters()[1].1);
+    }
+
+    /// A quench stopped at a loose gradient sits above the Lennard-Jones
+    /// minimum. Polishing that incumbent crosses a target the quench missed,
+    /// so the first-hit call changes.
+    #[test]
+    fn polishing_an_improvement_changes_the_first_hit_call() {
+        let potential = PairPotential::lennard_jones(4);
+        let start = Array1::from_vec(vec![
+            0.7, 0.7, 0.7, 0.7, -0.7, -0.7, -0.7, 0.7, -0.7, -0.7, -0.7, 0.7,
+        ]);
+        let mut cfg = Config::with_scales(4, 1.0, 1.0);
+        cfg.relax_steps = 80;
+        cfg.screen_steps = 1;
+        cfg.record_gradient = 1.0e-2;
+        cfg.max_hops = Some(0);
+        cfg.replicas = 1;
+        cfg.polish_records = 0;
+        cfg.polish_on_improve = false;
+        cfg.return_screen = false;
+        cfg.escape_on_stall = false;
+        cfg.surfaces.clear();
+        cfg.allocate_moves = false;
+        let mut loose = Ledger::new(2_000);
+        let (loose_out, _) =
+            search_from(&potential, &cfg, &mut loose, start.view(), 1).expect("loose");
+        assert!(
+            loose_out.best.is_finite(),
+            "loose quench {}",
+            loose_out.best
+        );
+        let mut deep = cfg.clone();
+        deep.polish_on_improve = true;
+        let mut polished = Ledger::new(2_000);
+        let (polished_out, _) =
+            search_from(&potential, &deep, &mut polished, start.view(), 1).expect("polished");
+        assert!(
+            polished_out.best < loose_out.best,
+            "polish {} did not undercut {}",
+            polished_out.best,
+            loose_out.best
+        );
+        let target = (loose_out.best + polished_out.best) / 2.0;
+        let mut off = Ledger::new(2_000);
+        off.stop_below(target);
+        let (off_out, _) = search_from(&potential, &cfg, &mut off, start.view(), 1).expect("off");
+        let mut on_ledger = Ledger::new(2_000);
+        on_ledger.stop_below(target);
+        let (on_out, _) =
+            search_from(&potential, &deep, &mut on_ledger, start.view(), 1).expect("on");
+        let first_hit = |encounters: &[(usize, f64)]| {
+            encounters
+                .iter()
+                .find(|(_, energy)| crate::energy_hits(*energy, target, 0.0))
+                .map(|(call, _)| *call)
+        };
+        let off_hit = first_hit(off.encounters());
+        let on_hit = first_hit(on_ledger.encounters());
+        assert!(off_hit.is_none(), "unpolished search hit at {off_hit:?}");
+        assert!(!crate::energy_hits(off_out.best, target, 0.0));
+        let on_hit = on_hit.expect("polished search reaches the target");
+        assert_ne!(Some(on_hit), off_hit);
+        assert_eq!(
+            on_out.stop.map(|stop| format!("{stop:?}")),
+            Some("Target".into())
+        );
+        assert_eq!(on_ledger.spent(), on_hit);
+        assert!(crate::energy_hits(on_ledger.best, target, 0.0));
+    }
 
     #[test]
     fn quench_watch_rejects_negative_infinity() {
