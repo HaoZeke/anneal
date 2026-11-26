@@ -576,6 +576,7 @@ class Config:
     point_symmetrise_on_new: bool
     point_symmetrise_every_accept: bool
     symmetrise_core_fraction: float
+    detected_symmetry: bool
     symmetry_tolerance: float
     symmetry_merge_radius: float
     orbit_complete_on_new: bool

@@ -2715,6 +2715,16 @@ impl PyClusterConfig {
     // --- Symmetry & surface hops ---
 
     #[getter]
+    fn detected_symmetry(&self) -> bool {
+        self.inner.detected_symmetry
+    }
+
+    #[setter]
+    fn set_detected_symmetry(&mut self, value: bool) {
+        self.inner.detected_symmetry = value;
+    }
+
+    #[getter]
     fn symmetrise_on_stall(&self) -> bool {
         self.inner.symmetrise_on_stall
     }
