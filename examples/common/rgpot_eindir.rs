@@ -37,6 +37,18 @@ pub(crate) const OVERLAP_SEPARATION_A: f64 = 0.35;
 /// where xtb's SCC fails.
 pub(crate) const OVERLAP_CALL_LIMIT_A: f64 = 0.90;
 
+/// Bit 0 of the engine word `rgpot_xtb_last_eval_flags`.
+///
+/// rgpot sets it when xtb smears a non-converged SCC and still returns
+/// success. crates.io rgpot-core 3.5.1 does not declare the word. It is
+/// the engine ABI of rgpot 3.8.0 (`ac6f6f5f`), which is not on crates.io.
+/// The symbol is resolved with `dlsym` and is absent on older engines.
+const RGPOT_XTB_EVAL_SCC_RESCUED: u64 = 0x1;
+
+fn scc_was_rescued(flags: u64) -> bool {
+    flags & RGPOT_XTB_EVAL_SCC_RESCUED != 0
+}
+
 static SCC_REJECTED: AtomicUsize = AtomicUsize::new(0);
 static GEOMETRY_REJECTED: AtomicUsize = AtomicUsize::new(0);
 
@@ -116,6 +128,181 @@ mod tests {
         assert_eq!(descriptor.abi.features, 0b101);
         assert_eq!(descriptor.build_identity.as_deref(), Some("rgpot@abc123"));
     }
+
+    unsafe extern "C" fn rescued_smear(
+        _pot: *mut std::ffi::c_void,
+        n: i64,
+        _positions: *const f64,
+        _atomic_numbers: *const i32,
+        gradient: *mut f64,
+        energy: *mut f64,
+        variance: *mut f64,
+        _cell: *const f64,
+    ) -> i32 {
+        unsafe {
+            *energy = -12.5;
+            *variance = 0.0;
+            std::slice::from_raw_parts_mut(gradient, 3 * n as usize).fill(0.0);
+        }
+        0
+    }
+
+    unsafe extern "C" fn reset_noop(_pot: *mut std::ffi::c_void) {}
+
+    unsafe extern "C" fn flags_rescued(_pot: *const std::ffi::c_void) -> u64 {
+        RGPOT_XTB_EVAL_SCC_RESCUED
+    }
+
+    /// A finite rc 0 with a zero force is still unconverged when the engine
+    /// says it smeared the SCC. That answer is not a target, a best, or a
+    /// recordable energy.
+    #[test]
+    fn a_rescued_scc_is_rejected_as_unconverged() {
+        use eindir_core::gradient::DifferentiableObjective;
+
+        let objective = RgpotObjective::xtb_from_symbols(
+            &[1, 1],
+            [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0],
+            OVERLAP_CALL_LIMIT_A,
+            None,
+            std::ptr::null_mut(),
+            rescued_smear,
+            reset_noop,
+            reset_noop,
+            Some(flags_rescued),
+        );
+        let coordinates = ndarray::Array1::from(vec![0.0, 0.0, 0.0, 2.3, 0.0, 0.0]);
+        let (energy, _gradient) = objective.wrapper().value_and_gradient(coordinates.view());
+        assert!(
+            !energy.is_finite(),
+            "rescued SCC energy {energy} was finite"
+        );
+        assert!(objective.scc_rejected_count() >= 1);
+
+        let mut ledger = anneal_core::methods::cluster_hopping::Ledger::new(4);
+        ledger.stop_below(-1.0);
+        assert!(
+            !ledger.below_target(energy),
+            "a rescued SCC counted as a target hit"
+        );
+        ledger.record(energy, coordinates.view());
+        assert!(
+            ledger.best.is_infinite() && ledger.best.is_sign_positive(),
+            "a rescued SCC became the best {}",
+            ledger.best
+        );
+        assert!(ledger.best_state.is_none());
+    }
+
+    /// Ammonia tetramer at 300 K does not converge its GFN2 SCC. The closest
+    /// pair is a normal N-H near 1.010 A. The engine smears it and reports a
+    /// finite energy; that energy must not cross the objective. Water at the
+    /// same settings is a converged SCC.
+    #[test]
+    fn the_linked_engine_rejects_a_rescued_ammonia_scc() {
+        use eindir_core::gradient::DifferentiableObjective;
+
+        let Some(path) = std::env::var_os("RGPOT_XTB_ENGINE").filter(|value| !value.is_empty())
+        else {
+            eprintln!("RGPOT_XTB_ENGINE is unset; the rescued SCC is not checked");
+            return;
+        };
+        let lib = unsafe { libloading::Library::new(&path) }.expect("dlopen RGPOT_XTB_ENGINE");
+        let exports_flags = unsafe {
+            lib.get::<XtbEvalFlags>(b"rgpot_xtb_last_eval_flags\0")
+                .is_ok()
+        };
+        if !exports_flags {
+            eprintln!("rgpot_xtb_last_eval_flags is absent; rgpot 3.8.0 (ac6f6f5f) is required");
+            return;
+        }
+        let previous = std::env::var("RGPOT_XTB_ETEMP").ok();
+        // The objective reads the variable when it is constructed below.
+        unsafe { std::env::set_var("RGPOT_XTB_ETEMP", "300") };
+        let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
+        let ammonia_z = [7, 1, 1, 1, 7, 1, 1, 1, 7, 1, 1, 1, 7, 1, 1, 1];
+        let ammonia = [
+            -1.66532428,
+            0.54889027,
+            -2.03940010,
+            0.11165024,
+            2.04946110,
+            1.43904553,
+            -0.42884806,
+            2.72524649,
+            0.30972045,
+            1.43338889,
+            2.19082068,
+            0.90531718,
+            0.53411760,
+            1.59058476,
+            -4.48817656,
+            -0.62302497,
+            2.69900828,
+            -3.26741719,
+            1.34429373,
+            3.32407404,
+            -1.22950979,
+            -0.35527480,
+            1.88804157,
+            -4.87298828,
+            1.47996713,
+            0.55484625,
+            3.71752121,
+            1.28956128,
+            -0.72444169,
+            2.95951158,
+            -0.20031872,
+            0.12475055,
+            3.35919321,
+            1.70295493,
+            -0.38386526,
+            4.03334277,
+            -2.71341888,
+            -5.98849237,
+            1.22333256,
+            -1.72758892,
+            -6.21046903,
+            1.63826395,
+            -1.69113306,
+            -6.08127583,
+            -0.32892162,
+            -2.20633610,
+            -6.61433582,
+            0.61469530,
+        ];
+        let gap = min_pair_distance_a(&ammonia);
+        assert!(
+            (gap - 1.010).abs() < 0.001,
+            "ammonia min pair {gap:.6} A is not 1.010 A"
+        );
+        let pot = RgpotObjective::xtb(&ammonia_z, box_);
+        let (energy, gradient) = pot
+            .wrapper()
+            .value_and_gradient(ndarray::ArrayView1::from(&ammonia));
+        assert!(
+            !energy.is_finite(),
+            "rescued ammonia SCC energy {energy} crossed the objective"
+        );
+        assert!(gradient.iter().all(|value| !value.is_finite()));
+        assert!(pot.scc_rejected_count() >= 1);
+
+        let water_z = [8, 1, 1];
+        let water = [
+            0.0, 0.0, 0.1173, 0.0, 0.7572, -0.4692, 0.0, -0.7572, -0.4692,
+        ];
+        let pot = RgpotObjective::xtb(&water_z, box_);
+        let (energy, gradient) = pot
+            .wrapper()
+            .value_and_gradient(ndarray::ArrayView1::from(&water));
+        assert!(energy.is_finite(), "water SCC was rejected as unconverged");
+        assert!(gradient.iter().all(|value| value.is_finite()));
+        assert_eq!(pot.scc_rejected_count(), 0);
+        match previous {
+            Some(value) => unsafe { std::env::set_var("RGPOT_XTB_ETEMP", value) },
+            None => unsafe { std::env::remove_var("RGPOT_XTB_ETEMP") },
+        }
+    }
 }
 
 #[repr(C)]
@@ -133,6 +320,7 @@ pub(crate) type XtbDestroy = unsafe extern "C" fn(*mut c_void);
 pub(crate) type XtbReset = unsafe extern "C" fn(*mut c_void);
 type XtbSetWarmMove = unsafe extern "C" fn(*mut c_void, f64);
 type XtbWarmMove = unsafe extern "C" fn(*const c_void) -> f64;
+type XtbEvalFlags = unsafe extern "C" fn(*const c_void) -> u64;
 pub(crate) type XtbForce = unsafe extern "C" fn(
     *mut c_void,
     i64,
@@ -193,6 +381,7 @@ fn read_full(fd: i32, bytes: &mut [u8]) -> bool {
 unsafe fn xtb_worker_main(
     force: XtbForce,
     reset: XtbReset,
+    flags: Option<XtbEvalFlags>,
     pot: *mut c_void,
     incoming: i32,
     outgoing: i32,
@@ -251,13 +440,18 @@ unsafe fn xtb_worker_main(
                 cell.as_ptr(),
             )
         };
-        let mut message = Vec::with_capacity(4 + 8 + 8 + forces.len() * 8);
+        let eval_flags = match flags {
+            Some(flags) => unsafe { flags(pot) },
+            None => 0,
+        };
+        let mut message = Vec::with_capacity(4 + 8 + 8 + 8 + forces.len() * 8);
         message.extend_from_slice(&rc.to_ne_bytes());
         message.extend_from_slice(&energy.to_ne_bytes());
         message.extend_from_slice(&variance.to_ne_bytes());
         let force_bytes =
             unsafe { std::slice::from_raw_parts(forces.as_ptr() as *const u8, forces.len() * 8) };
         message.extend_from_slice(force_bytes);
+        message.extend_from_slice(&eval_flags.to_ne_bytes());
         if !write_full(outgoing, &message) {
             unsafe { _exit(0) };
         }
@@ -275,11 +469,17 @@ struct XtbWorker {
     from_child: i32,
     force: XtbForce,
     reset: XtbReset,
+    flags: Option<XtbEvalFlags>,
     pot: *mut c_void,
 }
 
 impl XtbWorker {
-    fn spawn(force: XtbForce, reset: XtbReset, pot: *mut c_void) -> Self {
+    fn spawn(
+        force: XtbForce,
+        reset: XtbReset,
+        pot: *mut c_void,
+        flags: Option<XtbEvalFlags>,
+    ) -> Self {
         unsafe {
             let mut to_child = [0i32; 2];
             let mut from_child = [0i32; 2];
@@ -293,7 +493,7 @@ impl XtbWorker {
             if pid == 0 {
                 close(to_child[1]);
                 close(from_child[0]);
-                xtb_worker_main(force, reset, pot, to_child[0], from_child[1]);
+                xtb_worker_main(force, reset, flags, pot, to_child[0], from_child[1]);
             }
             close(to_child[0]);
             close(from_child[1]);
@@ -303,6 +503,7 @@ impl XtbWorker {
                 from_child: from_child[0],
                 force,
                 reset,
+                flags,
                 pot,
             }
         }
@@ -342,9 +543,10 @@ impl XtbWorker {
             Err(WorkerFail::Dead) => {
                 let force = self.force;
                 let reset = self.reset;
+                let flags = self.flags;
                 let pot = self.pot;
                 self.shutdown();
-                *self = Self::spawn(force, reset, pot);
+                *self = Self::spawn(force, reset, pot, flags);
                 Err(WorkerFail::Dead)
             }
         }
@@ -390,7 +592,18 @@ impl XtbWorker {
         if !read_full(self.from_child, force_bytes) {
             return Err(WorkerFail::Dead);
         }
-        if rc != 0 || !energy.is_finite() || forces.iter().any(|value| !value.is_finite()) {
+        let mut flag_bytes = [0u8; 8];
+        if !read_full(self.from_child, &mut flag_bytes) {
+            return Err(WorkerFail::Dead);
+        }
+        let eval_flags = u64::from_ne_bytes(flag_bytes);
+        // A smeared rescue is a finite rc 0. It is the same failure as a
+        // non-zero return: not a target, a best, or an answer.
+        if rc != 0
+            || scc_was_rescued(eval_flags)
+            || !energy.is_finite()
+            || forces.iter().any(|value| !value.is_finite())
+        {
             return Err(WorkerFail::Rejected);
         }
         let _ = variance;
@@ -413,6 +626,8 @@ struct XtbKernel {
     destroy: XtbDestroy,
     worker: XtbWorker,
     evaluations: usize,
+    /// SCC failures on this handle, including a rescued success.
+    scc_rejected: usize,
     /// Calls with a pair at or inside this distance are refused before xtb.
     overlap_limit_a: f64,
     /// Force buffer reused across calls. The owned DLPack tensor copies
@@ -534,6 +749,7 @@ unsafe extern "C" fn xtb_callback(
             Ok(answer) => answer,
             Err(_) => {
                 note_scc_rejected(min_pair);
+                kernel.scc_rejected += 1;
                 kernel.scratch.fill(f64::NAN);
                 return rgpot_status_t::RGPOT_INTERNAL_ERROR;
             }
@@ -680,10 +896,15 @@ impl RgpotObjective {
             unsafe { lib.get(b"rgpot_xtb_reset\0") }.unwrap_or_else(|_| {
                 panic!("rgpot xtb engine {RGPOT_XTB_ENGINE_REV} is required for rgpot_xtb_reset")
             });
+        // Optional. An engine from before rgpot 3.8.0 (`ac6f6f5f`) has no
+        // `rgpot_xtb_last_eval_flags` symbol. A missing word is not a rescue.
+        let flags: Option<XtbEvalFlags> =
+            unsafe { lib.get::<XtbEvalFlags>(b"rgpot_xtb_last_eval_flags\0") }
+                .ok()
+                .map(|symbol| *symbol);
         // A dissociated monomer is refused before this call. A bound
-        // geometry whose SCC does not converge is smeared and cooled inside
-        // the engine at `RGPOT_XTB_ENGINE_REV`, and the energy stays on
-        // this surface.
+        // geometry whose SCC does not converge, including one the engine
+        // rescued by smearing, is an unconverged evaluation.
         let cfg = XtbConfig {
             method: GFN2,
             accuracy: GFN2_ACCURACY,
@@ -725,6 +946,7 @@ impl RgpotObjective {
             force_fn,
             reset_fn,
             destroy_fn,
+            flags,
         );
         println!("  eindir objective from rgpot xtb ({})", path.display());
         let _ = std::io::Write::flush(&mut std::io::stdout());
@@ -741,14 +963,16 @@ impl RgpotObjective {
         force_fn: XtbForce,
         reset_fn: XtbReset,
         destroy_fn: XtbDestroy,
+        flags_fn: Option<XtbEvalFlags>,
     ) -> Self {
-        let worker = XtbWorker::spawn(force_fn, reset_fn, pot);
+        let worker = XtbWorker::spawn(force_fn, reset_fn, pot, flags_fn);
         let kernel = Box::new(XtbKernel {
             _lib: lib,
             pot,
             destroy: destroy_fn,
             worker,
             evaluations: 0,
+            scc_rejected: 0,
             overlap_limit_a,
             scratch: Vec::new(),
         });
@@ -788,9 +1012,19 @@ impl RgpotObjective {
         if !kernel.worker.restart() {
             let force = kernel.worker.force;
             let reset = kernel.worker.reset;
+            let flags = kernel.worker.flags;
             let pot = kernel.worker.pot;
             kernel.worker.shutdown();
-            kernel.worker = XtbWorker::spawn(force, reset, pot);
+            kernel.worker = XtbWorker::spawn(force, reset, pot, flags);
+        }
+    }
+
+    /// SCC failures on this handle, including a rescued success.
+    pub(crate) fn scc_rejected_count(&self) -> usize {
+        if self.xtb.is_null() {
+            0
+        } else {
+            unsafe { (*self.xtb).scc_rejected }
         }
     }
 
