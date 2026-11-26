@@ -129,7 +129,9 @@ fn link_libpython_for_test_binaries() {
     let script = r#"
 import sysconfig
 libdir = sysconfig.get_config_var("LIBDIR") or ""
+libpl = sysconfig.get_config_var("LIBPL") or ""
 ldversion = sysconfig.get_config_var("LDVERSION") or ""
+instsoname = sysconfig.get_config_var("INSTSONAME") or ""
 framework = sysconfig.get_config_var("PYTHONFRAMEWORKPREFIX") or ""
 shared = sysconfig.get_config_var("Py_ENABLE_SHARED")
 pyframework = sysconfig.get_config_var("PYTHONFRAMEWORK")
@@ -138,7 +140,9 @@ def on(value):
     return value not in (None, 0, "0", "")
 
 print(libdir)
+print(libpl)
 print(ldversion)
+print(instsoname)
 print(framework)
 print("1" if on(shared) or on(pyframework) else "0")
 "#;
@@ -160,19 +164,36 @@ print("1" if on(shared) or on(pyframework) else "0")
     let text = String::from_utf8(output.stdout).expect("python sysconfig stdout is utf-8");
     let mut lines = text.lines();
     let libdir = lines.next().unwrap_or("");
+    let libpl = lines.next().unwrap_or("");
     let ldversion = lines.next().unwrap_or("");
+    let instsoname = lines.next().unwrap_or("");
     let framework = lines.next().unwrap_or("");
     let shared = lines.next().unwrap_or("0") == "1";
     if libdir.is_empty() || ldversion.is_empty() {
         panic!("feature `python` needs LIBDIR and LDVERSION from `{python}`");
     }
     println!("cargo:rustc-link-search=native={libdir}");
+    // The unversioned shared object can live in LIBPL while LIBDIR has only
+    // the versioned soname. Search that directory when it names somewhere else.
+    if !libpl.is_empty() && libpl != libdir {
+        println!("cargo:rustc-link-search=native={libpl}");
+    }
     let lib_name = format!("python{ldversion}");
     if shared && os == "linux" {
         // GNU ld drops a `-l` that appears before the crates that use it
         // when `--as-needed` is on. Keep this library after those crates.
+        // -lname needs libname.so. When that file is absent, name the
+        // installed soname instead.
+        let unversioned = format!("lib{lib_name}.so");
+        let link_arg = if config_dir_has(&unversioned, libdir, libpl) {
+            format!("-l{lib_name}")
+        } else if config_dir_has(instsoname, libdir, libpl) {
+            format!("-l:{instsoname}")
+        } else {
+            format!("-l{lib_name}")
+        };
         println!("cargo:rustc-link-arg=-Wl,--no-as-needed");
-        println!("cargo:rustc-link-arg=-l{lib_name}");
+        println!("cargo:rustc-link-arg={link_arg}");
         println!("cargo:rustc-link-arg=-Wl,--as-needed");
     } else if shared {
         println!("cargo:rustc-link-lib=dylib={lib_name}");
@@ -186,6 +207,15 @@ print("1" if on(shared) or on(pyframework) else "0")
     if !framework.is_empty() {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{framework}");
     }
+}
+
+fn config_dir_has(name: &str, libdir: &str, libpl: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    [libdir, libpl]
+        .into_iter()
+        .any(|dir| !dir.is_empty() && std::path::Path::new(dir).join(name).is_file())
 }
 
 fn python_interpreter() -> String {
