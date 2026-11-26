@@ -2467,8 +2467,11 @@ pub fn shell_core_group(x: ArrayView1<f64>, n: usize, spec: &ShellCore) -> Optio
 
 /// [`shell_core_group`] with detected symmetry on or off.
 ///
-/// Off scans the orders `[2, 3, 4, 5, 6]` with the crystallographic scan.
-/// On scans every order the core can hold with [`detect_all`].
+/// Off scans the orders `[2, 3, 4, 5, 6]` with the crystallographic scan
+/// and keeps the partial set [`close_group`] stops at when it hits `cap`.
+/// On scans every order the core can hold with [`detect_all`] and keeps a
+/// group only when [`close_group_checked`] closes it within `closure` and
+/// `cap`. An unclosed set is skipped.
 pub(crate) fn shell_core_group_for(
     detected_symmetry: bool,
     x: ArrayView1<f64>,
@@ -2561,7 +2564,14 @@ pub(crate) fn shell_core_group_for(
             .iter()
             .map(|g| refine_operation(&operation(g), &rel))
             .collect();
-        let group = close_group(&gens, spec.closure, spec.cap);
+        let group = if detected_symmetry {
+            let Some(group) = close_group_checked(&gens, spec.closure, spec.cap) else {
+                continue;
+            };
+            group
+        } else {
+            close_group(&gens, spec.closure, spec.cap)
+        };
         return Some(CoreGroup {
             group,
             core,
@@ -3418,6 +3428,41 @@ mod shell_tests {
                 );
             }
         }
+    }
+
+    /// A cap too small for the icosahedral rotations leaves an unclosed set.
+    /// Flag off keeps that set, and its matrices match the public entry.
+    /// Flag on refuses it.
+    #[test]
+    fn shell_core_with_the_flag_on_rejects_an_unclosed_group() {
+        let (x, n) = centred_icosahedron_under_a_one_sided_surface(0.0);
+        let spec = ShellCore {
+            max_points: ICOSAHEDRON_POINTS,
+            cap: 8,
+            ..ShellCore::scaled(1.0)
+        };
+        let off = shell_core_group_for(false, x.view(), n, &spec).expect("flag off");
+        let plain = shell_core_group(x.view(), n, &spec).expect("develop entry");
+        assert_eq!(off.core, plain.core);
+        for axis in 0..3 {
+            assert_eq!(off.centre[axis].to_bits(), plain.centre[axis].to_bits());
+        }
+        assert_eq!(off.group.len(), plain.group.len());
+        for (left, right) in off.group.iter().zip(&plain.group) {
+            for row in 0..3 {
+                for col in 0..3 {
+                    assert_eq!(left[row][col].to_bits(), right[row][col].to_bits());
+                }
+            }
+        }
+        assert!(
+            !group_is_closed_within(&off.group, spec.closure),
+            "the capped flag-off set closed"
+        );
+        assert!(
+            shell_core_group_for(true, x.view(), n, &spec).is_none(),
+            "an unclosed shell-core group was kept with the flag on"
+        );
     }
 
     /// The case the shell core exists for: a surface heavy on one side
