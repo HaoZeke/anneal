@@ -35,6 +35,12 @@ C20_REVISION = "5351f272"
 # CREST runs already in bench/nh3-octamer/results.csv. No call column is printed.
 NH3_RECORD = "d3c3e351e2bfd8c26a279943a26e5a8230467284"
 NH3_RECORD_PATH = "bench/octamer-matched/nh3x8/results.csv"
+# First-hit (H2O)8 records. A miss is stored as the budget plus one.
+# The row prints hits, the Fisher p, and those medians, and no budget.
+H2O8_ANNEAL_COMMIT = "42e708289a718d3d916b46e5ae43f26cf0a677c1"
+H2O8_ANNEAL_PATH = "bench/octamer-matched/h2o8/poi/results.csv"
+H2O8_CREST_COMMIT = "7ad8eab67d61f1d5835a9ce7b67e7b2cb2b4ede9"
+H2O8_CREST_PATH = "bench/h2o8-crest-firsthit/rows.csv"
 
 
 def read(path: Path) -> list[dict[str, str]]:
@@ -54,7 +60,7 @@ def show_csv(commit: str, path: str) -> list[dict[str, str]]:
 
 
 def hits(rows: list[dict[str, str]]) -> int:
-    return sum(r["hit"] in ("true", "yes") for r in rows)
+    return sum(r["hit"] in ("true", "yes", "1") for r in rows)
 
 
 def complete(rows: list[dict[str, str]], column: str = "charged") -> list[dict[str, str]]:
@@ -71,6 +77,24 @@ def water_hexamer() -> dict[str, object]:
         raise SystemExit(f"crest-equal: anneal budgets {sorted(budgets)}")
     return {"system": "(H\\(_2\\)O)\\(_6\\)", "budget": budgets.pop(), "anneal": anneal, "crest": crest,
             "crest_calls": [float(r["charged"]) for r in crest]}
+
+
+def water_octamer() -> dict[str, object]:
+    """Hits and first-hit medians. The comparison is not a budget-rule row."""
+    anneal = show_csv(H2O8_ANNEAL_COMMIT, H2O8_ANNEAL_PATH)
+    crest = show_csv(H2O8_CREST_COMMIT, H2O8_CREST_PATH)
+    if len(anneal) != 12 or len(crest) != 12:
+        raise SystemExit(f"h2o8 first-hit: {len(anneal)} anneal rows and {len(crest)} CREST rows")
+    return {
+        "system": "(H\\(_2\\)O)\\(_8\\)",
+        "budget": None,
+        "anneal": anneal,
+        "crest": crest,
+        "crest_calls": [],
+        "first_hit": True,
+        "anneal_median": statistics.median(float(r["calls_to_hit"]) for r in anneal),
+        "crest_median": statistics.median(float(r["first_hit_call"]) for r in crest),
+    }
 
 
 def ammonia_octamer() -> dict[str, object]:
@@ -116,9 +140,9 @@ def covalent() -> list[dict[str, object]]:
 
 def pairs() -> list[dict[str, object]]:
     kept = []
-    for pair in (water_hexamer(), ammonia_octamer(), *covalent()):
+    for pair in (water_hexamer(), water_octamer(), ammonia_octamer(), *covalent()):
         a, c = pair["anneal"], pair["crest"]
-        if pair.get("hits_only"):
+        if pair.get("hits_only") or pair.get("first_hit"):
             pair.update(median=None, p=fisher_exact(hits(a), len(a), hits(c), len(c)))
             kept.append(pair)
             continue
@@ -157,14 +181,15 @@ def pvalue(p: float) -> str:
 
 def table() -> str:
     kept = pairs()
-    nh3 = next(pair for pair in kept if pair.get("hits_only"))
+    h2o8 = next(pair for pair in kept if pair.get("first_hit"))
     lines = [
         "\\begin{table}",
         "\\caption{This code against CREST 3.0.2 on GFN2-xTB clusters.",
         "Both arms count GFN2-xTB energy and gradient calls.",
         "CREST calls is the median of the complete runs kept by the budget rule.",
-        f"The (NH\\(_3\\))\\(_8\\) row is the hit rate on {len(nh3['anneal'])} seeds of this code "
-        f"and {len(nh3['crest'])} CREST runs and is not budget- or seed-matched.",
+        f"The (H\\(_2\\)O)\\(_8\\) first-hit medians are {number(h2o8['anneal_median'])} and "
+        f"{number(h2o8['crest_median'])}. The row prints no budget.",
+        "The (NH\\(_3\\))\\(_8\\) row is hits only.",
         "\\(p\\) is the two-sided Fisher exact test on the hits.",
         "The Supporting Information gives the settings, revisions, records, and the arms that",
         "the budget rule removes.}",
@@ -180,6 +205,10 @@ def table() -> str:
     ]
     for pair in kept:
         a, c = pair["anneal"], pair["crest"]
+        if pair.get("first_hit"):
+            lines.append(f"{pair['system']} & --- & --- & {hits(a)}/{len(a)} & {hits(c)}/{len(c)} & "
+                         f"{pair['p']:.4f} \\\\")
+            continue
         if pair.get("hits_only"):
             lines.append(f"{pair['system']} & --- & --- & {hits(a)}/{len(a)} & {hits(c)}/{len(c)} & "
                          f"{pair['p']:.3f} \\\\")

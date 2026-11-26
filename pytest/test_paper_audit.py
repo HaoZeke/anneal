@@ -1179,7 +1179,7 @@ def test_the_paired_newcombe_interval_matches_the_published_example():
 def test_a_title_across_funnels_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "Template-free basin hopping with adaptive moves for funnelled cluster landscapes"
+    old = "Template-free basin hopping with adaptive moves for funneled cluster landscapes"
     assert old in audit_mod.collapse(tex)
     audit.text_cache[audit_mod.TEX] = replace_collapsed(
         tex,

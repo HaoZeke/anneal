@@ -3107,9 +3107,14 @@ def manuscript_ase(audit: Audit) -> None:
         audit.record("mann_whitney" not in source and "continuity" not in source, path,
                      "no continuity-corrected rank test", "absent",
                      "absent" if "mann_whitney" not in source else "present")
-    for gone in ("gofee", "AGOX", "1ce3ab64", "b49341e3", "equal-call"):
+    for gone in ("gofee", "1ce3ab64", "b49341e3", "equal-call"):
         found = [path for path in (TEX, SI, "paper/jctc/cover-letter.tex") if gone in audit.text(path)]
         audit.record(not found, " ".join(found) or TEX, f"no {gone} in the paper", "absent", " ".join(found) or "absent")
+    # The removed AGOX runs stay out. The cited package is named once, in the introduction.
+    agox_sites = [path for path in (TEX, SI, "paper/jctc/cover-letter.tex") if "AGOX" in audit.text(path)]
+    named = audit.text(TEX).count("the AGOX package") == 1 and audit.text(TEX).count("AGOX") == 1
+    audit.record(named and agox_sites == [TEX], TEX, "AGOX is named once, as the cited package",
+                 "one package name", " ".join(agox_sites) or "absent")
     step = 1e-4
 
     def curvature(pair) -> float:
@@ -5793,7 +5798,7 @@ def cover_letter(audit: Audit) -> None:
     audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
 
 
-REFS_BLOB = "914836e6824728ed6e3b8b83a69c6e1739e0ab5f"
+REFS_BLOB = "06303453f665b6418f74b1a8544f1cc116decb16"
 # Wording the review of the first rewrite showed to overclaim; none may come back.
 OVERCLAIMS = ("same trap", "confined to one funnel", "cannot become the stored best", "cannot win",
               "basin-hopping setting", "one setting", "adds nothing", "does no better", "this setting",
@@ -5937,7 +5942,7 @@ def science_claims(audit: Audit) -> None:
     audit.record("GFN2-xTB" not in stack, "paper/jctc/scripts/fig_algorithm_stack.py",
                  "the search stack excludes the offline GFN2 reference relaxation",
                  "absent", "absent" if "GFN2-xTB" not in stack else "present")
-    audit.said(TEX, "The lower band separates the rgpot Lennard-Jones, Morse, Gupta, and binary\n"
+    audit.said(TEX, "The lower band separates the rgpot \\cite{goswamiOmniPotentRPCRgpot2026} Lennard-Jones, Morse, Gupta, and binary\n"
                     "Lennard-Jones kernels from the native TIP4P and Sutton--Chen implementations;\n"
                     "offline reference relaxations are not part of the search stack.")
     audit.said(TEX, "the lowest of the archived GFN2-xTB water hexamers after relaxation\n"
@@ -6066,7 +6071,7 @@ def science_claims(audit: Audit) -> None:
             text = outside_template_era(audit.text(path)) if path == SI and word == "c2de652d" else audit.text(path)
             audit.record(word not in text, path, f"no row is labelled {word}", "absent",
                          "absent" if word not in text else "present")
-    audit.said(TEX, "\\title{Template-free basin hopping with adaptive moves for funnelled cluster landscapes}")
+    audit.said(TEX, "\\title{Template-free basin hopping with adaptive moves for funneled cluster landscapes}")
     audit.said(TEX, "We present a template-free basin-hopping search")
 
 
@@ -6227,7 +6232,7 @@ def manuscript_new(audit: Audit) -> None:
 
     # Title, affiliation, spelling, and the pending DOI.
     cover = "paper/jctc/cover-letter.tex"
-    title = "Template-free basin hopping with adaptive moves for funnelled cluster landscapes"
+    title = "Template-free basin hopping with adaptive moves for funneled cluster landscapes"
     audit.said(TEX, "\\title{" + title + "}")
     audit.said(SI, "\\title{" + title + "}")
     audit.said(cover, "``" + title)
@@ -6795,7 +6800,7 @@ def revision_map(audit: Audit) -> None:
 
 BRITISH = re.compile(r"\b\w*(?:optimis|neighbour|initialis|symmetris|normalis|minimis|colour|centred|licence|"
          r"favour|behaviour|analyse|organis|recognis|characteris|parametris|summaris|catalogue|"
-         r"labell|travell|modell|cancell|fuell)\w*\b",
+         r"labell|travell|modell|cancell|fuell|funnell)\w*\b",
          re.IGNORECASE)
 
 
@@ -7070,7 +7075,7 @@ def crest_table(audit: Audit) -> None:
     audit.record(block == fresh, TEX, "tab:crest is the output of crest_table.py", "equal",
                  "equal" if block == fresh else "differs")
     pairs = {re.sub(r"\\[()]|[_{}\\]", "", p["system"]): p for p in table.pairs()}
-    audit.cell(TEX, "the clusters of tab:crest", "(H2O)6 (NH3)8 C10 Si10 C20", " ".join(pairs))
+    audit.cell(TEX, "the clusters of tab:crest", "(H2O)6 (H2O)8 (NH3)8 C10 Si10 C20", " ".join(pairs))
 
     def counts(name: str) -> tuple[int, int, int, int]:
         a, c = pairs[name]["anneal"], pairs[name]["crest"]
@@ -7092,10 +7097,10 @@ def crest_table(audit: Audit) -> None:
     audit.cell(TEX, "the hexamer charges one count", "1", float(len(charged)))
     records = octamer_records(audit)
     for path in (TEX, COVER):
-        audit.said(path, f"On tight-binding clusters the search loses to CREST on the water hexamer, {hits_of(anneal)} "
-                         f"of {len(anneal)} runs against {hits_of(crest)} of {len(crest)} \\((p={p:.2f})\\), and, "
-                         "with the opt-in \\texttt{polish\\_on\\_improve} option, wins "
-                         "on the water octamer and the ten-atom carbon ring.")
+        audit.said(path, f"On tight-binding clusters the hit counts are {hits_of(anneal)} of {len(anneal)} against "
+                         f"{hits_of(crest)} of {len(crest)} and the difference is not significant, and the search "
+                         "wins on the ten-atom carbon ring and, with the opt-in \\texttt{polish\\_on\\_improve} option, on "
+                         "the water octamer.")
     if records is not None:
         water, nh3 = records["h2o8"], records["nh3"]
         audit.said(TEX, f"On GFN2-xTB clusters CREST hits the water hexamer on {hits_of(crest)} of {len(crest)} runs "
