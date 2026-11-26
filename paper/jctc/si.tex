@@ -762,13 +762,17 @@ the 0.90~ps arm, whose calls are nearest those of this code.
 On (H\(_2\)O)\(_8\), seeds 2000--2011 of this code run with the opt-in
 polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
 seeds 17000--17011.
-Both arms record the first-hit call.
+Medians are over all 12 runs. A miss counts as the budget plus one.
+CREST budget is 151738.
 This code hits 12 of 12 seeds at a median of 6193, and CREST hits 7 of 12
-at a median of 141621.5, with a miss counted as the budget plus one.
+at a median of 141621.5.
+\texttt{calls\_to\_hit} includes polish-on-improve calls;
+\texttt{charged\_calls}, the run total, is larger on every seed.
 The two-sided Fisher exact test gives \(p=0.0373\).
-The two-sided exact Mann--Whitney test on the first-hit calls gives \(U=0\)
-and \(p=7.4\times 10^{-7}\).
-The median ratio is 22.87, and the bootstrap 95\% interval is 10.35 to 34.57.
+Mann--Whitney \(U=0\) for this code against CREST, pairs with its call larger,
+is complete separation (\(p=7.4\times 10^{-7}\)):
+its runs hit in fewer calls than every CREST run.
+The median ratio is 22.87, bootstrap 95\% interval 10.35 to 34.57.
 The rows of this code are \path{bench/octamer-matched/h2o8/poi/results.csv}
 and the CREST rows are \path{bench/h2o8-crest-firsthit/rows.csv}.
 The comparison is \path{bench/h2o8-poi-vs-crest/results.json}.

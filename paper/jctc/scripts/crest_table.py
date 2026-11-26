@@ -162,11 +162,9 @@ def table() -> str:
         "\\begin{table}",
         "\\caption{This code against CREST 3.0.2 on GFN2-xTB clusters.",
         "Both arms count GFN2-xTB energy and gradient calls.",
-        "CREST calls is the median calls of the complete CREST runs, and a pair is kept only",
-        "when the budget of this code is at least that median; an aborted CREST run is dropped",
-        "from its pair.",
+        "CREST calls is the median of the complete runs kept by the budget rule.",
         f"The (NH\\(_3\\))\\(_8\\) row is the hit rate on {len(nh3['anneal'])} seeds of this code "
-        f"and {len(nh3['crest'])} CREST runs.",
+        f"and {len(nh3['crest'])} CREST runs and is not budget- or seed-matched.",
         "\\(p\\) is the two-sided Fisher exact test on the hits.",
         "The Supporting Information gives the settings, revisions, records, and the arms that",
         "the budget rule removes.}",

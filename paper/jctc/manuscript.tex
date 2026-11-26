@@ -53,7 +53,8 @@ Under independent starts and shared wall caps, the search reaches four of
 five atomic and all four Morse references, while the two Atomic Simulation
 Environment optimizers reach one Lennard-Jones minimum, once.
 On tight-binding clusters the search loses to CREST on the water hexamer,
-1 of 12 runs against 4 of 12 \((p=0.32)\), and wins on the water octamer
+1 of 12 runs against 4 of 12 \((p=0.32)\), and, with the opt-in
+\texttt{polish\_on\_improve} option, wins on the water octamer
 and the ten-atom carbon ring.
 \end{abstract}
 
@@ -914,13 +915,17 @@ median of 3055.
 On (H\(_2\)O)\(_8\), seeds 2000--2011 of this code run with the opt-in
 polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
 seeds 17000--17011.
-Both arms record the first-hit call.
+Medians are over all 12 runs. A miss counts as the budget plus one.
+CREST budget is 151738.
 This code hits 12 of 12 seeds at a median of 6193, and CREST hits 7 of 12
-at a median of 141621.5, with a miss counted as the budget plus one.
+at a median of 141621.5.
+\texttt{calls\_to\_hit} includes polish-on-improve calls;
+\texttt{charged\_calls}, the run total, is larger on every seed.
 The two-sided Fisher exact test gives \(p=0.0373\).
-The two-sided exact Mann--Whitney test on the first-hit calls gives \(U=0\)
-and \(p=7.4\times 10^{-7}\).
-The median ratio is 22.87, and the bootstrap 95\% interval is 10.35 to 34.57.
+Mann--Whitney \(U=0\) for this code against CREST, pairs with its call larger,
+is complete separation (\(p=7.4\times 10^{-7}\)):
+its runs hit in fewer calls than every CREST run.
+The median ratio is 22.87, bootstrap 95\% interval 10.35 to 34.57.
 This code hits the ammonia octamer on 10 of 12 seeds and CREST on 6 of 6
 (\(p=0.529\)).
 This code hits the C\(_{10}\) ring on 11 of 12 seeds and CREST on 4
@@ -934,10 +939,8 @@ the CREST arms that the budget rule removes.
 \begin{table}
 \caption{This code against CREST 3.0.2 on GFN2-xTB clusters.
 Both arms count GFN2-xTB energy and gradient calls.
-CREST calls is the median calls of the complete CREST runs, and a pair is kept only
-when the budget of this code is at least that median; an aborted CREST run is dropped
-from its pair.
-The (NH\(_3\))\(_8\) row is the hit rate on 12 seeds of this code and 6 CREST runs.
+CREST calls is the median of the complete runs kept by the budget rule.
+The (NH\(_3\))\(_8\) row is the hit rate on 12 seeds of this code and 6 CREST runs and is not budget- or seed-matched.
 \(p\) is the two-sided Fisher exact test on the hits.
 The Supporting Information gives the settings, revisions, records, and the arms that
 the budget rule removes.}

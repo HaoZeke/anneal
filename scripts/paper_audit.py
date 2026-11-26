@@ -6868,7 +6868,7 @@ H2O8_CREST_COMMIT = "7ad8eab67d61f1d5835a9ce7b67e7b2cb2b4ede9"
 H2O8_CREST_TREE = "e161694dae3f663d407763dd1f415127b9bedb69"
 NH3_RECORD_COMMIT = "d3c3e351e2bfd8c26a279943a26e5a8230467284"
 NH3_RECORD_TREE = "47353ceea9816654aa80b95d35062d482be10dba"
-_STALE_H2O8 = ("15.47", "8253.5", "8 of 8", "8/8")
+_STALE_H2O8 = ("15.47", "8253.5", "8 of 8", "8/8", "91817")
 
 
 def _record_text(commit: str, path: str) -> str:
@@ -6906,14 +6906,19 @@ def h2o8_prose(row: dict[str, object]) -> str:
     return (
         f"On (H\\(_2\\)O)\\(_8\\), seeds {row['anneal_seeds']} of this code run with the "
         f"opt-in polish-on-improvement option (\\texttt{{polish\\_on\\_improve}}), and CREST uses "
-        f"seeds {row['crest_seeds']}. Both arms record the first-hit call. "
+        f"seeds {row['crest_seeds']}. "
+        f"Medians are over all {row['anneal_n']} runs. A miss counts as the budget plus one. "
+        f"CREST budget is {row['crest_budget']}. "
         f"This code hits {row['anneal_hits']} of {row['anneal_n']} seeds at a median of "
         f"{_call_text(float(row['anneal_median']))}, and CREST hits {row['crest_hits']} of {row['crest_n']} "
-        f"at a median of {_call_text(float(row['crest_median']))}, with a miss counted as the budget plus one. "
+        f"at a median of {_call_text(float(row['crest_median']))}. "
+        f"\\texttt{{calls\\_to\\_hit}} includes polish-on-improve calls; "
+        f"\\texttt{{charged\\_calls}}, the run total, is larger on every seed. "
         f"The two-sided Fisher exact test gives \\(p={float(row['fisher']):.4f}\\). "
-        f"The two-sided exact Mann--Whitney test on the first-hit calls gives \\(U={int(row['u'])}\\) "
-        f"and \\(p={pp(float(row['mannwhitney']))}\\). The median ratio is "
-        f"{float(row['ratio']):.2f}, and the bootstrap 95\\% interval is "
+        f"Mann--Whitney \\(U={int(row['u'])}\\) for this code against CREST, pairs with its call larger, "
+        f"is complete separation (\\(p={pp(float(row['mannwhitney']))}\\)): "
+        f"its runs hit in fewer calls than every CREST run. "
+        f"The median ratio is {float(row['ratio']):.2f}, bootstrap 95\\% interval "
         f"{float(row['low']):.2f} to {float(row['high']):.2f}."
     )
 
@@ -6959,6 +6964,14 @@ def octamer_records(audit: Audit) -> dict[str, dict[str, object]] | None:
     audit.record(miss_rule, "bench/h2o8-crest-firsthit/rows.csv",
                  "a CREST miss is stored as the budget plus one", "budget+1",
                  "budget+1" if miss_rule else "other")
+    miss_budgets = {int(float(r["total_calls"])) for r in misses}
+    audit.record(len(miss_budgets) == 1, "bench/h2o8-crest-firsthit/rows.csv",
+                 "CREST misses share one stored budget", "1", str(len(miss_budgets)))
+    crest_budget = next(iter(miss_budgets)) if len(miss_budgets) == 1 else None
+    driver = _record_text(H2O8_CREST_COMMIT, "bench/h2o8-crest-firsthit/run.py")
+    audit.record(crest_budget is not None and f"BUDGET = {crest_budget}" in driver,
+                 "bench/h2o8-crest-firsthit/run.py", "CREST budget constant",
+                 str(crest_budget), f"BUDGET = {crest_budget}")
     audit.record(summary["anneal"]["calls"] == anneal_calls and summary["crest"]["calls"] == crest_calls,
                  "bench/h2o8-poi-vs-crest/results.json", "the summary call lists are the row calls",
                  "equal", "equal" if summary["anneal"]["calls"] == anneal_calls and summary["crest"]["calls"] == crest_calls else "differ")
@@ -6979,6 +6992,23 @@ def octamer_records(audit: Audit) -> dict[str, dict[str, object]] | None:
     ratio = crest_median / anneal_median
     recorded_ratio = float(summary["median_ratio_crest_over_anneal"]["ratio"])
     audit.cell("bench/h2o8-poi-vs-crest/results.json", "median ratio", f"{recorded_ratio:.2f}", ratio)
+    hit_only = median([float(int(r["first_hit_call"])) for r in crest if r["hit"] == "1"])
+    audit.record(abs(hit_only - crest_median) > 1e-9, "bench/h2o8-crest-firsthit/rows.csv",
+                 "the headline CREST median is not the hits-only median",
+                 _call_text(crest_median), _call_text(hit_only))
+
+    def charged_total(row: dict[str, str]) -> int:
+        return int(float(row["charged_calls"] or row["charged"]))
+
+    charged_larger = all(charged_total(r) > int(r["calls_to_hit"]) for r in anneal)
+    polish_recorded = all(int(r["polish_calls"]) > 0 for r in anneal)
+    audit.record(charged_larger and polish_recorded, "bench/octamer-matched/h2o8/poi/results.csv",
+                 "charged_calls exceeds calls_to_hit and polish calls are recorded",
+                 "larger", "larger" if charged_larger and polish_recorded else "not larger")
+    separated = max(anneal_calls) < min(crest_calls)
+    audit.record(separated, "bench/h2o8-poi-vs-crest/results.json",
+                 "every call of this code is below every CREST call",
+                 "separated", "separated" if separated else "overlap")
     water = {
         "anneal_seeds": _seed_span([int(r["seed"]) for r in anneal]),
         "crest_seeds": _seed_span([int(r["seed"]) for r in crest]),
@@ -6988,6 +7018,7 @@ def octamer_records(audit: Audit) -> dict[str, dict[str, object]] | None:
         "crest_n": len(crest),
         "anneal_median": anneal_median,
         "crest_median": crest_median,
+        "crest_budget": crest_budget,
         "fisher": fisher_p,
         "u": rank_u,
         "mannwhitney": float(summary["mann_whitney"]["p_value"]),
@@ -7062,7 +7093,8 @@ def crest_table(audit: Audit) -> None:
     records = octamer_records(audit)
     for path in (TEX, COVER):
         audit.said(path, f"On tight-binding clusters the search loses to CREST on the water hexamer, {hits_of(anneal)} "
-                         f"of {len(anneal)} runs against {hits_of(crest)} of {len(crest)} \\((p={p:.2f})\\), and wins "
+                         f"of {len(anneal)} runs against {hits_of(crest)} of {len(crest)} \\((p={p:.2f})\\), and, "
+                         "with the opt-in \\texttt{polish\\_on\\_improve} option, wins "
                          "on the water octamer and the ten-atom carbon ring.")
     if records is not None:
         water, nh3 = records["h2o8"], records["nh3"]
