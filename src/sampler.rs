@@ -3,7 +3,7 @@
 //! Stan's `base_mcmc::transition` (`stan/mcmc/base_mcmc.hpp:21`) factors
 //! the per-step logic into one virtual call, with the driver loop in
 //! `services/util/generate_transitions.hpp:42` independent of which
-//! sampler is wired. Our `run_rs` previously monomorphised on five type
+//! sampler is wired. Without it, `run_rs` is monomorphised on five type
 //! parameters `<O, C, N, M, A>`; this trait gives the driver a single
 //! type bound and a single dispatch point.
 

@@ -1,0 +1,1 @@
+The paper table generators, the paper audit and the record ingest now share one check of a tuned GMIN row and one definition of a held revision, in ``scripts/revision_reach.py``. The generator no longer keeps a copy that could give a different verdict for the same row.

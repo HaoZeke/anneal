@@ -4,8 +4,8 @@
 # stay under /work. Run on a host named bench:
 #   sudo unshare --uts sh -c 'hostname bench; sh paper/jctc/scripts/xtb680_build.sh'
 set -eu
-if [ "$(hostname)" != bench ]; then
-  echo "xtb680_build: hostname is $(hostname), want bench" >&2
+if [ "$(python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label)" != bench ]; then
+  echo "xtb680_build: hostname is $(python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label), want bench" >&2
   exit 1
 fi
 root=/work/xtb-6.8.0

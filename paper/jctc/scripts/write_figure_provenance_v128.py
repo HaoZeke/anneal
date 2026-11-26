@@ -10,19 +10,22 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[3]
 BLOB = "b3b5395211f02202c2f912e4475fa594d82c8cef"
 
 
 def main() -> int:
     found = subprocess.run(
         ["git", "cat-file", "-t", BLOB],
+        cwd=ROOT,
         text=True,
         capture_output=True,
     )
     if found.returncode != 0 or found.stdout.strip() != "blob":
         raise SystemExit(f"missing blob {BLOB}")
-    sys.stdout.buffer.write(subprocess.check_output(["git", "cat-file", "blob", BLOB]))
+    sys.stdout.buffer.write(subprocess.check_output(["git", "cat-file", "blob", BLOB], cwd=ROOT))
     return 0
 
 

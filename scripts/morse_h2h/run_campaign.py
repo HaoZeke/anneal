@@ -32,6 +32,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
+    host_label,
     machine_columns,
     read_built_gmin_source,
     require_csv_schema,
@@ -246,7 +247,7 @@ def write_per_seed_row(
         "gmin_build_key": stamped_build_key,
         "anneal_head": head if arm == "anneal" else "",
         "code_revision": code_revision,
-        "host": os.uname().nodename if host is None else host,
+        "host": host_label(os.uname().nodename) if host is None else host,
         **machine,
     }
     with path.open("w", newline="") as handle:
@@ -458,7 +459,7 @@ def summarise(rows, seeds, url, revision, head, machine: dict[str, str] | None =
                     "gmin_revision": revision,
                     "anneal_head": head,
                     "code_revision": code_revision,
-                    "host": " ".join(hosts) if hosts else os.uname().nodename,
+                    "host": " ".join(hosts) if hosts else host_label(os.uname().nodename),
                     **group_machine,
                 }
             )
@@ -588,7 +589,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
         return 0
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()

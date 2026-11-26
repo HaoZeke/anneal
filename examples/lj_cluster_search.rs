@@ -17,6 +17,9 @@ mod checkpoint_deposits;
 #[path = "common/ensemble_report.rs"]
 mod ensemble_report;
 #[cfg(feature = "bank-rpc")]
+#[path = "common/host_label.rs"]
+mod host_label;
+#[cfg(feature = "bank-rpc")]
 use checkpoint_deposits::{with_pending_bias_update, with_pending_deposits};
 
 #[cfg(feature = "bank-rpc")]
@@ -1653,7 +1656,8 @@ fn main() {
                 Some(&mut grad),
                 &mut archive,
                 &mut rng_ras,
-            );
+            )
+            .expect("finite start");
             let hit = reference
                 .map(|r| anneal_core::energy_hits(out.best, r, anneal_core::SEARCH_HIT_TOL))
                 .unwrap_or(false);
@@ -2475,7 +2479,10 @@ fn main() {
             #[cfg(feature = "bank-rpc")]
             {
                 if let Some(endpoint) = catalog_rpc.as_deref() {
-                    println!("  isolated descriptor catalog {endpoint}");
+                    println!(
+                        "  isolated descriptor catalog {}",
+                        host_label::endpoint_label(endpoint)
+                    );
                 } else {
                     println!("  descriptor-catalog control with sharing disabled");
                 }
@@ -2498,7 +2505,10 @@ fn main() {
         } else if let Some(endpoint) = bank_rpc {
             #[cfg(feature = "bank-rpc")]
             {
-                println!("  capnp compatibility bank {endpoint}");
+                println!(
+                    "  capnp compatibility bank {}",
+                    host_label::endpoint_label(&endpoint)
+                );
                 run_capnp_bank(&cfg, &mut ledger, &mut relax, &mut grad, seed, &endpoint)
             }
             #[cfg(not(feature = "bank-rpc"))]
@@ -4105,7 +4115,8 @@ fn run_capnp_catalog(
                     .expect("configured replica must accept its catalog client");
             }
             Err(error) => eprintln!(
-                "catalog {endpoint} unavailable ({error}); local execution remains active"
+                "catalog {} unavailable ({error}); local execution remains active",
+                host_label::endpoint_label(endpoint)
             ),
         }
     }
@@ -7396,7 +7407,10 @@ fn run_capnp_bank(
     let mut client = match BankClient::connect(sock) {
         Ok(c) => Some(c),
         Err(e) => {
-            println!("  bank {sock} down ({e}); own walk");
+            println!(
+                "  bank {} down ({e}); own walk",
+                host_label::endpoint_label(sock)
+            );
             None
         }
     };

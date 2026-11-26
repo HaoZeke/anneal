@@ -137,7 +137,7 @@ impl Gupta {
     /// Copper atoms followed by gold atoms.
     ///
     /// The species labels are [`COPPER_Z`] then [`GOLD_Z`]. A homotop keeps
-    /// that labelling and exchanges coordinates.
+    /// that labeling and exchanges coordinates.
     pub fn copper_gold(n_copper: usize, n_gold: usize) -> Self {
         Self::elements(&Self::copper_gold_species(n_copper, n_gold))
     }
@@ -164,7 +164,7 @@ impl Gupta {
     /// Platinum atoms followed by copper atoms.
     ///
     /// The species labels are `PLATINUM_Z` then [`COPPER_Z`]. A homotop
-    /// keeps that labelling and exchanges coordinates.
+    /// keeps that labeling and exchanges coordinates.
     pub fn platinum_copper(n_platinum: usize, n_copper: usize) -> Self {
         Self::from_slots(
             {

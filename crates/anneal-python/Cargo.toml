@@ -15,8 +15,14 @@ crate-type = ["cdylib"]
 # maturin and CI pass `--features python`; the module is always the
 # Python build of anneal-core.
 python = []
+# Residual archive search. The default wheel leaves this off.
+graphkey = ["anneal-core/graphkey"]
 
 [dependencies]
-anneal-core = { path = "../..", features = ["python-host"] }
+# [[[cog
+# cog.outl('anneal-core = { version = "%s", path = "../..", features = ["python-host"] }' % anneal_version.package_version())
+# ]]]
+anneal-core = { version = "0.12.0", path = "../..", features = ["python-host"] }
+# [[[end]]]
 pyo3 = { version = "0.26", features = ["extension-module", "abi3-py310"] }
 rgpot-pair = { git = "https://github.com/OmniPotentRPC/rgpot", rev = "8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e" }

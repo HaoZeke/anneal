@@ -44,7 +44,7 @@ export SEED_OFFSET="${OFFSETS[$SLURM_ARRAY_TASK_ID]}"
 
 echo "arm ${NAME}, flags '${ARM}', seed offset ${SEED_OFFSET}, LJ${N}, ${BUDGET} charged evaluations, ${SEEDS} seeds"
 echo "binary $(ls -la "$BIN")"
-echo "host $(hostname)"
+echo "host $(python3 "$HOME/anneal-morphcv/scripts/machine_provenance.py" host-label)"
 date -Is
 
 "$BIN" lj "$N" "$BUDGET" "$SEEDS" "$ARM"

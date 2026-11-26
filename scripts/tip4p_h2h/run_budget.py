@@ -3,7 +3,7 @@
 """(H2O)21 head-to-head, anneal against GMIN, across a budget sweep.
 
 Same serial arm as ``run_h2h.py`` -- one core, hostname bench, working
-directory /work, both codes from the same molecular centres -- but for one
+directory /work, both codes from the same molecular centers -- but for one
 size at several charged-evaluation budgets. anneal runs ``recommended``, the
 develop default preset, with no replica ladder. GMIN is the fixed step. A hit
 is a quenched energy at or below the Cambridge header plus ``HIT_TOL``; a miss
@@ -37,6 +37,7 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     default_gmin_source_metadata,
+    host_label,
     machine_columns,
     read_built_gmin_provenance,
     require_csv_schema,
@@ -358,8 +359,8 @@ def main() -> int:
     parser.add_argument("--gmin-source", type=Path)
     parser.add_argument("--svnrev", type=Path, required=True)
     args = parser.parse_args()
-    if socket.gethostname() != "bench":
-        print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
+    if host_label(socket.gethostname()) != "bench":
+        print(f"hostname is {host_label(socket.gethostname())}, not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
@@ -376,7 +377,7 @@ def main() -> int:
         source_path,
     )
     revision, gmin_build_key = read_built_gmin_provenance(args.svnrev, source_path)
-    host = os.uname().nodename
+    host = host_label(os.uname().nodename)
     machine = machine_columns()
     reuse = load_reuse(args.gmin_rows, revision, gmin_build_key)
     n = args.size

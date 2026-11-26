@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # Copyright (c) anneal developers
-# Behaviour tests for the shell scripts in the coverage list.
+# Behavior tests for the shell scripts in the coverage list.
 
 setup() {
   ROOT="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"

@@ -20,7 +20,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use crate::methods::cluster_hopping::{Ledger, Outcome, Relax, random_cluster};
+use crate::methods::cluster_hopping::{ChargeName, Ledger, Outcome, Relax, random_cluster};
 use crate::potentials::PairKind;
 
 use std::collections::VecDeque;
@@ -300,7 +300,7 @@ pub fn optimise_occupation_over(
     let frac = 2.0 / n.max(1) as f64;
     let mut moves = 0usize;
     while moves < cfg.max_moves {
-        if !ledger.charge() {
+        if !ledger.with_charge_name(ChargeName::Reoccupy, |ledger| ledger.charge()) {
             break;
         }
         let energies: Vec<f64> = (0..n)
@@ -319,7 +319,8 @@ pub fn optimise_occupation_over(
         let mut best: Option<(usize, [f64; 3], f64)> = None;
         for &atom in order.iter().take(movers.max(1)) {
             for site in &sites {
-                if !ledger.charge_frac(frac) {
+                if !ledger.with_charge_name(ChargeName::Reoccupy, |ledger| ledger.charge_frac(frac))
+                {
                     return (Array1::from(cur), moves);
                 }
                 let gain = energies[atom] - site_energy(cfg.kind, &cur, Some(atom), *site);
@@ -354,7 +355,7 @@ pub fn construct(
     let mut last_moved: Option<usize> = None;
     while moves < cfg.max_moves && !sites.is_empty() {
         // Per-point energies: one full evaluation's worth of pair terms.
-        if !ledger.charge() {
+        if !ledger.with_charge_name(ChargeName::Reoccupy, |ledger| ledger.charge()) {
             break;
         }
         let energies: Vec<f64> = (0..n)
@@ -366,7 +367,7 @@ pub fn construct(
             .unwrap_or(0);
         let mut best: Option<(usize, f64)> = None;
         for (s, site) in sites.iter().enumerate() {
-            if !ledger.charge_frac(frac) {
+            if !ledger.with_charge_name(ChargeName::Reoccupy, |ledger| ledger.charge_frac(frac)) {
                 return (Array1::from(cur), moves);
             }
             let e = site_energy(cfg.kind, &cur, Some(worst), *site);
@@ -554,7 +555,7 @@ pub fn place_successively_on(
             {
                 continue;
             }
-            if !ledger.charge_frac(frac) {
+            if !ledger.with_charge_name(ChargeName::Reoccupy, |ledger| ledger.charge_frac(frac)) {
                 break;
             }
             let e = site_energy(cfg.kind, &placed, None, *site);
@@ -617,7 +618,7 @@ pub fn walk_occupation_on(
     let mut lattice: Vec<[f64; 3]> = (0..n).map(|i| point(&xs, i)).collect();
     lattice.extend_from_slice(vacant_sites);
     let m = lattice.len();
-    if m <= n || !ledger.charge() {
+    if m <= n || !ledger.with_charge_name(ChargeName::Reoccupy, |ledger| ledger.charge()) {
         return x.to_owned();
     }
     let kind = cfg.kind;
@@ -634,7 +635,7 @@ pub fn walk_occupation_on(
     let mut rng = StdRng::seed_from_u64(seed);
     let t_hi = OCCUPATION_WALK_START_RATIO * temperature;
     for step in 0..steps {
-        if !ledger.charge_frac(frac) {
+        if !ledger.with_charge_name(ChargeName::Reoccupy, |ledger| ledger.charge_frac(frac)) {
             break;
         }
         let progress = step as f64 / steps.max(1) as f64;
@@ -647,7 +648,7 @@ pub fn walk_occupation_on(
         if delta > 0.0 && rng.random::<f64>() >= (-delta / temperature).exp() {
             continue;
         }
-        if !ledger.charge_frac(frac) {
+        if !ledger.with_charge_name(ChargeName::Reoccupy, |ledger| ledger.charge_frac(frac)) {
             break;
         }
         let old = point(&cur, i);
@@ -888,7 +889,7 @@ fn full_pairs(n: usize) -> f64 {
 /// units that charge settled. The residue under one unit is not a call.
 pub(crate) fn charge_oracle(ledger: &mut Ledger, frac: f64) -> bool {
     let before = ledger.spent();
-    let ok = ledger.charge_frac(frac);
+    let ok = ledger.with_charge_name(ChargeName::Lattice, |ledger| ledger.charge_frac(frac));
     oracle_add(ledger.spent().saturating_sub(before));
     ok
 }
@@ -991,7 +992,7 @@ impl Quench {
     /// ledger that runs out later ends the quench where it stands, unconverged.
     pub fn relax(&self, ledger: &mut Ledger, start: &[f64]) -> Option<Relaxed> {
         let dim = start.len();
-        if dim == 0 || !ledger.charge() {
+        if dim == 0 || !ledger.with_charge_name(ChargeName::Quench, |ledger| ledger.charge()) {
             return None;
         }
         let memory = self.memory.max(1);
@@ -1056,7 +1057,7 @@ impl Quench {
                 for i in 0..dim {
                     xn[i] = x[i] + step * d[i];
                 }
-                if !ledger.charge() {
+                if !ledger.with_charge_name(ChargeName::Quench, |ledger| ledger.charge()) {
                     return Some(Relaxed {
                         energy: e,
                         state: x,
@@ -2475,7 +2476,7 @@ mod tests {
         true
     }
 
-    /// Relabelling must not move a vacant site.
+    /// Relabeling must not move a vacant site.
     ///
     /// The base merge keeps the first hollow in atom-index order, so
     /// this assertion fails there. The centroid order passes.
@@ -2519,13 +2520,13 @@ mod tests {
                 let sites_b = lattice.sites(&moved);
                 assert!(
                     same_points(&sites, &sites_b),
-                    "vacant sites moved under a relabelling"
+                    "vacant sites moved under a relabeling"
                 );
             }
         }
     }
 
-    /// Relabelling a minimum must not move a vacant site or a draw.
+    /// Relabeling a minimum must not move a vacant site or a draw.
     #[test]
     fn vacant_sites_and_move_probabilities_ignore_labels() {
         use rand::SeedableRng;
@@ -2574,14 +2575,14 @@ mod tests {
                 let sites_b = lattice.sites(&moved);
                 assert!(
                     same_points(&sites, &sites_b),
-                    "vacant sites moved under a relabelling"
+                    "vacant sites moved under a relabeling"
                 );
                 let law_b = lattice
                     .exchange_probabilities(&moved, 0.8)
-                    .expect("relabelled minimum offers an exchange");
+                    .expect("relabeled minimum offers an exchange");
                 assert!(
                     same_law(&law, &law_b),
-                    "move probabilities moved under a relabelling"
+                    "move probabilities moved under a relabeling"
                 );
             }
         }

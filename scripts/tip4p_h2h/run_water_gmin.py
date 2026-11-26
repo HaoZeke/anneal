@@ -3,7 +3,7 @@
 """(H2O)n head-to-head, anneal's default preset against GMIN's rigid-body
 TIP4P basin-hopping, at n = 8, 12, 16, 20 and 21, twelve seeds, one core.
 
-Both arms open the same molecular centres (``h2h_seed`` writes the start, GMIN
+Both arms open the same molecular centers (``h2h_seed`` writes the start, GMIN
 reads it as ``coords``) and stop at 2_000_000 charged evaluations or at the
 Cambridge Cluster Database header plus 0.001 kJ/mol, whichever is first.
 
@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from machine_provenance import (  # noqa: E402
     default_gmin_source_metadata,
+    host_label,
     machine_columns,
     read_built_gmin_provenance,
     require_csv_schema,
@@ -73,13 +74,6 @@ FIELDS = [
     "best", "wall_s", "pot_s", "outside_s", "basins", "start_sha1",
     "code_revision", "gmin_build_key", "host", "cpu", "machine_id", "cpu_model",
 ]
-
-
-def cpu_model() -> str:
-    for line in Path("/proc/cpuinfo").read_text().splitlines():
-        if line.startswith("model name"):
-            return line.split(":", 1)[1].strip()
-    return ""
 
 
 def sha1(path: Path) -> str:
@@ -237,8 +231,8 @@ def main() -> int:
     parser.add_argument("--size", type=int, choices=SIZES)
     parser.add_argument("--seed", type=int)
     args = parser.parse_args()
-    if socket.gethostname() != "bench":
-        print(f"hostname is {socket.gethostname()}, not bench", file=sys.stderr)
+    if host_label(socket.gethostname()) != "bench":
+        print(f"hostname is {host_label(socket.gethostname())}, not bench", file=sys.stderr)
         return 2
     if Path.cwd() != Path("/work"):
         print(f"cwd is {Path.cwd()}, not /work", file=sys.stderr)
@@ -257,8 +251,8 @@ def main() -> int:
     write_gm_blocks(args.repo, args.gm_dir)
     verify(args.point, args.gmin, args.verify_data, args.gm_dir, args.verify_out, args.work)
 
-    host, cpu = socket.gethostname(), cpu_model()
     machine = machine_columns()
+    host, cpu = host_label(socket.gethostname()), machine["cpu_model"]
     require_csv_schema(args.rows, FIELDS)
     stored = read_rows(args.rows)
     sizes = (args.size,) if args.size else SIZES

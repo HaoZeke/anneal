@@ -18,6 +18,10 @@ import os
 import socket
 import subprocess
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from machine_provenance import host_label  # noqa: E402
 
 SYSTEMS = (
     ("m80r3", "h2h_morse", ("run", "m80r3")),
@@ -253,7 +257,7 @@ def main():
         return
     if not args.examples or not args.revision or not args.out:
         parser.error("--examples, --revision and --out are required")
-    host = args.host or socket.gethostname()
+    host = args.host or host_label(socket.gethostname())
     written = []
     for seed in seeds_of(args.seeds):
         for system, binary, prefix in SYSTEMS:

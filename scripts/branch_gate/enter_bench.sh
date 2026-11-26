@@ -14,7 +14,7 @@ ROOT=$(cd "$HERE/../.." && pwd)
 DEVELOP=${DEVELOP_REV:-c2de652dca0bc75e2b0cb4afffac91fd656404e4}
 BRANCH=${BRANCH_REV:-$(git -C "$ROOT" rev-parse HEAD)}
 WORK=/work/branch-gate
-OUT=$ROOT/bench/branch-gate
+OUT=${BRANCH_GATE_OUT:-$ROOT/bench/branch-gate}
 cargo_home=${CARGO_HOME:-$HOME/.cargo}
 examples="--example h2h_gmin_proof --example h2h_morse --example h2h_metal"
 
@@ -56,6 +56,7 @@ for arm in develop branch; do
 done
 sha256sum "$WORK"/develop-bin/* "$WORK"/branch-bin/* > "$WORK/bin-sha256.txt"
 cp -f "$HERE/run_gate.py" "$WORK/run_gate.py"
+python3 "$ROOT/scripts/stage_python.py" "$WORK" --from "$HERE" --from "$ROOT/scripts"
 # Captured before HOME moves, so the summary can import scipy.
 user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 

@@ -1,3 +1,4 @@
+use anneal_core::catalog::molecular::{bohr_angstrom, hartree_ev};
 use anneal_core::catalog::{DescriptorSignature, EngineSignature, SystemSignature};
 use std::collections::BTreeMap;
 
@@ -34,7 +35,7 @@ fn signature_with_map_order(reverse: bool) -> SystemSignature {
         cell: Some([12.0, 0.0, 0.0, 0.0, 13.0, 0.0, 0.0, 0.0, 14.0]),
         periodic: [true, true, false],
         length_scale: 1.0,
-        energy_scale: 27.211_386_245_988,
+        energy_scale: hartree_ev(),
         engine: EngineSignature {
             kind: "xtb".to_owned(),
             config_digest: digest(0x11),
@@ -105,7 +106,7 @@ fn every_contract_field_changes_identity() {
     assert_distinct(&base, &changed);
 
     let mut changed = base.clone();
-    changed.length_scale = 0.529_177_210_903;
+    changed.length_scale = bohr_angstrom();
     assert_distinct(&base, &changed);
 
     let mut changed = base.clone();

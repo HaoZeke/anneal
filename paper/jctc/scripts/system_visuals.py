@@ -3,9 +3,10 @@
 """The structures and maps of the benchmark systems, for the figures of the main text and the SI.
 
 Reads rewrite_2026/data/system_visuals/: structures/ holds the reference minima that the
-tests of anneal check, copied byte for byte from tests/fixtures/ of the published anneal
-commit, and landfold/ the output of occupancy_landfold_book of that commit on the
-archived minima dumps of data/landscapes_7695255/. provenance.txt records the commit,
+tests of anneal check, copied byte for byte from tests/fixtures/ of structures_commit,
+hexamer_gfn2/ the GFN2-xTB hexamers that hexamer_gfn2_relax.py relaxed with xtb 6.7.1,
+and landfold/ the output of occupancy_landfold_book of landfold_book_commit on the
+archived minima dumps of data/landscapes_7695255/. provenance.txt records those commits,
 the build, the command of each map and the digest of every file this script reads,
 including the water geometries of data/hq_sci_h2o6/, data/w6gofee4k/ and data/w6nwpbe/.
 
@@ -13,7 +14,7 @@ ccd/ holds the coordinates of the Cambridge Cluster Database for every other ref
 the tables of the Supporting Information that needs only coordinates, at the paths of
 their URLs, and references.csv the published energy of each reference structure, as the
 table of the database it names prints it. sketchmap/ holds the reference minima the
-sketch-map runs of the paper at 028d995 pinned and the projection of each size that
+sketch-map runs pinned and the projection of each size that
 sketchmap_landscapes.py writes.
 
 Each reference structure is at its published energy, recomputed from its coordinates: the
@@ -24,7 +25,9 @@ Sutton--Chen 10-8 energy of a Pt file to 1e-4 epsilon; and the TIP4P energy of r
 molecules within 5e-3 kJ/mol and no more than 1e-3 above the published value, the test of
 anneal, since the files round the coordinates to seven places. A hexamer of each class is
 the lowest of the archived minima of one engine whose oxygens make that many contacts
-under 3.2 Angstrom, the convention of the verifier: 9 prism, 8 cage, 7 book, 6 ring. A
+under 3.2 Angstrom, the convention of the verifier: 9 prism, 8 cage, 7 book, 6 ring. At
+GFN2-xTB it is instead the lowest of those minima after relaxation with xtb 6.7.1, the
+files of hexamer_gfn2/ that hexamer_gfn2_relax.py writes and its RECORD describes. A
 map is one size's fold, whose minima count is the rows of the dumps it read. A landmark of
 a sketch-map is a line of a dump whose digest provenance.txt records, at the energy of
 that line.
@@ -68,7 +71,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / "data" / "system_visuals"
 XYZRENDER = "0.3.8"
 CAIROSVG = "2.9.1"
-# Nearest neighbours of a Lennard-Jones minimum, in sigma, drawn as sticks.
+# Nearest neighbors of a Lennard-Jones minimum, in sigma, drawn as sticks.
 LJ_NEIGHBOUR = 1.35
 # The pictures of a one-species model: for each style, the renderer, the longest pair in
 # sigma it joins (0 joins none), and its settings. xyzrender takes command-line flags;
@@ -101,6 +104,9 @@ ENGINES = {
     "GFN2-xTB": ("hq_sci_h2o6/best_h2o6_eindir_s*.xyz", "w6gofee4k/rec4k_w6_*.min"),
     "PBE/6-31G*": ("w6nwpbe/best_h2o6_rgpot_s*.xyz", "w6nwpbe/w6_nwpbe_*.min"),
 }
+# The hexamers drawn at an engine whose archived minima were relaxed again, one file per
+# class, written by hexamer_gfn2_relax.py with the xtb build its RECORD names.
+RELAXED = {"GFN2-xTB": "system_visuals/hexamer_gfn2/{cls}.xyz"}
 LJ_FILES = ("lj38_fcc", "lj75_marks", "lj98_gm", "lj104_gm")
 TIP4P_FILES = ("tip4p-10", "tip4p-15", "tip4p-20")
 MAP_SIZES = (38, 75, 98)
@@ -116,9 +122,9 @@ TIP4P_C6 = 2552.24
 TIP4P_COULOMB = 1389.354848
 TIP4P_QH = 0.52
 TIP4P_M = 0.15
-# The lengths of each one-species model, scaled so that its nearest neighbours stand as
+# The lengths of each one-species model, scaled so that its nearest neighbors stand as
 # far apart as those of Lennard-Jones, 2^(1/6) sigma: r_e of Morse and a/sqrt(2), the
-# neighbour distance of the fcc lattice, of Sutton--Chen.
+# neighbor distance of the fcc lattice, of Sutton--Chen.
 DRAWN_SCALE = {"Lennard-Jones": 1.0, "Morse": 2 ** (1 / 6), "Sutton--Chen": 2 ** (1 / 6) * math.sqrt(2)}
 ENERGY_DIGITS = {"Lennard-Jones": 6, "Morse": 6, "Sutton--Chen": 4, "TIP4P water": 4}
 VIEWS = {"lj38_fcc": "tilt", "lj98_gm": "pair", "lj13": "tilt", "lj26": "tilt", "lj55": "tilt"}
@@ -171,10 +177,13 @@ def _resolve(data: Path, name: str) -> Path:
 
 
 def _read(data: Path, digests: dict[str, str], name: str) -> str:
-    fetch_paper_data()
     if name not in digests:
         die(f"provenance.txt records no digest of {name}")
     path = _resolve(data, name)
+    if not path.is_file() or digest_of(path) != digests[name]:
+        repo = ROOT.parents[1]
+        if path.resolve().is_relative_to(repo):
+            fetch_paper_data([path.resolve().relative_to(repo).as_posix()])
     if not path.is_file() or digest_of(path) != digests[name]:
         die(f"{name} does not match the digest provenance.txt records")
     return path.read_text()
@@ -445,9 +454,29 @@ def _hexamer_candidates(data, digests, engine: str):
     return found
 
 
+def _relaxed_hexamers(data, digests, engine: str) -> list[Structure]:
+    """The hexamer of each class that hexamer_gfn2_relax.py wrote, at the energy in Eh of its header."""
+    drawn = []
+    for cls in HEXAMER_CLASSES:
+        name = RELAXED[engine].format(cls=cls)
+        header, symbols, coords = _xyz(_read(data, digests, name))
+        if contact_class(symbols, coords) != cls:
+            die(f"{name} is a {contact_class(symbols, coords)}, not a {cls}")
+        _waters(symbols, coords)
+        fields = header.split()
+        energy = float(fields[fields.index("energy:") + 1])
+        key = f"w6_{engine.split('/')[0].split('-')[0].lower()}_{cls}"
+        drawn.append(Structure(key, f"{cls}, {engine}", "Water hexamer", tuple(symbols), tuple(coords),
+                               energy, "Eh", "tilt"))
+    return drawn
+
+
 def _hexamers(data, digests) -> list[Structure]:
     drawn = []
     for engine in ENGINES:
+        if engine in RELAXED:
+            drawn += _relaxed_hexamers(data, digests, engine)
+            continue
         lowest: dict[str, tuple] = {}
         for energy, where, symbols, coords in _hexamer_candidates(data, digests, engine):
             cls = contact_class(symbols, coords)
@@ -586,7 +615,7 @@ def viewed(structure: Structure):
 
     axis looks down the unique axis of the second moments, the five-fold axis of a
     decahedron; pair down the longest sum of the lines to two of the atoms farthest from
-    the centre, the first such pair in file order, which sets the lattice of the Leary
+    the center, the first such pair in file order, which sets the lattice of the Leary
     tetrahedron in rows; tilt turns the principal axes by 25 and 15 degrees.
     """
     import numpy as np
@@ -669,7 +698,7 @@ def render(structure: Structure, style: str = ONE_SPECIES_STYLE) -> bytes:
     with tempfile.TemporaryDirectory() as scratch:
         xyz = Path(scratch) / f"{structure.key}.xyz"
         svg = Path(scratch) / f"{structure.key}.svg"
-        # Ruhi element colours for water: JSON color_overrides, not the NCI CPK palette.
+        # Ruhi element colors for water: JSON color_overrides, not the NCI CPK palette.
         cfg = Path(scratch) / "ruhi_water.json"
         if not lj:
             cfg.write_text(

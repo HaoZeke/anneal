@@ -26,7 +26,7 @@ for _candidate in (
     if (_candidate / "machine_provenance.py").is_file() and str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
         break
-from machine_provenance import machine_columns, require_csv_schema  # noqa: E402
+from machine_provenance import host_label, machine_columns, require_csv_schema  # noqa: E402
 SYSTEMS = ("sc126-80", "sc96-80", "sc108-80", "sc108-55")
 SEEDS = tuple(range(2000, 2012))
 PROBE_SEEDS = (2000, 2007, 2003)
@@ -179,11 +179,11 @@ def main(argv: list[str]) -> int:
         help="repository root the row tables are written under",
     )
     args = parser.parse_args(argv)
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     revision = args.head_file.read_text().strip()
-    host = os.uname().nodename
+    host = host_label(os.uname().nodename)
     path, fields, planned = jobs(args.campaign, args.root.resolve())
     done = load_done(path, args.campaign)
     for variant, system, seed, extra in planned:

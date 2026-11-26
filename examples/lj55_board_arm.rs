@@ -11,6 +11,9 @@
 //!
 //! Usage: `lj55_board_arm <seed> <budget>`
 
+#[path = "common/host_label.rs"]
+mod host_label;
+
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, Outcome, random_cluster, run_with_gradient,
 };
@@ -38,8 +41,8 @@ fn first_line(path: &str) -> String {
 
 fn main() {
     anneal_core::install_rgpot_kernels!();
-    let hostname = first_line("/proc/sys/kernel/hostname");
-    let boot_id = first_line("/proc/sys/kernel/random/boot_id");
+    let hostname = host_label::read_host_label().unwrap_or_else(|| host_label::UNKNOWN.to_string());
+    let boot_id = host_label::read_boot_label().unwrap_or_else(|| host_label::UNKNOWN.to_string());
     let uptime_s = first_line("/proc/uptime")
         .split_whitespace()
         .next()

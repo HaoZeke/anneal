@@ -13,7 +13,7 @@
 //!
 //! # Common neighbour analysis
 //!
-//! Honeycutt and Andersen. Each bonded pair is labelled by three integers: how
+//! Honeycutt and Andersen. Each bonded pair is labeled by three integers: how
 //! many neighbours the two share, how many bonds are among those shared
 //! neighbours, and the longest chain those bonds form. A pair inside an
 //! icosahedral shell gives `555`; a face-centred cubic environment gives `421`
@@ -1689,7 +1689,7 @@ mod ring_tests {
     /// The profile has to separate the two thirteen-point packings by
     /// topology and survive a permutation unchanged.
     #[test]
-    fn rings_separate_packings_and_ignore_labelling() {
+    fn rings_separate_packings_and_ignore_labeling() {
         let a = ring_profile(ico13().view(), 13, 1.2);
         let b = ring_profile(fcc13().view(), 13, 1.2);
         let census = ring_census(ico13().view(), 13, 1.2);

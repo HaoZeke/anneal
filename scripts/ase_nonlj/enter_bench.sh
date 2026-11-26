@@ -87,7 +87,7 @@ PY
 )
 fi
 
-if [[ ! $REV =~ ^[0-9a-f]{40}$ ]]; then
+if ! python3 "$ROOT/scripts/revision_reach.py" full-sha "$REV"; then
   echo "ASE_NONLJ_REVISION must be a full lowercase commit SHA" >&2
   exit 2
 fi

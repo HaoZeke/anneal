@@ -4,7 +4,7 @@ scripts/run_cuh2_fcc_rec.sh
 host
 bench
 boot_id
-8dfa5fef-6e78-4792-b2cb-45d3449a4527
+boot-99207ab7aef54169
 uptime
  23:47:55 up 22:54,  0 user,  load average: 10.17, 9.54, 6.49
 cpuinfo_mhz
@@ -80,7 +80,7 @@ scripts/run_cuh2_fcc_rec.sh
 host
 bench
 boot_id
-8dfa5fef-6e78-4792-b2cb-45d3449a4527
+boot-99207ab7aef54169
 uptime
  23:56:31 up 23:02,  0 user,  load average: 18.24, 16.33, 11.26
 cpuinfo_mhz

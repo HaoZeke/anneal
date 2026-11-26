@@ -2,11 +2,10 @@
 # Copyright (c) anneal developers
 """Draw fig:landscapes: the sketch-map landscape, its minima and the landfold map of LJ38, LJ75 and LJ98.
 
-Each column is one size: the projection of the paper at 028d995 as sketchmap_landscapes.py
-wrote it into data/system_visuals/sketchmap/, read by system_visuals.py, which checks each
+Each column is one size: the projection sketchmap_landscapes.py
+wrote into data/system_visuals/sketchmap/, read by system_visuals.py, which checks each
 landmark against its line of its dump; and under it the landfold map of the same minima,
-the fold that the occupancy book of anneal makes of them after the sigmoid switch. The drawing is that of campaign_landscape.py of that
-commit: the energy of the landmarks interpolated cubically over the plane, smoothed by a
+the fold that the occupancy book of anneal makes of them after the sigmoid switch. The drawing follows the committed landmarks: the energy of the landmarks interpolated cubically over the plane, smoothed by a
 gaussian of four grid steps and clipped to the 97th percentile, as filled contours with
 thin lines; the landmarks of each arm; the deepest landmark of each arm ringed; the
 pinned references; under each map the landmarks of each arm and the energy of its deepest

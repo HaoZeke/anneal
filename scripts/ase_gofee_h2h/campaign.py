@@ -53,6 +53,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 from potential import (
     BudgetReached,
@@ -509,7 +510,7 @@ def run_job(binary, repo, runs, system, seed, arm, head) -> dict:
     if not row.get("head"):
         row["head"] = head
     row["code_revision"] = {"paper": row["head"], "agox_gofee": AGOX_VERSION}.get(arm, ASE_VERSION)
-    row["host"] = os.uname().nodename
+    row["host"] = host_label(os.uname().nodename)
     return row
 
 
@@ -695,13 +696,15 @@ def lj_large_line(fields: list[str]) -> str:
     return ",".join(fields)
 
 
-def write_lj_large(rows: list[dict], repo: Path, systems: list[str]) -> None:
+def write_lj_large(
+    rows: list[dict], repo: Path, output_dir: Path, systems: list[str]
+) -> None:
     """Append missing system/arm rows. A row already in the file stays as written."""
     panel = load_n12(repo)
     grouped: dict[tuple[str, str], list[dict]] = {}
     for row in rows:
         grouped.setdefault((row["system"], row["arm"]), []).append(row)
-    out = repo / "bench" / "ase-gofee-h2h" / "lj-large.csv"
+    out = output_dir / "lj-large.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     present: set[tuple[str, str]] = set()
     if out.is_file() and out.read_text().strip():
@@ -775,8 +778,8 @@ def write_lj_large(rows: list[dict], repo: Path, systems: list[str]) -> None:
     out.write_text(text + "\n".join(extra) + "\n")
 
 
-def write_tables(rows: list[dict], repo: Path, comparison: str | None) -> None:
-    out = repo / "bench" / "ase-gofee-h2h"
+def write_tables(rows: list[dict], output_dir: Path, comparison: str | None) -> None:
+    out = output_dir
     out.mkdir(parents=True, exist_ok=True)
     summary = summarise(rows)
     if comparison is None:
@@ -789,7 +792,7 @@ def write_tables(rows: list[dict], repo: Path, comparison: str | None) -> None:
 
 
 def main() -> int:
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     check_type7()
@@ -799,6 +802,7 @@ def main() -> int:
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--runs", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--comparison", choices=["ase_bh", "ase_mh", "agox_gofee"])
     parser.add_argument("--panel", choices=["asg2"])
     parser.add_argument("--system")
@@ -870,9 +874,9 @@ def main() -> int:
             flush=True,
         )
     if systems:
-        write_lj_large(rows, args.repo, systems)
+        write_lj_large(rows, args.repo, args.output_dir, systems)
     else:
-        write_tables(rows, args.repo, args.comparison)
+        write_tables(rows, args.output_dir, args.comparison)
     print(summarise(rows), end="", flush=True)
     return 0
 

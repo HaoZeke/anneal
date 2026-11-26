@@ -594,3 +594,61 @@ def test_build_gmin_sc_key_follows_the_discovered_blas(tmp_path: Path) -> None:
     new_sha = hashlib.sha256(blas_a_new.read_bytes()).hexdigest()
     assert f"blas={shared}" in note
     assert f"blas_sha256={new_sha}" in note
+
+
+@pytest.mark.parametrize(
+    ("script_rel", "work_var", "needs_lib"),
+    [
+        ("scripts/gmin_panel/build_gmin.sh", "GMIN_PANEL_WORK", False),
+        ("scripts/gmin_h2h/build_gmin.sh", "GMIN_H2H_WORK", False),
+        ("scripts/metal_h2h/build_gmin_darby.sh", "GMIN_DARBY_WORK", False),
+        ("scripts/metal_h2h/build_gmin_sc.sh", "GMIN_SC_WORK", False),
+        ("scripts/covalent_h2h/build_gmin_tersoff.sh", "GMIN_H2H_WORK", True),
+    ],
+)
+def test_gmin_builders_work_without_gnu_sha256sum_or_nproc(
+    tmp_path: Path, script_rel: str, work_var: str, needs_lib: bool
+) -> None:
+    repo, _tarball, base_env, _counter = _make_builder_sandbox(tmp_path)
+    # Build a PATH without sha256sum or nproc to exercise the macOS fallbacks.
+    filtered = tmp_path / "no-gnu-bin"
+    filtered.mkdir()
+    stubs_dir = Path(base_env["PATH"].split(os.pathsep)[0])
+    for name in (
+        "awk",
+        "bash",
+        "bzip2",
+        "chmod",
+        "cp",
+        "dirname",
+        "getconf",
+        "grep",
+        "mkdir",
+        "mktemp",
+        "mv",
+        "paste",
+        "python3",
+        "readlink",
+        "realpath",
+        "rm",
+        "sh",
+        "shasum",
+        "sysctl",
+        "tar",
+    ):
+        found = shutil.which(name)
+        if found is not None:
+            (filtered / name).symlink_to(found)
+    env = dict(base_env)
+    env["PATH"] = f"{stubs_dir}{os.pathsep}{filtered}"
+    work = tmp_path / "work"
+    env[work_var] = str(work)
+    if script_rel == "scripts/metal_h2h/build_gmin_sc.sh":
+        env["GMIN_DARBY_WORK"] = str(tmp_path / "darby-work")
+    cmd = ["bash", str(repo / script_rel)]
+    if needs_lib:
+        lib = tmp_path / "librgpot_covalent.so"
+        lib.write_bytes(b"fake-rgpot\n")
+        cmd.append(str(lib))
+    subprocess.run(cmd, cwd=repo, env=env, check=True)
+    assert any((work / "bin").iterdir())

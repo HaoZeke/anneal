@@ -42,11 +42,11 @@ The new rows are in `rows.csv`. The medians of those rows are `summary-followup.
 
 ## Cage walk
 
-`scripts/tip4p_h2h/enter_cage.sh` appends the `anneal-cage` arm. The budget, seeds, core, and hostname are the same. The five misses on the previous tip are different oxygen cages, not proton arrangements of the global-minimum cage. (H₂O)₁₅ misses have 24 oxygen contacts against 25 in the global minimum. (H₂O)₂₀ misses differ by one contact, including a five-coordinate water.
+`scripts/tip4p_h2h/enter_cage.sh` appends the `anneal-cage` arm. The budget, seeds, core, and hostname are the same. The five misses of the main arm are different oxygen cages, not proton arrangements of the global-minimum cage. (H₂O)₁₅ misses have 24 oxygen contacts against 25 in the global minimum. (H₂O)₂₀ misses differ by one contact, including a five-coordinate water.
 
 The energy archive was keeping proton isomers of the lowest cage, so a stall had no other cage to walk. The cage archive keeps one structure per oxygen framework. After 160 patience windows with no new lowest minimum, the calls that remain are spent on another stored cage. That walk uses its own generator. The main walker is not moved, and a seed that is still descending keeps the same proposals and the same evaluation count.
 
-(H₂O)₁₅ seed 2002, previously −623.022 kJ/mol, now reaches −628.372. Seed 2004 moves from −623.336 to −623.877 and still misses. The three (H₂O)₂₀ misses stay at −864.746, −859.404 and −863.975. Every previous hit keeps its evaluation count.
+(H₂O)₁₅ seed 2002 reaches −628.372 kJ/mol on the cage arm, against −623.022 on the main arm. Seed 2004 reaches −623.877 against −623.336 and misses on both. The three (H₂O)₂₀ misses are at −864.746, −859.404 and −863.975 on both arms. Every hit of the main arm has the same evaluation count on the cage arm.
 
 The descriptor of a rigid minimum is reused when the centres and rotations are unchanged. A full-budget (H₂O)₁₅ miss drops from 5.90 s outside the potential to 4.57 s. The three (H₂O)₂₀ misses drop from 9.58, 8.79 and 9.26 s to 6.37, 8.87 and 5.72 s. GMIN's full-budget outside time stays near 3.4 s at 15 molecules and 3.6 s at 20.
 

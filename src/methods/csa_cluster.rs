@@ -238,7 +238,7 @@ fn slice_run_inner<'g>(
         rng,
     )
     .expect("finite start");
-    ledger.charge_many(slice_ledger.spent());
+    ledger.absorb_charges(&slice_ledger);
     if let Some(st) = slice_ledger.best_state.as_ref() {
         ledger.record(slice_ledger.best, st.view());
     }
@@ -718,7 +718,7 @@ mod tests {
     }
 
     /// A stop raised on the campaign ledger has to end the bank at once.
-    /// Each chain runs on a slice, and that slice used to ignore the flag.
+    /// Each chain runs on a slice, and that slice must honour the flag.
     #[test]
     fn caller_stop_ends_the_bank_at_once() {
         use std::sync::Arc;

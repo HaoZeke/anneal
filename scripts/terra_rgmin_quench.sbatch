@@ -14,6 +14,6 @@ export PATH="/usr/bin:$HOME/.cargo/bin:$PATH"
 ROOT=${LJ_ROOT:-$HOME/anneal-leave-ridge}
 cd "$ROOT"
 mkdir -p probe
-echo "{\"kind\":\"build\",\"head\":\"$(git rev-parse HEAD)\",\"host\":\"$(hostname)\"}"
+echo "{\"kind\":\"build\",\"head\":\"$(git rev-parse HEAD)\",\"host\":\"$(python3 "$ROOT/scripts/machine_provenance.py" host-label)\"}"
 cargo build --release --example rgmin_quench_compare
 exec ./target/release/examples/rgmin_quench_compare "${RELAX_STEPS:-200}"

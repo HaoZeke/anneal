@@ -13,7 +13,7 @@ mkdir -p "$(dirname "$out")"
   printf 'UTC %s\n' "$utc"
   printf 'HEAD %s\n' "$head_sha"
   printf 'TREE %s\n' "$tree_sha"
-  printf 'host %s\n' "$(hostname)"
+  printf 'host %s\n' "$(python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label)"
   printf 'nproc\n'
   nproc
   printf 'lscpu\n'

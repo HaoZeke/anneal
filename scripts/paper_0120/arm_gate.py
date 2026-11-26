@@ -37,6 +37,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import run_panel  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from machine_provenance import host_label  # noqa: E402
 
 FIELDS = ["arm", *run_panel.ROW_FIELDS[:-1]]
 
@@ -81,7 +83,7 @@ def run(args: argparse.Namespace) -> None:
     for run_, seed in order:
         for name, directory, revision in arms if seed % 2 == 0 else arms[::-1]:
             jobs.put((run_, seed, name, directory, revision))
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     cpu = run_panel.cpu_model()
     lock = threading.Lock()
     failures = []

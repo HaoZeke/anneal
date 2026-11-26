@@ -1,0 +1,1 @@
+The ``enter_*.sh`` wrappers copy the local modules a staged campaign script imports, found by ``scripts/stage_python.py``, instead of a hand-kept list, so a staged script no longer stops on a missing module. A test checks every wrapper.

@@ -37,13 +37,15 @@
 
 use ndarray::{Array1, ArrayView1};
 
+use crate::catalog::molecular::{bohr_angstrom, hartree_ev};
 use crate::methods::cluster_hopping::covalent_radius;
 
 const BOND_FACTOR: f64 = 1.2;
 const LINEAR_COS: f64 = -0.996_194_698_091_745_5; // cos 175 degrees
-const HARTREE_EV: f64 = 27.211_386_245_988;
-const BOHR_A: f64 = 0.529_177_210_903;
-const AU_STRETCH: f64 = HARTREE_EV / (BOHR_A * BOHR_A);
+fn au_stretch() -> f64 {
+    let bohr = bohr_angstrom();
+    hartree_ev() / (bohr * bohr)
+}
 const SINGULAR_FLOOR: f64 = 1.0e-7;
 const CURVATURE_FLOOR: f64 = 1.0e-4;
 // Off-axis share of a fragment's spread below which it rotates as a line.
@@ -58,7 +60,7 @@ pub enum LocalStep {
     /// Cartesian L-BFGS, [`crate::methods::warm_lbfgs::WarmLbfgs`].
     #[default]
     Lbfgs,
-    /// [`TricOpt`] on a species-labelled Cartesian state; L-BFGS elsewhere.
+    /// [`TricOpt`] on a species-labeled Cartesian state; L-BFGS elsewhere.
     Tric,
     /// L-BFGS for the opening quench, then [`TricOpt`] for the rest of the
     /// search when one potential call of that quench took longer than one
@@ -475,7 +477,7 @@ impl Tric {
                     neighbours[i].push(j);
                     neighbours[j].push(i);
                     primitives.push(Primitive::Bond(i, j));
-                    stiffness.push(0.45 * AU_STRETCH);
+                    stiffness.push(0.45 * au_stretch());
                 }
             }
         }
@@ -486,7 +488,7 @@ impl Tric {
                 for &k in &around[a + 1..] {
                     if cos_angle(&x, i, j, k) > LINEAR_COS {
                         primitives.push(Primitive::Angle(i, j, k));
-                        stiffness.push(0.16 * HARTREE_EV);
+                        stiffness.push(0.16 * hartree_ev());
                     } else {
                         straight = true;
                     }
@@ -495,7 +497,7 @@ impl Tric {
             if straight {
                 for axis in 0..3 {
                     primitives.push(Primitive::Cartesian { atom: j, axis });
-                    stiffness.push(0.05 * AU_STRETCH);
+                    stiffness.push(0.05 * au_stretch());
                 }
             }
         }
@@ -513,7 +515,7 @@ impl Tric {
                             continue;
                         }
                         primitives.push(Primitive::Dihedral(i, j, k, l));
-                        stiffness.push(0.023 * HARTREE_EV);
+                        stiffness.push(0.023 * hartree_ev());
                     }
                 }
             }
@@ -526,7 +528,7 @@ impl Tric {
                 && cos_angle(&x, k, j, l) > LINEAR_COS
             {
                 primitives.push(Primitive::Dihedral(i, k, j, l));
-                stiffness.push(0.045 * HARTREE_EV);
+                stiffness.push(0.045 * hartree_ev());
             }
         }
         let mut label = vec![usize::MAX; n];
@@ -571,12 +573,12 @@ impl Tric {
         for (fragment, frag) in fragments.iter().enumerate() {
             for axis in 0..3 {
                 primitives.push(Primitive::Translation { fragment, axis });
-                stiffness.push(0.05 * AU_STRETCH);
+                stiffness.push(0.05 * au_stretch());
             }
             if frag.atoms.len() > 1 {
                 for axis in 0..3 {
                     primitives.push(Primitive::Rotation { fragment, axis });
-                    stiffness.push(0.05 * AU_STRETCH);
+                    stiffness.push(0.05 * au_stretch());
                 }
             }
         }
@@ -926,7 +928,7 @@ pub struct TricOpt {
 }
 
 impl TricOpt {
-    /// A relaxation over atoms labelled by atomic number.
+    /// A relaxation over atoms labeled by atomic number.
     pub fn new(species: Vec<u32>) -> Self {
         Self {
             species,

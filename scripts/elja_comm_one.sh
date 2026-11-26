@@ -4,7 +4,7 @@
 # N and budget are arguments so 38/55/75/98 share one driver.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_comm_one.sh: run under sbatch, not on $(hostname)" >&2
+  echo "elja_comm_one.sh: run under sbatch, not directly" >&2
   exit 1
 fi
 N=${1:?LJ site count}
@@ -28,7 +28,7 @@ fi
 export SEED_OFFSET=${SEED_OFFSET:-${SLURM_ARRAY_TASK_ID:-0}}
 OUT=${COMM_OUT:-$ROOT/comm$N}
 mkdir -p "$OUT"
-echo "host=$(hostname) job=$SLURM_JOB_ID n=$N budget=$BUDGET seed=$SEED_OFFSET"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID n=$N budget=$BUDGET seed=$SEED_OFFSET"
 echo "RUN $BIN $N $BUDGET 1 comm"
 "$BIN" "$N" "$BUDGET" 1 comm | tee "$OUT/seed${SEED_OFFSET}.out"
 if grep -q SOLVED "$OUT/seed${SEED_OFFSET}.out"; then

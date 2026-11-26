@@ -12,7 +12,9 @@
 //!
 //! Usage: `lj_lean_relax_budget <n> <relaxations> <seed> <reference>`
 
-use std::process::Command;
+#[path = "common/host_label.rs"]
+mod host_label;
+
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
@@ -24,19 +26,9 @@ use ndarray::ArrayView1;
 
 const HIT_TOL: f64 = anneal_core::DEFAULT_HIT_TOL;
 
-fn hostname() -> String {
-    Command::new("hostname")
-        .output()
-        .ok()
-        .filter(|out| out.status.success())
-        .and_then(|out| String::from_utf8(out.stdout).ok())
-        .map(|text| text.trim().to_string())
-        .unwrap_or_default()
-}
-
 fn main() {
     anneal_core::install_rgpot_kernels!();
-    if hostname() != "bench" {
+    if host_label::read_host_label().as_deref() != Some("bench") {
         eprintln!("uts hostname is not bench");
         std::process::exit(2);
     }

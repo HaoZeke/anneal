@@ -14,6 +14,7 @@ bash "$HERE/build_gmin_darby.sh"
 mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" "$LOGS" /work
 cp -a "$HERE/run_darby.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 cp -a /work/metal-h2h/bin/h2h_metal "$WORK/bin/h2h_metal"
 chmod +x "$WORK/bin/h2h_metal"
 
