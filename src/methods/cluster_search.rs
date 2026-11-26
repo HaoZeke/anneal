@@ -3050,13 +3050,19 @@ impl Encounter {
 /// `target` is compared under the one-sided rule `energy <= target + tolerance`,
 /// since a published minimum is quoted to six decimals and a relaxation lands
 /// near it rather than on it.
-pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, spent: usize) -> Encounter {
+///
+/// A miss is censored at [`Outcome::charged`], which includes calls that
+/// settled past the budget. The paid spend is not that total. The last
+/// argument stays so existing callers keep compiling.
+pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, _spent: usize) -> Encounter {
     for &(hops, charged, _, e) in &out.improvements {
         if crate::energy_hits(e, target, tolerance) {
             return Encounter::Found { charged, hops };
         }
     }
-    Encounter::Censored { charged: spent }
+    Encounter::Censored {
+        charged: out.charged,
+    }
 }
 
 /// Median first encounter time under censoring, by Kaplan-Meier.
@@ -4493,16 +4499,16 @@ mod tests {
                 assert!(charged > 0 && charged <= ledger.spent());
                 assert!(hops > 0 && hops <= out.hops);
             }
-            Encounter::Censored { charged } => assert_eq!(charged, ledger.spent()),
+            Encounter::Censored { charged } => assert_eq!(charged, out.charged),
         }
 
-        // A target nothing can reach must censor at the spend, not report a
-        // time.
+        // A target nothing can reach must censor at the charged total,
+        // including calls that settled past the budget.
         let never = first_encounter(&out, -1e9, crate::DEFAULT_HIT_TOL, ledger.spent());
         assert_eq!(
             never,
             Encounter::Censored {
-                charged: ledger.spent()
+                charged: out.charged
             }
         );
 
@@ -4529,13 +4535,37 @@ mod tests {
                 hops: 3
             }
         );
+        trace.charged = 50;
+        trace.settled_beyond_cap = 20;
         assert_eq!(
-            first_encounter(&trace, f64::NAN, tol, 20),
-            Encounter::Censored { charged: 20 }
+            first_encounter(&trace, f64::NAN, tol, 30),
+            Encounter::Censored { charged: 50 }
         );
         assert_eq!(
-            first_encounter(&trace, target, f64::NAN, 20),
-            Encounter::Censored { charged: 20 }
+            first_encounter(&trace, target, f64::NAN, 30),
+            Encounter::Censored { charged: 50 }
+        );
+    }
+
+    /// A censored run reports every settled call, including those past the budget.
+    #[test]
+    fn a_censored_run_reports_calls_past_the_budget() {
+        let spent = 30;
+        let beyond = 20;
+        let out = Outcome {
+            best: -1.0,
+            charged: spent + beyond,
+            settled_beyond_cap: beyond,
+            improvements: vec![(1, spent, 1, -0.5)],
+            ..Outcome::default()
+        };
+        let reported = first_encounter(&out, -100.0, 0.0, spent);
+        assert_eq!(
+            reported,
+            Encounter::Censored {
+                charged: out.charged
+            },
+            "censored calls dropped the beyond-cap settlements"
         );
     }
 
