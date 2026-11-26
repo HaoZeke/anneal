@@ -77,3 +77,34 @@ Seed `2000` missed in both sessions: original wall `553.267 s`, control wall `54
 ### Ledger
 
 All 12 `p = 1` rows and the one control row have `sum(replica_charged) == ledger_sum == total_oracle_calls == 4_000_000`.
+
+## Same-VM Control (`p = 1` and `p = 2`, 12 Seeds Each)
+
+The full control ran in one serial process: `python3 bench/arch-scaling/lj75/run_scaling.py --rungs 1,2 --rotate --session p1-control --control-workers 2 --control-session p2-control`. Order was ABBA over seeds `2000..=2011`. Budget stayed `4_000_000`. The release example is unchanged from `5abbdf46a81ccbc78a04cdfd453d3f4eb4951326`, and `src/` matches `3ccb2ad4fb930270f0fe95568ff09a5d0127d81b`. The binary was built with rustc `1.88.0` as `--release --locked`. New rows record `revision=bd70bdbd9b64df7bb7b6fcb4c64db53a8da21c06`.
+
+`nproc` was `8` on every new row. `p = 1` (`session=p1-control`) was pinned to core `0`. `p = 2` (`session=p2-control`) was pinned to cores `0-1`. Both have `oversubscribed=false`. Every new row has machine id `3b1b725a97e4e3fc407fe86011128eed3413f48e895d03fa0514e1a70eb8a61a`. The 24 jobs finished in `13,676 s` (`3.799 h`). Full-budget wall sums were `8,946.342 s` for `p = 1` and `4,728.444 s` for `p = 2`.
+
+The earlier `session=control` row is still only seed `2000`. That comparison is unchanged:
+
+`INCONCLUSIVE: control or original p=2 has no hit-conditioned wall`
+
+Hit-conditioned wall-to-hit medians use a 10,000-resample percentile bootstrap 95% CI with seed `20261123`. Fisher's exact test is two-sided on hits. The Mann-Whitney U test is two-sided and tie-corrected on wall-to-hit, with a miss coded as `4_000_001`.
+
+`p1-control` hit seeds `2000, 2001, 2002, 2005, 2006, 2007, 2008, 2009, 2011` (`9/12`). `p2-control` hit seeds `2001, 2002, 2006, 2008, 2009, 2011` (`6/12`). Those are the same seeds as the recorded `p = 1` rung and the original `p = 2` rung.
+
+| Arm | Hits | Wall-to-Hit Med s [95% CI] |
+| --- | ---: | --- |
+| `p1-control` | 9/12 | 290.786 [123.973; 558.673] |
+| recorded `p = 1` | 9/12 | 312.868 [129.631; 573.828] |
+| `p2-control` | 6/12 | 123.699 [36.414; 294.308] |
+| original `p = 2` | 6/12 | 138.695 [37.024; 317.934] |
+
+`p2-control` versus original `p = 2`: hits `6/12` vs `6/12`, Fisher `p = 1`, MWU `U = 69.0`, MWU `p = 0.877416`.
+
+`p1-control` versus recorded `p = 1`: hits `9/12` vs `9/12`, Fisher `p = 1`, MWU `U = 64.5`, MWU `p = 0.68382`.
+
+`AGREE: same-VM p=2 and original p=2 agree on hits and wall-to-hit`
+
+`AGREE: p=1 control and recorded p=1 agree on hits and wall-to-hit`
+
+All 24 new rows have `sum(replica_charged) == ledger_sum == total_oracle_calls == 4_000_000`. A miss has `calls_to_hit = 4_000_001`. Existing data lines were not edited.
