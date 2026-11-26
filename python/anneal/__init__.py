@@ -265,6 +265,7 @@ def cluster_search(
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
+    polish_on_improve: bool | None = None,
 ):
     """Run the measured cluster-search layer.
 
@@ -347,6 +348,9 @@ def cluster_search(
         deposit height from the median quenched energy change of its opening
         hops instead of an energy scale of one. ``None`` keeps the preset's:
         on for ``recommended=True``, off otherwise.
+      polish_on_improve: polish the incumbent when a hop improves it, at the
+        component gradient tolerance, charging every evaluation. ``None``
+        keeps the preset's, which is off.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
@@ -438,6 +442,8 @@ def cluster_search(
         kwargs["hold_stereocentres"] = bool(hold_stereocentres)
     if measured_energy_scale is not None:
         kwargs["measured_energy_scale"] = bool(measured_energy_scale)
+    if polish_on_improve is not None:
+        kwargs["polish_on_improve"] = bool(polish_on_improve)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     return out

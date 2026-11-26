@@ -7007,12 +7007,18 @@ def append_only_rows(audit: Audit) -> None:
     base = base_ref
     if base is not None:
         # A file the base never committed is this branch's own record. A
-        # correction of that file is not a removed line of a committed
-        # record. A file missing at HEAD was deleted, so it stays in the log.
-        history_paths = [
-            path for path in sorted(paths)
-            if git("cat-file", "-e", f"{base}:{path}").returncode == 0 or not (ROOT / path).is_file()
-        ]
+        # correction of that file, or dropping it, is not a removed line of
+        # a base record. A file the base committed stays in the log, including
+        # when HEAD no longer has it. A name with no commit in the range
+        # still goes to the log.
+        history_paths = []
+        for path in sorted(paths):
+            if git("cat-file", "-e", f"{base}:{path}").returncode == 0:
+                history_paths.append(path)
+            elif not (ROOT / path).is_file() and not git(
+                "rev-list", "-1", f"{base}..HEAD", "--", path
+            ).stdout.strip():
+                history_paths.append(path)
         history = git(
             "log", "-p", "--no-renames", "--format=", f"{base}..HEAD", "--",
             *history_paths,
