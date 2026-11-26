@@ -41,6 +41,7 @@ CHECKS = (
     audit_mod.paper_0120,
     audit_mod.gad_published,
     audit_mod.openconf,
+    audit_mod.conf_miss4,
     audit_mod.head_to_head,
     audit_mod.sc96_78_howto,
     audit_mod.stale_claims,
@@ -75,6 +76,7 @@ CHECKS = (
     audit_mod.bibliography_keys,
     audit_mod.conversion_literals,
     audit_mod.own_references,
+    audit_mod.build_receipts,
     audit_mod.selection_tables,
     audit_mod.gmin_panel_drivers,
     audit_mod.prior_switches,
@@ -2126,6 +2128,130 @@ def test_the_british_spelling_of_labeled_is_caught():
     assert not audit_mod.BRITISH.search("labeled")
 
 
+CONF_MISS4 = audit_mod.CONF_MISS4
+
+
+def test_conf_miss4_recomputes_the_exact_tests_without_scipy():
+    scipy_stats = pytest.importorskip("scipy.stats")
+    import random
+
+    rng = random.Random(4)
+    for n in (1, 5, 12, 24):
+        diffs = [rng.uniform(-1, 1) + 0.2 for _ in range(n)]
+        assert audit_mod.signed_rank_exact(diffs) == pytest.approx(
+            float(scipy_stats.wilcoxon(diffs, method="exact").pvalue), rel=1e-9
+        )
+    assert audit_mod.signed_rank_exact([0.0, 0.0]) == 1.0
+    assert audit_mod.signed_rank_exact([1.0, 2.0, 3.0, 4.0, 5.0, 0.0]) == pytest.approx(2 / 32)
+    for k, n in ((0, 6), (2, 7), (3, 6), (6, 6)):
+        assert audit_mod.binomial_half(k, n) == pytest.approx(float(scipy_stats.binomtest(k, n, 0.5).pvalue))
+    assert audit_mod.binomial_half(0, 0) == 1.0
+
+
+def test_a_drifted_conf_miss4_panel_cell_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{CONF_MISS4}/panel.tsv"
+    audit.text_cache[path] = audit.text(path).replace("\t15/24\t15/24\t16888", "\t14/24\t15/24\t16888", 1)
+    audit_mod.conf_miss4(audit)
+    assert [r[2] for r in audit.drifts()] == ["hits"]
+
+
+def test_a_drifted_conf_miss4_wilcoxon_cell_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{CONF_MISS4}/paired.tsv"
+    audit.text_cache[path] = audit.text(path).replace("\t0.0179\t", "\t0.0189\t", 1)
+    audit_mod.conf_miss4(audit)
+    assert sorted(r[2] for r in audit.drifts()) == ["p", "wilcoxon_p"]
+
+
+def test_a_conf_miss4_row_citing_a_missing_commit_is_reported():
+    audit = audit_mod.Audit()
+    for r in audit.rows(f"{CONF_MISS4}/guard.csv"):
+        if r["code_revision"] != "61fa67cf380e46876b569da45e7cc091647a775b":
+            r["code_revision"] = "0123456789abcdef0123456789abcdef01234567"
+    audit_mod.conf_miss4(audit)
+    assert sorted(r[2] for r in audit.drifts()) == [
+        "cited revision 01234567 is a commit object",
+        "cited revision 01234567 is on its provenance merge parent",
+        "cited revision 01234567 is reachable from origin",
+        "every revision the rows cite is listed",
+    ]
+
+
+def test_conf_miss4_requires_the_documented_two_parent_merge(monkeypatch):
+    monkeypatch.setattr(
+        audit_mod,
+        "CONF_MISS4_PROVENANCE_MERGE",
+        "5c40c711f6f49ce0950d6025349adcde7f17cdce",
+    )
+    audit = audit_mod.Audit()
+    audit_mod.conf_miss4(audit)
+    assert "the documented provenance merge has two parents" in {
+        r[2] for r in audit.drifts()
+    }
+
+
+def test_conf_miss4_checks_revisions_against_their_merge_parent():
+    audit = audit_mod.Audit()
+    path = f"{CONF_MISS4}/provenance.tsv"
+    audit.text_cache[path] = audit.text(path).replace(
+        "anneal and openconf rows; anneal wheel",
+        "develop base",
+        1,
+    )
+    audit_mod.conf_miss4(audit)
+    assert "cited revision 259befae is on its provenance merge parent" in {
+        r[2] for r in audit.drifts()
+    }
+
+
+def test_conf_miss4_requires_one_revision_for_both_paired_arms():
+    audit = audit_mod.Audit()
+    row = next(r for r in audit.rows(f"{CONF_MISS4}/rows.csv") if r["arm"] == "openconf")
+    row["code_revision"] = "5c40c711f6f49ce0950d6025349adcde7f17cdce"
+    audit_mod.conf_miss4(audit)
+    assert [r[2] for r in audit.drifts()] == [
+        "anneal and openconf carry the paired runner's one revision"
+    ]
+
+
+def test_a_conf_miss4_guard_mismatch_and_a_moved_mirror_hit_are_reported():
+    audit = audit_mod.Audit()
+    rows = audit.rows(f"{CONF_MISS4}/guard.csv")
+    series = next(r for r in rows if r["code_revision"] != "61fa67cf380e46876b569da45e7cc091647a775b")
+    series["charged"] = str(int(series["charged"]) + 1)
+    audit_mod.conf_miss4(audit)
+    assert [r[2] for r in audit.drifts()] == ["156 jobs, none differs between develop and the series"]
+    audit = audit_mod.Audit()
+    mirror = next(r for r in audit.rows(f"{CONF_MISS4}/rows.csv") if r["hit_mirror"] == "1" and r["hit"] == "0")
+    mirror["hit_mirror"] = "0"
+    audit_mod.conf_miss4(audit)
+    labels = {r[2] for r in audit.drifts()}
+    assert {"hits_mirror", "hit_mirror_after", "the runs that count only as a mirror hit"} <= labels
+
+
+def test_a_conf_miss4_provenance_tree_that_is_not_the_commits_is_reported():
+    audit = audit_mod.Audit()
+    path = f"{CONF_MISS4}/provenance.tsv"
+    first = audit.text(path).splitlines()[1].split("\t")[2]
+    audit.text_cache[path] = audit.text(path).replace(first, "0" * 40)
+    audit_mod.conf_miss4(audit)
+    assert sorted(r[2] for r in audit.drifts() if "tree of" in r[2]) == [
+        "tree of 259befae (anneal and openconf rows; anneal wheel)"
+    ]
+
+
+def test_a_conf_miss4_run_order_claim_is_checked_against_the_schedule():
+    audit = audit_mod.Audit()
+    path = f"{CONF_MISS4}/README.md"
+    audit.text_cache[path] = audit.text(path).replace(
+        "Develop ran first on 98 of the 192 pairs and anneal on 94.",
+        "Develop ran first on 97 of the 192 pairs and anneal on 95.",
+        1,
+    )
+    audit_mod.conf_miss4(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
+
 def test_water_header_keeps_the_committed_record_spelling():
     source = (ROOT / "paper/jctc/scripts/water_h2h.py").read_text()
     record = (ROOT / "paper/jctc/logs/water/NUMBERS.tsv").read_text()
@@ -2403,6 +2529,78 @@ def test_labels_are_numbered_as_achemso_numbers_them():
     numbers = cross_labels().numbers(text, "S")
     assert numbers == {"sec:one": "S1", "eq:a": "S1", "sec:two": "S1.1", "fig:a": "S1", "tab:a": "S1",
                        "fig:b": "S2", "eq:b": "S2", "sec:three": "S2"}
+
+
+def test_the_label_files_and_the_length_receipt_match_the_sources():
+    audit = audit_mod.Audit()
+    audit_mod.build_receipts(audit)
+    assert len(audit.results) == 6
+    assert not audit.drifts(), audit.drifts()
+
+
+def receipt_tree(tmp_path, monkeypatch):
+    """A copy of the paper sources, label files, receipt and their scripts that the audit reads as ROOT."""
+    for name in ("manuscript.tex", "si.tex", "macros.tex", "labels-manuscript.tex", "labels-si.tex",
+                 "logs/pdf-length.txt", "scripts/cross_labels.py", "scripts/pdf_length.py"):
+        dest = tmp_path / "paper/jctc" / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / "paper/jctc" / name, dest)
+    for name in ("cross_labels", "pdf_length"):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setattr(audit_mod, "ROOT", tmp_path)
+    return tmp_path / "paper/jctc"
+
+
+def receipt_drifts():
+    audit = audit_mod.Audit()
+    audit_mod.build_receipts(audit)
+    assert len(audit.results) == 6
+    return [(where, label) for _, where, label, _, _ in audit.drifts()]
+
+
+def test_a_label_file_left_behind_its_source_fails_the_audit(tmp_path, monkeypatch):
+    jctc = receipt_tree(tmp_path, monkeypatch)
+    assert receipt_drifts() == []
+    si = jctc / "si.tex"
+    si.write_text(si.read_text().replace("\\begin{document}", "\\begin{document}\n\\section{Added}\\label{sec:added}", 1))
+    assert receipt_drifts() == [("paper/jctc/labels-si.tex", "cross_labels.py output for si.tex")]
+
+
+def test_a_length_receipt_left_behind_its_source_fails_the_audit(tmp_path, monkeypatch):
+    jctc = receipt_tree(tmp_path, monkeypatch)
+    macros = jctc / "macros.tex"
+    macros.write_text(macros.read_text() + "% edited\n")
+    assert receipt_drifts() == [("paper/jctc/logs/pdf-length.txt", "sha256 of paper/jctc/macros.tex")]
+
+
+def test_a_length_over_the_limit_is_shown_without_failing_the_audit(tmp_path, monkeypatch):
+    jctc = receipt_tree(tmp_path, monkeypatch)
+    receipt = jctc / "logs/pdf-length.txt"
+    text = re.sub(r"(?m)^abstract_words=\d+$", "abstract_words=120", receipt.read_text())
+    text = re.sub(r"(?m)^abstract_numerals=\d+$", "abstract_numerals=4", text)
+    receipt.write_text(re.sub(r"(?m)^body_words=\d+$", "body_words=6000", text))
+    audit = audit_mod.Audit()
+    audit_mod.build_receipts(audit)
+    assert not audit.drifts() and not audit.expected()
+    receipt.write_text(re.sub(r"(?m)^body_words=\d+$", "body_words=7001", receipt.read_text()))
+    audit = audit_mod.Audit()
+    audit_mod.build_receipts(audit)
+    assert not audit.drifts()
+    assert [row[1:] for row in audit.expected()] == [
+        ("paper/jctc/logs/pdf-length.txt", "rendered length within the journal limits", "within",
+         "body has 7001 words, outside 5000-7000")]
+
+
+def test_a_missing_length_receipt_or_count_fails_the_audit(tmp_path, monkeypatch):
+    jctc = receipt_tree(tmp_path, monkeypatch)
+    receipt = jctc / "logs/pdf-length.txt"
+    receipt.write_text(re.sub(r"(?m)^body_words=\d+\n", "", receipt.read_text()))
+    assert receipt_drifts() == [("paper/jctc/logs/pdf-length.txt", "pdf_length.py counts")]
+    receipt.unlink()
+    audit = audit_mod.Audit()
+    audit_mod.build_receipts(audit)
+    assert [row[1:] for row in audit.drifts()] == [
+        ("paper/jctc/logs/pdf-length.txt", "pdf_length.py receipt", "present", "missing")]
 
 
 def test_the_crest_equal_panel_holds_in_the_committed_text():

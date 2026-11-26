@@ -25,8 +25,8 @@
 #[cfg(feature = "graphkey")]
 use anneal_core::methods::archive_search::{Archive, archive_search};
 use anneal_core::methods::cluster_hopping::{
-    Config, Ledger, random_cluster_in_radius, run, run_with_gradient, run_with_gradient_settle,
-    run_with_history,
+    ChargeName, Config, Ledger, random_cluster_in_radius, run, run_with_gradient,
+    run_with_gradient_settle, run_with_history,
 };
 use anneal_core::methods::cluster_search::{search_from, search_lennard_jones};
 use anneal_core::methods::csa_cluster::{self, BankConfig, spectrum_distance};
@@ -55,8 +55,8 @@ struct Tally {
 fn ledger_carrying_an_overrun() -> Ledger {
     let mut parent = Ledger::new(30);
     let mut child = parent.slice(10);
-    assert!(child.charge_many(10));
-    assert!(!child.charge_many(40));
+    assert!(child.with_charge_name(ChargeName::Quench, |child| child.charge_many(10)));
+    assert!(!child.with_charge_name(ChargeName::Quench, |child| child.charge_many(40)));
     parent.settle_child(&child, 0);
     assert_eq!(parent.spent(), 30);
     assert_eq!(parent.settled_beyond_cap(), 20);

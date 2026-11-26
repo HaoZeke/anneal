@@ -11,7 +11,7 @@ use crate::catalog::{Event, EventCatalog};
 use crate::floors::FloorBook;
 use crate::localkey::local_keys;
 use crate::methods::cluster_hopping::{
-    Config, GradFn, Ledger, Relax, active_mask, run_with_gradient,
+    Config, GradFn, Ledger, Relax, SearchError, active_mask, run_with_gradient,
 };
 use crate::residual_field::ResidualField;
 use crate::screen::DropModel;
@@ -89,6 +89,10 @@ pub struct ArchiveOutcome {
     pub events: usize,
     /// ARTn / stall-symmetry escapes attempted.
     pub artn: usize,
+    /// Fresh-start branches actually run by `branch_on_stall`.
+    pub branch_draws: u64,
+    /// Charged evaluations spent inside fresh-start branches.
+    pub branch_spent: usize,
     /// Charged evaluations: every settled call, [`Ledger::charged`].
     pub charged: usize,
     /// The part of [`ArchiveOutcome::charged`] that passed the budget.
@@ -119,6 +123,8 @@ struct HopAcc {
     full: usize,
     returned: usize,
     artn: usize,
+    branch_draws: u64,
+    branch_spent: usize,
     basins: usize,
     nve_unavailable: bool,
 }
@@ -214,6 +220,25 @@ fn residual_start<R: Rng + ?Sized>(
     y
 }
 
+/// One charged hop. The slice is settled onto `ledger` before an error
+/// returns, so a refused start still carries the evaluations it spent.
+fn paid_hop<'g, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    take: usize,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    rng: &mut R,
+) -> Result<(crate::methods::cluster_hopping::Outcome, usize), SearchError> {
+    let mut led = ledger.slice(take);
+    let hopped = run_with_gradient(cfg, start, &mut led, relax, grad, rng);
+    let used = led.spent();
+    let _ = ledger.settle_child(&led, 0);
+    let hop = hopped?;
+    Ok((hop, used))
+}
+
 fn hops_from_start<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -223,7 +248,7 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
     rng: &mut R,
     slices: &[usize],
     residual: bool,
-) -> HopAcc {
+) -> Result<HopAcc, SearchError> {
     let mut acc = HopAcc {
         best: f64::INFINITY,
         best_state: None,
@@ -232,6 +257,8 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         full: 0,
         returned: 0,
         artn: 0,
+        branch_draws: 0,
+        branch_spent: 0,
         basins: 0,
         nve_unavailable: false,
     };
@@ -242,21 +269,27 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
             break;
         }
         let take = slice.max(1).min(rest);
-        let mut led = ledger.slice(take);
         let x0 = if residual && i > 0 {
             residual_start(start, cfg, rng)
         } else {
             start.to_owned()
         };
-        let hop = run_with_gradient(cfg, x0.view(), &mut led, relax, grad.as_deref_mut(), rng)
-            .expect("finite start");
-        let used = led.spent();
-        let _ = ledger.settle_child(&led, 0);
+        let (hop, used) = paid_hop(
+            cfg,
+            x0.view(),
+            ledger,
+            take,
+            relax,
+            grad.as_deref_mut(),
+            rng,
+        )?;
         acc.screens += hop.screened_out;
         acc.full += paid_full_quenches(cfg, take, hop.hops);
         acc.returned += hop.returned;
         acc.nve_unavailable |= hop.nve_unavailable;
         acc.artn += hop.symmetrised.0 + hop.stall_escapes;
+        acc.branch_draws += hop.branch_draws;
+        acc.branch_spent += hop.branch_spent;
         acc.basins = acc.basins.max(hop.basins);
         if hop.best.is_finite() {
             let at = spent_before.saturating_add(hop_best_at(&hop, used));
@@ -272,7 +305,7 @@ fn hops_from_start<'g, R: Rng + ?Sized>(
         }
         spent_before = spent_before.saturating_add(used);
     }
-    acc
+    Ok(acc)
 }
 
 fn incumbent_floor(archive: &Archive) -> Option<usize> {
@@ -412,6 +445,8 @@ fn fold_hop(
     acc.returned += hop.returned;
     acc.nve_unavailable |= hop.nve_unavailable;
     acc.artn += hop.symmetrised.0 + hop.stall_escapes;
+    acc.branch_draws += hop.branch_draws;
+    acc.branch_spent += hop.branch_spent;
     acc.basins = acc.basins.max(hop.basins);
     if hop.best.is_finite() && hop.best < acc.best - 1e-12 {
         acc.best = hop.best;
@@ -430,6 +465,7 @@ fn fold_hop(
 ///
 /// Large-budget: skip-return explore, then residual hops on unsaturated
 /// local keys. The caller's recommended defaults are not written.
+/// A non-finite opening quench is [`SearchError::NoFiniteStart`].
 pub fn archive_search<'g, R: Rng + ?Sized>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -438,7 +474,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     mut grad: Option<&mut GradFn<'g>>,
     archive: &mut Archive,
     rng: &mut R,
-) -> ArchiveOutcome {
+) -> Result<ArchiveOutcome, SearchError> {
     let _caller_stop = ledger.bind_stop();
     let cap = ledger.remaining();
     // Molecular / slab budgets are a few thousand evaluations. A 30 %
@@ -453,11 +489,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             // Hop 1 is that walk to 900. Hop 2 is one 1100-eval residual
             // packing at rec quench with angular moves and group restart.
             let p1 = 900.min(cap);
-            let mut led1 = ledger.slice(p1);
-            let hop1 = run_with_gradient(cfg, start, &mut led1, relax, grad.as_deref_mut(), rng)
-                .expect("finite start");
-            let used1 = led1.spent();
-            let _ = ledger.settle_child(&led1, 0);
+            let (hop1, used1) = paid_hop(cfg, start, ledger, p1, relax, grad.as_deref_mut(), rng)?;
             let at1 = hop_best_at(&hop1, used1);
             let rest = ledger.remaining();
             let acc = if rest > 0 {
@@ -470,15 +502,20 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 c2.symmetrise_on_stall = true;
                 let hunt = 850.min(rest);
                 let x2 = residual_start(start, cfg, rng);
-                let mut led2 = ledger.slice(hunt);
-                let hop2 =
-                    run_with_gradient(&c2, x2.view(), &mut led2, relax, grad.as_deref_mut(), rng)
-                        .expect("finite start");
-                let used2 = led2.spent();
-                let _ = ledger.settle_child(&led2, 0);
+                let (hop2, used2) = paid_hop(
+                    &c2,
+                    x2.view(),
+                    ledger,
+                    hunt,
+                    relax,
+                    grad.as_deref_mut(),
+                    rng,
+                )?;
                 let at2 = used1.saturating_add(hop_best_at(&hop2, used2));
                 let rest3 = ledger.remaining();
                 let mut nve_unavailable = hop1.nve_unavailable || hop2.nve_unavailable;
+                let mut branch_draws = hop1.branch_draws + hop2.branch_draws;
+                let mut branch_spent = hop1.branch_spent + hop2.branch_spent;
                 let (best, best_state, best_at, basins, screens, full, returned, artn) =
                     if rest3 > 0 && hop2.best < hop1.best - 0.015 && hop2.best_state.is_some() {
                         let mut c3 = c2.clone();
@@ -496,21 +533,21 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                                 };
                         }
                         let x3 = hop2.best_state.clone().unwrap();
-                        let mut led3 = ledger.slice(rest3);
-                        let hop3 = run_with_gradient(
+                        let (hop3, used3) = paid_hop(
                             &c3,
                             x3.view(),
-                            &mut led3,
+                            ledger,
+                            rest3,
                             relax,
                             grad.as_deref_mut(),
                             rng,
-                        )
-                        .expect("finite start");
-                        let _ = ledger.settle_child(&led3, 0);
+                        )?;
                         nve_unavailable |= hop3.nve_unavailable;
+                        branch_draws += hop3.branch_draws;
+                        branch_spent += hop3.branch_spent;
                         let at3 = used1
                             .saturating_add(used2)
-                            .saturating_add(hop_best_at(&hop3, led3.spent()));
+                            .saturating_add(hop_best_at(&hop3, used3));
                         let (b, s, a, n) = if hop3.best < hop2.best.min(hop1.best) - 1e-12 {
                             (hop3.best, hop3.best_state, at3, hop3.basins)
                         } else if hop2.best < hop1.best - 1e-12 {
@@ -581,6 +618,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     full,
                     returned,
                     artn,
+                    branch_draws,
+                    branch_spent,
                     basins,
                     nve_unavailable,
                 }
@@ -593,6 +632,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                     full: paid_full_quenches(cfg, p1, hop1.hops),
                     returned: hop1.returned,
                     artn: hop1.symmetrised.0 + hop1.stall_escapes + hop1.restarts,
+                    branch_draws: hop1.branch_draws,
+                    branch_spent: hop1.branch_spent,
                     basins: hop1.basins,
                     nve_unavailable: hop1.nve_unavailable,
                 }
@@ -602,7 +643,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             {
                 record_best(archive, cfg, acc.best, x.view());
             }
-            return ArchiveOutcome {
+            return Ok(ArchiveOutcome {
                 best: acc.best,
                 best_state: acc.best_state,
                 screens: acc.screens,
@@ -612,11 +653,13 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 floors: archive.floors.len().max(acc.basins),
                 events: archive.catalog.event_count(),
                 artn: acc.artn,
+                branch_draws: acc.branch_draws,
+                branch_spent: acc.branch_spent,
                 charged: ledger.charged(),
                 settled_beyond_cap: ledger.settled_beyond_cap(),
                 best_at: acc.best_at,
                 nve_unavailable: acc.nve_unavailable,
-            };
+            });
         }
         let mut c = cfg.clone();
         c.symmetrise_on_stall = true;
@@ -640,13 +683,13 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             rng,
             &slices,
             slab,
-        );
+        )?;
         if acc.best.is_finite()
             && let Some(ref x) = acc.best_state
         {
             record_best(archive, cfg, acc.best, x.view());
         }
-        return ArchiveOutcome {
+        return Ok(ArchiveOutcome {
             best: acc.best,
             best_state: acc.best_state,
             screens: acc.screens,
@@ -656,11 +699,13 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             floors: archive.floors.len().max(acc.basins),
             events: archive.catalog.event_count(),
             artn: acc.artn,
+            branch_draws: acc.branch_draws,
+            branch_spent: acc.branch_spent,
             charged: ledger.charged(),
             settled_beyond_cap: ledger.settled_beyond_cap(),
             best_at: acc.best_at,
             nve_unavailable: acc.nve_unavailable,
-        };
+        });
     }
     // Explore (skip-return) then residual holes / non-incumbent keys.
     // The same mix for every N: leftover follows the residual field and
@@ -670,11 +715,15 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
     c_fast.return_screen = true;
     c_fast.return_polish = 0;
     c_fast.symmetrise_on_stall = true;
-    let mut led1 = ledger.slice(explore);
-    let hop1 = run_with_gradient(&c_fast, start, &mut led1, relax, grad.as_deref_mut(), rng)
-        .expect("finite start");
-    let used1 = led1.spent();
-    let _ = ledger.settle_child(&led1, 0);
+    let (hop1, used1) = paid_hop(
+        &c_fast,
+        start,
+        ledger,
+        explore,
+        relax,
+        grad.as_deref_mut(),
+        rng,
+    )?;
     let at1 = hop_best_at(&hop1, used1);
     if hop1.best.is_finite()
         && let Some(ref x) = hop1.best_state
@@ -698,6 +747,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         full: paid_full_quenches(cfg, explore, hop1.hops),
         returned: hop1.returned,
         artn: hop1.symmetrised.0 + hop1.stall_escapes,
+        branch_draws: hop1.branch_draws,
+        branch_spent: hop1.branch_spent,
         basins: hop1.basins,
         nve_unavailable: hop1.nve_unavailable,
     };
@@ -712,14 +763,18 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         let rest = ledger.remaining();
         let take = (rest / 2).max(cfg.relax_steps.saturating_mul(8)).min(rest);
         let (from_key, x0) = residual_origin(archive, cfg, start, rng);
-        let mut led = ledger.slice(take.max(1));
-        let hop = run_with_gradient(&c_res, x0.view(), &mut led, relax, grad.as_deref_mut(), rng)
-            .expect("finite start");
-        let used = led.spent();
+        let (hop, used) = paid_hop(
+            &c_res,
+            x0.view(),
+            ledger,
+            take.max(1),
+            relax,
+            grad.as_deref_mut(),
+            rng,
+        )?;
         if used == 0 {
             break;
         }
-        let _ = ledger.settle_child(&led, 0);
         let at = spent.saturating_add(hop_best_at(&hop, used));
         spent = spent.saturating_add(used);
         if let Some(k) = from_key {
@@ -747,7 +802,7 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         archive.pending_residual =
             archive.catalog.due_key().is_some() || archive.residual.best_node().is_none();
     }
-    ArchiveOutcome {
+    Ok(ArchiveOutcome {
         best: acc.best,
         best_state: acc.best_state,
         screens: acc.screens,
@@ -757,11 +812,13 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         floors: archive.floors.len(),
         events: archive.catalog.event_count(),
         artn: acc.artn,
+        branch_draws: acc.branch_draws,
+        branch_spent: acc.branch_spent,
         charged: ledger.charged(),
         settled_beyond_cap: ledger.settled_beyond_cap(),
         best_at: acc.best_at,
         nve_unavailable: acc.nve_unavailable,
-    }
+    })
 }
 
 /// Coordinates used for topology identity: the active patch on a slab, else all.
@@ -848,6 +905,34 @@ mod tests {
         (e, y)
     }
 
+    #[test]
+    fn archive_accumulator_keeps_screen_and_branch_counts() {
+        let cfg = Config::for_cluster(3);
+        let hop = crate::methods::cluster_hopping::Outcome {
+            screened_out: 4,
+            branch_draws: 2,
+            branch_spent: 17,
+            ..Default::default()
+        };
+        let mut acc = HopAcc {
+            best: f64::INFINITY,
+            best_state: None,
+            best_at: 0,
+            screens: 0,
+            full: 0,
+            returned: 0,
+            artn: 0,
+            branch_draws: 0,
+            branch_spent: 0,
+            basins: 0,
+            nve_unavailable: false,
+        };
+        fold_hop(&mut acc, &cfg, 0, &hop, 0);
+        assert_eq!(acc.screens, 4);
+        assert_eq!(acc.branch_draws, 2);
+        assert_eq!(acc.branch_spent, 17);
+    }
+
     /// A caller that raises the parent stop during a slice must get the
     /// archive back at once. The slice ledger is where a force-call cap
     /// could keep walking after the potential had stopped.
@@ -894,7 +979,8 @@ mod tests {
             None,
             &mut archive,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         let calls = calls.load(Ordering::SeqCst);
         assert!(
             calls <= AFTER + 24,
@@ -942,7 +1028,8 @@ mod tests {
             None,
             &mut archive,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert_eq!(
             format!("{rec:?}"),
             before,
@@ -976,7 +1063,8 @@ mod tests {
             None,
             &mut archive,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert!(out.full >= 1);
         assert!(out.screens + out.full >= 1);
         assert!(out.charged <= 400);
@@ -1009,7 +1097,8 @@ mod tests {
             None,
             &mut archive,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert_eq!(
             format!("{rec:?}"),
             before,
@@ -1058,7 +1147,8 @@ mod tests {
             None,
             &mut archive,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert!(
             out.full >= 2,
             "starved: full={} screens={} returned={} charged={}",
@@ -1094,7 +1184,8 @@ mod tests {
             None,
             &mut archive,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert_eq!(
             format!("{rec:?}"),
             before,
@@ -1127,7 +1218,8 @@ mod tests {
             None,
             &mut archive,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert_eq!(
             format!("{rec:?}"),
             before,
@@ -1193,7 +1285,8 @@ mod tests {
             None,
             &mut archive,
             &mut rng,
-        );
+        )
+        .expect("finite start");
         assert_eq!(format!("{rec:?}"), before);
         assert!(
             archive.catalog.key_count() >= 1,
@@ -1207,5 +1300,78 @@ mod tests {
         );
         assert!(out.best.is_finite());
         assert!(out.charged <= 50_000);
+    }
+
+    fn nan_relax(led: &mut Ledger, x: ArrayView1<f64>, _steps: usize) -> (f64, Array1<f64>) {
+        let _ = led.charge();
+        (f64::NAN, x.to_owned())
+    }
+
+    #[test]
+    fn a_non_finite_opening_quench_is_returned() {
+        let mut cfg = Config::for_cluster(4);
+        cfg.relax_steps = 2;
+        cfg.screen_steps = 1;
+        let start = Array1::zeros(12);
+        let mut ledger = Ledger::new(200);
+        let mut relax = nan_relax;
+        let mut rng = StdRng::seed_from_u64(0);
+        let mut archive = Archive::new();
+        let err = archive_search(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut archive,
+            &mut rng,
+        )
+        .expect_err("a non-finite opening quench is an error");
+        assert!(matches!(err, SearchError::NoFiniteStart { .. }));
+    }
+
+    #[test]
+    fn a_non_finite_large_budget_quench_is_returned() {
+        let mut cfg = Config::for_cluster(4);
+        cfg.relax_steps = 2;
+        cfg.screen_steps = 1;
+        let start = Array1::zeros(12);
+        let mut ledger = Ledger::new(50_000);
+        let mut relax = nan_relax;
+        let mut rng = StdRng::seed_from_u64(1);
+        let mut archive = Archive::new();
+        let err = archive_search(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut archive,
+            &mut rng,
+        )
+        .expect_err("a large-budget non-finite quench is an error");
+        assert!(matches!(err, SearchError::NoFiniteStart { .. }));
+        assert!(ledger.spent() < 50_000);
+    }
+
+    #[test]
+    fn a_non_finite_molecular_opening_quench_is_returned() {
+        let cfg = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
+        let start = Array1::from(vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -0.25, 0.97, 0.0]);
+        let mut ledger = Ledger::new(200);
+        let mut relax = nan_relax;
+        let mut rng = StdRng::seed_from_u64(3);
+        let mut archive = Archive::new();
+        let err = archive_search(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            None,
+            &mut archive,
+            &mut rng,
+        )
+        .expect_err("a molecular non-finite quench is an error");
+        assert!(matches!(err, SearchError::NoFiniteStart { .. }));
     }
 }

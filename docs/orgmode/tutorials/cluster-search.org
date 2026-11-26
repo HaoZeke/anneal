@@ -117,6 +117,36 @@ A force-call cap or a target hit should raise =BaseException= rather than
 =Exception=. The search then returns at once with the best geometry found.
 A binary chart, a rigid chart, and a water-site chart do the same.
 
+* Where the budget went
+
+The result of =cluster_search= carries =ledger=, a dict of counts.
+One charge is one oracle evaluation. An energy and a gradient returned
+together count as one charge. A separate energy call and a separate
+gradient call are two. =spent= equals the sum of the named counters
+=screen=, =full=, =check=, =closure=, =quench=, =settle=, =lattice=,
+=reoccupy= and =probe=.
+
+#+begin_src python
+split = out["ledger"]
+print(split["spent"], split["screen"], split["full"], split["check"])
+print(split["closure"], split["quench"], split["settle"])
+print(split["lattice"], split["reoccupy"], split["probe"])
+print(split["probe_unbacked"], split["callbacks"], split["split_extras"])
+print(split["quenches"], split["converged"], split["capped"])
+print(split["branch_draws"], split["branch_spent"])
+#+end_src
+
+- =spent= is every evaluation the search charged. It equals =screen= + =full= + =check= + =closure= + =quench= + =settle= + =lattice= + =reoccupy= + =probe=.
+- =screen=, =full= and =check= are screening passes, full relaxations and confirming convergence.
+- =closure= is an energy and a gradient returned together outside those three counters.
+- =quench=, =settle=, =lattice=, =reoccupy= and =probe= are the other named charges.
+- =callbacks= counts raw Python callbacks. =split_extras= counts evaluations that returned energy and gradient together. =probe_unbacked= is the probe charges that had no callback. It is two when the gradient probe returns after its first callback, and zero when that probe runs all three. Each is counted on its own. =callbacks= plus the internal charges plus =probe_unbacked= equals =spent= plus =split_extras=.
+- =quenches= is the number of relaxations run. It equals =converged= plus =capped=: the relaxations that reached a small gradient and those that stopped at their step cap.
+- =screened_out= counts the trials the screening pass dropped before a full relaxation. =returned= counts the trials abandoned because their partial relaxation was going home, back to the basin the hop left.
+- =branch_draws= counts fresh-start branches actually run by =branch_on_stall=. =branch_spent= is the charged evaluations spent inside those branches. Both stay zero when the resolved configuration disables that path.
+- =overlap_rejected= counts line-search geometries inside a relaxation that were closer than the overlap rule. Each was refused before the potential was called, so it is not in =spent=.
+- =basins= is the number of distinct basins registered.
+
 * Direct quantum-chemistry profiles
 
 =molecular_cluster= evaluates (H2O)m with GFN2-xTB. It opens

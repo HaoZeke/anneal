@@ -1,0 +1,9 @@
+molecule	arm	base	n	hits_arm	hits_base	only_arm	only_base	mcnemar_p	invalid_arm	invalid_base	outside_us_per_call_arm	outside_us_per_call_base	outside_ratio_median	wilcoxon_p	local_step_arm	local_step_base
+915	anneal	develop	24	15	15	0	0	1.0000	0	0	15.20	15.00	1.0091	0.0179	lbfgs:24	lbfgs:24
+amprenavir	anneal	develop	24	3	3	0	0	1.0000	0	0	29.54	29.32	1.0021	0.3596	lbfgs:24	lbfgs:24
+fluvastatin	anneal	develop	24	11	11	0	0	1.0000	0	0	21.05	21.03	1.0058	0.1074	lbfgs:24	lbfgs:24
+lopinavir	anneal	develop	24	4	4	0	0	1.0000	0	0	47.21	47.54	1.0027	0.5646	lbfgs:24	lbfgs:24
+lorlatinib	anneal	develop	24	11	11	0	0	1.0000	1	1	20.74	21.12	1.0051	0.9664	lbfgs:24	lbfgs:24
+rq3	anneal	develop	24	24	24	0	0	1.0000	0	0	19.25	18.82	1.0226	0.0229	lbfgs:24	lbfgs:24
+xld	anneal	develop	24	21	21	0	0	1.0000	0	0	22.80	22.92	0.9961	0.3748	lbfgs:24	lbfgs:24
+z34	anneal	develop	24	2	2	0	0	1.0000	0	0	26.17	26.08	1.0235	0.1600	lbfgs:24	lbfgs:24

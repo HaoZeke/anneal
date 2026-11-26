@@ -102,6 +102,7 @@ AUDIT_OPTIONAL_REMOTES = (
     "record/repro-pin",
     "bench/cov-floor2",
     "bench/ptcu-gupta",
+    "fix/conf-miss4",
     "fix/morse-gmin",
     "fix/sc-portfolio",
     "fix/sc-shelf-waypoint",
@@ -1192,8 +1193,18 @@ def bisected_z975() -> float:
 
 
 def paired_stats_module():
-    spec = importlib.util.spec_from_file_location("paired_stats", ROOT / "scripts/paired_stats.py")
+    """Load ``scripts/paired_stats.py`` under a name nothing else imports.
+
+    ``spec_from_file_location("paired_stats", ...)`` would reuse whatever
+    ``sys.modules["paired_stats"]`` already holds once another file of
+    that basename has been imported.
+    """
+    name = "anneal_scripts_paired_stats"
+    spec = importlib.util.spec_from_file_location(name, ROOT / "scripts/paired_stats.py")
+    if spec is None or spec.loader is None:
+        raise ImportError("scripts/paired_stats.py")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -1242,9 +1253,7 @@ def paired_statistics(audit: Audit) -> None:
     audit.record(all(int(float(r["evals_to_hit"])) == int(r["budget"]) for r in misses), "bench/gmin-panel/rows.csv",
                  "every miss carries the budget as its calls, as the Wilcoxon test counts it", "budget",
                  "budget" if all(int(float(r["evals_to_hit"])) == int(r["budget"]) for r in misses) else "other")
-    spec = importlib.util.spec_from_file_location("paired_stats", ROOT / "scripts/paired_stats.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = paired_stats_module()
     panel, groups = gmin_panel_groups(audit)
     worst = 0.0
     for system in panel.PAPER_BUDGETS:
@@ -3932,6 +3941,273 @@ def openconf_value(label: str, by: dict, mol: str) -> object:
     raise SystemExit(f"openconf column {label!r} has no rule")
 
 
+CONF_MISS4 = "bench/openconf-h2h/conf-miss4"
+CONF_MISS4_ARM = {"this series": "anneal", "develop 61fa67cf": "develop", "openconf": "openconf"}
+CONF_MISS4_LEDGER = ("spent", "screen", "full", "check", "quenches", "converged", "capped", "screened_out", "returned",
+                     "overlap_rejected", "basins")
+CONF_MISS4_SCHEDULE_SEED = 20261115
+CONF_MISS4_STANDARD_SEEDS = tuple(range(2000, 2012))
+# This audit is merge-only: the first parent carries the measured series and
+# the second carries its develop base. Checking both parent histories keeps a
+# side-branch revision from passing merely because a later HEAD merged it.
+CONF_MISS4_PROVENANCE_MERGE = "c8581d69319a2f960c25ecb5f0261feb34a739b3"
+
+
+def derived_table(audit: Audit, path: str, delimiter: str = "\t") -> list[dict[str, str]]:
+    """A table computed from row files. It carries no revision or host of its own, so it is not a row file."""
+    return list(csv.DictReader([line for line in audit.text(path).splitlines() if line.strip()], delimiter=delimiter))
+
+
+def binomial_half(k: int, n: int) -> float:
+    """Two-sided exact binomial p of k in n at one half."""
+    if n == 0:
+        return 1.0
+    return min(1.0, 2.0 * sum(math.comb(n, i) for i in range(min(k, n - k) + 1)) / 2.0**n)
+
+
+def signed_rank_exact(diffs: list[float]) -> float:
+    """Two-sided exact Wilcoxon signed-rank p of the non-zero differences, ranks of ties averaged."""
+    diffs = [d for d in diffs if d != 0.0]
+    if not diffs:
+        return 1.0
+    order = sorted(abs(d) for d in diffs)
+    rank = {}
+    i = 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and order[j + 1] == order[i]:
+            j += 1
+        rank[order[i]] = (i + j + 2)
+        i = j + 1
+    counts = {0: 1}
+    for d in diffs:
+        step = rank[abs(d)]
+        grown = defaultdict(int)
+        for total, ways in counts.items():
+            grown[total] += ways
+            grown[total + step] += ways
+        counts = grown
+    positive = sum(rank[abs(d)] for d in diffs if d > 0)
+    whole = sum(rank[abs(d)] for d in diffs)
+    tail = sum(ways for total, ways in counts.items() if total <= min(positive, whole - positive))
+    return min(1.0, 2.0 * tail / 2 ** len(diffs))
+
+
+def conf_miss4(audit: Audit) -> None:
+    """The conf-miss4 panel, paired statistics, rescore, guard and pins against its rows."""
+    base = CONF_MISS4
+    rows = audit.rows(f"{base}/rows.csv")
+    steps = audit.rows(f"{base}/local_step.csv")
+    guard = audit.rows(f"{base}/guard.csv")
+    where = f"{base}/rows.csv"
+    mols = list(dict.fromkeys(r["molecule"] for r in rows))
+    by = {(m, a): sorted(pick(rows, molecule=m, arm=a), key=lambda r: int(r["seed"])) for m in mols for a in
+          ("anneal", "develop", "openconf")}
+    audit.record(all(len(g) == 24 for g in by.values()) and len(rows) == 576, where, "8 molecules, 3 arms, 24 seeds each",
+                 "576 rows", f"{len(rows)} rows")
+    budgets_ok = True
+    for m in mols:
+        for a, o, d in zip(by[(m, "anneal")], by[(m, "openconf")], by[(m, "develop")]):
+            want = (int(o["energy_calls"]) + int(o["grad_calls"])) // 2
+            budgets_ok &= a["seed"] == o["seed"] == d["seed"] and int(a["budget"]) == int(d["budget"]) == want
+    audit.record(budgets_ok, where, "each arm's budget is (energy_calls + grad_calls) // 2 of its seed's openconf run",
+                 "holds", "holds" if budgets_ok else "fails")
+    audit.record(all(r["host"] == "cloud-vm" for r in rows + steps + guard), base, "the host column is the neutral label",
+                 "cloud-vm", "cloud-vm" if all(r["host"] == "cloud-vm" for r in rows + steps + guard) else "other")
+    cited = {r[c] for table in (rows, steps, guard) for r in table for c in ("code_revision",) if r[c]}
+    paired_revisions = {r["code_revision"] for r in rows if r["arm"] in ("anneal", "openconf")}
+    audit.record(len(paired_revisions) == 1, where, "anneal and openconf carry the paired runner's one revision",
+                 "one revision", " ".join(sorted(r[:8] for r in paired_revisions)))
+    provenance_rows = derived_table(audit, f"{base}/provenance.tsv")
+    roles = {r["commit"]: r["role"] for r in provenance_rows}
+    merge_exists = git("cat-file", "-e", f"{CONF_MISS4_PROVENANCE_MERGE}^{{commit}}").returncode == 0
+    merge_parents = (
+        git("show", "-s", "--format=%P", CONF_MISS4_PROVENANCE_MERGE).stdout.split()
+        if merge_exists
+        else []
+    )
+    audit.record(merge_exists, base, "the documented provenance merge is a commit object",
+                 "commit", "commit" if merge_exists else "missing")
+    audit.record(len(merge_parents) == 2, base, "the documented provenance merge has two parents",
+                 "two parents", f"{len(merge_parents)} parents")
+    merge_on_origin = merge_exists and bool(
+        git("for-each-ref", "--count=1", "--contains", CONF_MISS4_PROVENANCE_MERGE,
+            "refs/remotes/origin").stdout.strip()
+    )
+    audit.record(merge_on_origin, base, "the documented provenance merge is reachable from origin",
+                 "reachable", "reachable" if merge_on_origin else "not reachable")
+    merge_on_head = merge_exists and git(
+        "merge-base", "--is-ancestor", CONF_MISS4_PROVENANCE_MERGE, "HEAD"
+    ).returncode == 0
+    audit.record(merge_on_head, base, "the documented provenance merge is an ancestor of HEAD",
+                 "ancestor", "ancestor" if merge_on_head else "not")
+    for revision in sorted(cited):
+        exists = git("cat-file", "-e", f"{revision}^{{commit}}").returncode == 0
+        on_origin = exists and bool(
+            git("for-each-ref", "--count=1", "--contains", revision, "refs/remotes/origin").stdout.strip()
+        )
+        audit.record(exists, base, f"cited revision {revision[:8]} is a commit object",
+                     "commit", "commit" if exists else "missing")
+        audit.record(on_origin, base, f"cited revision {revision[:8]} is reachable from origin",
+                     "reachable", "reachable" if on_origin else "not reachable")
+        parent_index = 1 if roles.get(revision) == "develop base" else 0
+        on_parent = (
+            exists
+            and len(merge_parents) == 2
+            and git("merge-base", "--is-ancestor", revision, merge_parents[parent_index]).returncode == 0
+        )
+        audit.record(on_parent, base, f"cited revision {revision[:8]} is on its provenance merge parent",
+                     "ancestor", "ancestor" if on_parent else "not")
+
+    listed = {r["commit"] for r in provenance_rows}
+    for r in provenance_rows:
+        tree = git("rev-parse", f"{r['commit']}^{{tree}}").stdout.strip()
+        audit.record(tree == r["tree"], f"{base}/provenance.tsv", f"tree of {r['commit'][:8]} ({r['role']})", r["tree"], tree)
+        audit.said(f"{base}/README.md", r["commit"])
+        if r["role"] != "develop base":
+            audit.said(f"{base}/README.md", r["tree"])
+    audit.record(cited <= listed, f"{base}/provenance.tsv", "every revision the rows cite is listed",
+                 "all listed", "all listed" if cited <= listed else ", ".join(sorted(c[:8] for c in cited - listed)))
+
+    row_pairs = {(r["molecule"], int(r["seed"])) for r in rows if r["arm"] == "anneal"}
+    with (ROOT / "bench/openconf-h2h/molecules.csv").open(newline="") as handle:
+        schedule_names = [r["name"] for r in csv.DictReader(handle)]
+    rng = random.Random(CONF_MISS4_SCHEDULE_SEED)
+    standard = [(m, s) for m in schedule_names for s in CONF_MISS4_STANDARD_SEEDS]
+    rng.shuffle(standard)
+    orders = {pair: rng.random() < 0.5 for pair in standard}
+    extra_seeds = sorted({seed for _, seed in row_pairs} - set(CONF_MISS4_STANDARD_SEEDS))
+    extra = [(m, s) for m in schedule_names for s in extra_seeds]
+    rng.shuffle(extra)
+    orders.update({pair: rng.random() < 0.5 for pair in extra})
+    develop_first = sum(orders[pair] for pair in row_pairs)
+    audit.record(develop_first == 98 and len(row_pairs) == 192, where,
+                 "the seeded paired schedule runs develop first on 98 of 192 row pairs",
+                 "98 of 192", f"{develop_first} of {len(row_pairs)}")
+    audit.said(f"{base}/README.md", f"Develop ran first on {develop_first} of the {len(row_pairs)} pairs and anneal on "
+               f"{len(row_pairs) - develop_first}.")
+
+    def col(g: list[dict[str, str]], key: str) -> list[float]:
+        return [float(r[key]) for r in g if r[key] != ""]
+
+    panel = derived_table(audit, f"{base}/panel.tsv")
+    for line in panel:
+        m, a = line["molecule"], CONF_MISS4_ARM[line["arm"]]
+        g = by[(m, a)]
+        at = f"{base}/panel.tsv {m} {line['arm']}"
+        audit.cell(at, "n", line["n"], len(g))
+        audit.record(line["hits"] == frac(g), at, "hits", line["hits"], frac(g))
+        audit.record(line["hits_mirror"] == frac(g, "hit_mirror"), at, "hits_mirror", line["hits_mirror"], frac(g, "hit_mirror"))
+        calls = col(g, "calls_to_hit")
+        audit.cell(at, "calls_to_hit_median", line["calls_to_hit_median"], median(calls) if calls else None)
+        audit.cell(at, "delta_min_median_kcal", line["delta_min_median_kcal"], median(col(g, "delta_min_kcal")))
+        audit.cell(at, "invalid_total", line["invalid_total"], sum(int(r["invalid"]) for r in g))
+        audit.cell(at, "wall_median_s", line["wall_median_s"], median(col(g, "wall_s")))
+        for ref, label in (("develop", "vs_develop"), ("openconf", "vs_openconf")):
+            if a == ref:
+                audit.cell(at, f"fisher_p_{label}", line[f"fisher_p_{label}"], None)
+                audit.cell(at, f"mw_p_{label}", line[f"mw_p_{label}"], None)
+                continue
+            other = by[(m, ref)]
+            audit.cell(at, f"fisher_p_{label}", line[f"fisher_p_{label}"],
+                       fisher(hits_of(g), len(g), hits_of(other), len(other)))
+            x, y = col(g, "calls_to_hit"), col(other, "calls_to_hit")
+            audit.cell(at, f"mw_p_{label}", line[f"mw_p_{label}"],
+                       mann_whitney(x, y, continuity=True, degenerate=None) if x and y else None)
+    audit.record(len(panel) == 24, f"{base}/panel.tsv", "a line per molecule and arm", "24", str(len(panel)))
+
+    ledger_ok = True
+    local_step = {(r["molecule"], r["arm"], r["seed"]): r for r in steps}
+    for m in mols:
+        for a in ("anneal", "develop"):
+            for r in by[(m, a)]:
+                step = local_step[(m, a, r["seed"])]
+                ledger_ok &= step["local_step"] == "lbfgs"
+                if a == "develop":
+                    ledger_ok &= all(step[k] == "" for k in CONF_MISS4_LEDGER)
+                else:
+                    v = {k: int(step[k]) for k in CONF_MISS4_LEDGER}
+                    ledger_ok &= v["screen"] + v["full"] + v["check"] <= v["spent"] and v["quenches"] == v["converged"] + v["capped"]
+    audit.record(ledger_ok and len(steps) == 384, f"{base}/local_step.csv",
+                 "every run resolved to lbfgs; the ledger splits are consistent and absent for develop", "holds",
+                 "holds" if ledger_ok and len(steps) == 384 else "fails")
+
+    paired = derived_table(audit, f"{base}/paired.tsv")
+    for line in paired:
+        m = line["molecule"]
+        mine = {r["seed"]: r for r in by[(m, "anneal")]}
+        theirs = {r["seed"]: r for r in by[(m, "develop")]}
+        seeds = sorted(set(mine) & set(theirs), key=int)
+        a, b = [mine[s] for s in seeds], [theirs[s] for s in seeds]
+        only_arm = sum(1 for x, y in zip(a, b) if x["hit"] == "1" and y["hit"] == "0")
+        only_base = sum(1 for x, y in zip(a, b) if y["hit"] == "1" and x["hit"] == "0")
+        us = [(1e6 * float(x["outside_s"]) / float(x["calls"]), 1e6 * float(y["outside_s"]) / float(y["calls"])) for x, y in zip(a, b)]
+        at = f"{base}/paired.tsv {m}"
+        audit.cell(at, "n", line["n"], len(seeds))
+        audit.cell(at, "hits_arm", line["hits_arm"], hits_of(a))
+        audit.cell(at, "hits_base", line["hits_base"], hits_of(b))
+        audit.cell(at, "only_arm", line["only_arm"], only_arm)
+        audit.cell(at, "only_base", line["only_base"], only_base)
+        audit.cell(at, "mcnemar_p", line["mcnemar_p"], binomial_half(only_arm, only_arm + only_base))
+        audit.cell(at, "invalid_arm", line["invalid_arm"], sum(int(x["invalid"]) for x in a))
+        audit.cell(at, "invalid_base", line["invalid_base"], sum(int(y["invalid"]) for y in b))
+        audit.cell(at, "outside_us_per_call_arm", line["outside_us_per_call_arm"], median([p for p, _ in us]))
+        audit.cell(at, "outside_us_per_call_base", line["outside_us_per_call_base"], median([q for _, q in us]))
+        audit.cell(at, "outside_ratio_median", line["outside_ratio_median"], median([p / q for p, q in us]))
+        audit.cell(at, "wilcoxon_p", line["wilcoxon_p"], signed_rank_exact([p - q for p, q in us]))
+        audit.record(not any(p == q for p, q in us), at, "no equal pair, so no pair is dropped from the Wilcoxon test",
+                     "none", "none" if not any(p == q for p, q in us) else "some")
+        for side, arm in (("arm", "anneal"), ("base", "develop")):
+            counts = defaultdict(int)
+            for r in by[(m, arm)]:
+                counts[local_step[(m, arm, r["seed"])]["local_step"]] += 1
+            shown = " ".join(f"{k}:{v}" for k, v in sorted(counts.items()))
+            audit.record(line[f"local_step_{side}"] == shown, at, f"local_step_{side}", line[f"local_step_{side}"], shown)
+    audit.record(len(paired) == 8, f"{base}/paired.tsv", "a line per molecule", "8", str(len(paired)))
+
+    rescore = derived_table(audit, f"{base}/rescore.tsv")
+    moved = derived_table(audit, f"{base}/rescore-cells.tsv")
+    for line in rescore:
+        g = by[(line["molecule"], line["arm"])]
+        at = f"{base}/rescore.tsv {line['molecule']} {line['arm']}"
+        audit.cell(at, "hits_after", line["hits_after"], hits_of(g))
+        audit.cell(at, "hit_mirror_after", line["hit_mirror_after"], hits_of(g, "hit_mirror"))
+        audit.record(line["hits_before"] == line["hits_after"] and line["hit_mirror_before"] == line["hit_mirror_after"]
+                     and line["cells_differing"] == "0", at, "no hit or mirror hit moved", "unchanged", "unchanged"
+                     if line["cells_differing"] == "0" else "moved")
+    audit.record(len(rescore) == 24 and not moved, f"{base}/rescore-cells.tsv", "no differing cell is listed", "0", str(len(moved)))
+
+    series = {(r["system"], r["seed"]): r for r in guard if r["code_revision"] != "61fa67cf380e46876b569da45e7cc091647a775b"}
+    develop = {(r["system"], r["seed"]): r for r in guard if r["code_revision"] == "61fa67cf380e46876b569da45e7cc091647a775b"}
+    keys = ("hit", "evals_to_hit", "charged", "best")
+    mismatches = sum(any(series[k][c] != develop[k][c] for c in keys) for k in develop if k in series)
+    audit.record(len(series) == len(develop) == 156 and mismatches == 0, f"{base}/guard.csv",
+                 "156 jobs, none differs between develop and the series", "0 mismatches", f"{mismatches} mismatches")
+    audit.record(hits_of(list(series.values())) == hits_of(list(develop.values())) == 104, f"{base}/guard.csv",
+                 "104 of 156 jobs hit on each side", "104", f"{hits_of(list(series.values()))} {hits_of(list(develop.values()))}")
+
+    readme = f"{base}/README.md"
+    pins = (ROOT / base / "pins.txt").read_bytes()
+    audit.record(hashlib.sha1(pins).hexdigest() == "83d07464f1493b3846bc92b3d1f191331dacd586" and pins.count(b"\n") == 91,
+                 f"{base}/pins.txt", "91 lines with the sha1 the README gives", "83d07464", hashlib.sha1(pins).hexdigest()[:8])
+    totals = {a: (sum(len(g) and hits_of(g) for k, g in by.items() if k[1] == a),
+                  sum(hits_of(g, "hit_mirror") for k, g in by.items() if k[1] == a)) for a in ("anneal", "develop", "openconf")}
+    audit.said(readme, f"this series {totals['anneal'][0]}, develop {totals['develop'][0]}, openconf {totals['openconf'][0]}")
+    audit.said(readme, f"With `hit_mirror`: {totals['anneal'][1]}, {totals['develop'][1]} and {totals['openconf'][1]}.")
+    mirror_only = {(m, a): sum(1 for r in g if r["hit_mirror"] == "1" and r["hit"] == "0") for (m, a), g in by.items()}
+    audit.said(readme, "The 8 runs that count only as a mirror hit are xld (3 anneal, 3 develop) and rq3 (2 openconf)")
+    audit.record({k: v for k, v in mirror_only.items() if v} == {("xld", "anneal"): 3, ("xld", "develop"): 3, ("rq3", "openconf"): 2},
+                 readme, "the runs that count only as a mirror hit", "xld 3 3, rq3 2", str({k: v for k, v in mirror_only.items() if v}))
+    table = {r["molecule"]: r for r in paired}
+    for line, row in md_table(audit, readme, "molecule    | series"):
+        t = table[row["molecule"]]
+        at = f"{readme}:{line} {row['molecule']}"
+        audit.cell(at, "series", row["series"], float(t["outside_us_per_call_arm"]))
+        audit.cell(at, "develop", row["develop"], float(t["outside_us_per_call_base"]))
+        audit.cell(at, "ratio", row["ratio"], float(t["outside_ratio_median"]))
+        audit.cell(at, "p", row["p"], float(t["wilcoxon_p"]))
+
+
 def and_list(items: list[str]) -> str:
     items = list(items)
     return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
@@ -5521,7 +5797,7 @@ def cover_letter(audit: Audit) -> None:
     audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
 
 
-REFS_BLOB = "e73f824c8bd3f5244056165ba2d87cb450464845"
+REFS_BLOB = "ff495c1f0629c91a7e45ceea02df7cca033b0e4c"
 # Wording the review of the first rewrite showed to overclaim; none may come back.
 OVERCLAIMS = ("same trap", "confined to one funnel", "cannot become the stored best", "cannot win",
               "basin-hopping setting", "one setting", "adds nothing", "does no better", "this setting",
@@ -6729,10 +7005,23 @@ def append_only_rows(audit: Audit) -> None:
         )
     base = base_ref
     if base is not None:
+        # A file the base never committed is this branch's own record. A
+        # correction of that file, or dropping it, is not a removed line of
+        # a base record. A file the base committed stays in the log, including
+        # when HEAD no longer has it. A name with no commit in the range
+        # still goes to the log.
+        history_paths = []
+        for path in sorted(paths):
+            if git("cat-file", "-e", f"{base}:{path}").returncode == 0:
+                history_paths.append(path)
+            elif not (ROOT / path).is_file() and not git(
+                "rev-list", "-1", f"{base}..HEAD", "--", path
+            ).stdout.strip():
+                history_paths.append(path)
         history = git(
             "log", "-p", "--no-renames", "--format=", f"{base}..HEAD", "--",
-            *sorted(paths),
-        ).stdout.splitlines()
+            *history_paths,
+        ).stdout.splitlines() if history_paths else []
         removed = [line for line in history if line.startswith("-") and not line.startswith("---")]
         audit.record(
             not removed,
@@ -7540,6 +7829,36 @@ def own_references(audit: Audit) -> None:
                      " ".join(loose) or "all defined")
 
 
+def build_receipts(audit: Audit) -> None:
+    """The cross-document label files and the pdf-length receipt match the sources they were written from."""
+    labels = load_script("cross_labels", "paper/jctc/scripts/cross_labels.py")
+    stale = set(labels.stale())
+    for document in labels.DOCUMENTS:
+        name = f"labels-{document}.tex"
+        audit.record(name not in stale, f"paper/jctc/{name}", f"cross_labels.py output for {document}.tex",
+                     "current", "stale" if name in stale else "current")
+    length = load_script("pdf_length", "paper/jctc/scripts/pdf_length.py")
+    receipt = length.RECEIPT.relative_to(length.ROOT).as_posix()
+    if not length.RECEIPT.is_file():
+        audit.record(False, receipt, "pdf_length.py receipt", "present", "missing")
+        return
+    counts, digests = length.read_receipt(length.RECEIPT)
+    current = length.source_digests(length.ROOT)
+    for source in sorted(set(current) | set(digests)):
+        audit.record(digests.get(source) == current.get(source), receipt, f"sha256 of {source}",
+                     digests.get(source, "absent"), current.get(source, "not a source"))
+    missing = sorted({"abstract_words", "abstract_numerals", "body_words"} - set(counts))
+    if missing:
+        audit.record(False, receipt, "pdf_length.py counts", "present", "no " + ", ".join(missing))
+        return
+    # Over-length text is an editorial decision, not a stale receipt; it is shown without failing.
+    found = length.problems(counts)
+    if found:
+        audit.expect(receipt, "rendered length within the journal limits", "within", "; ".join(found))
+    else:
+        audit.record(True, receipt, "rendered length within the journal limits", "within", "within")
+
+
 def selection_tables(audit: Audit) -> None:
     """The arm-selection tables beside the two result files of tab:ablation.
 
@@ -7667,7 +7986,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
     for check in (
         paired_statistics, manuscript_gmin, withdrawn_benchmarks,
         supporting_information, release, paper_0120,
-        gad_published, openconf, head_to_head, sc96_78_howto, stale_claims,
+        gad_published, openconf, conf_miss4, head_to_head, sc96_78_howto, stale_claims,
         tip4p_panel, covalent_panels, covalent_gfn2, printed_harnesses, ase_gofee,
         lj_large, bench_prose, manuscript_ase, manuscript_knockouts,
         manuscript_priors, panel_references, generated_tables,
@@ -7678,7 +7997,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         reproduction_records, sutton_chen, crest_equal, crest_equal_bench,
         append_only_rows, tip4p_unscored, tip4p_r2_rows, pending_text, citation_metadata,
                   figure_source_scripts, bibliography_keys, conversion_literals,
-                  own_references, selection_tables, gmin_panel_drivers, prior_switches,
+                  own_references, build_receipts, selection_tables, gmin_panel_drivers, prior_switches,
                   method_definitions, au55_superseded, cap_turn_campaign):
         check(audit)
     if write_map:

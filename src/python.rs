@@ -2989,6 +2989,17 @@ impl PyClusterConfig {
         self.inner.tabu_on_stall
     }
 
+    /// Polish the incumbent when a hop improves it.
+    #[getter]
+    fn polish_on_improve(&self) -> bool {
+        self.inner.polish_on_improve
+    }
+
+    #[setter]
+    fn set_polish_on_improve(&mut self, on: bool) {
+        self.inner.polish_on_improve = on;
+    }
+
     /// Cost-asymmetric Bayes-screen threshold, if that screen is on.
     #[getter]
     fn bayes_threshold(&self) -> f64 {
@@ -3129,6 +3140,44 @@ impl PyLedger {
     }
 }
 
+#[derive(Default)]
+struct PythonCallCounts {
+    total: std::sync::atomic::AtomicUsize,
+    /// Pair evaluations. Incremented only from `value_and_gradient`,
+    /// never derived from the other counters.
+    split_pairs: std::sync::atomic::AtomicUsize,
+}
+
+impl PythonCallCounts {
+    fn record_energy(&self) {
+        self.total
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn record_gradient(&self) {
+        self.total
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn record_other(&self) {
+        self.total
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// One evaluation that returned energy and gradient together.
+    ///
+    /// This is not `total` minus the charges. A missed increment leaves
+    /// the reconciliation short.
+    fn record_split_pair(&self) {
+        self.split_pairs
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn load(counter: &std::sync::atomic::AtomicUsize) -> usize {
+        counter.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
 /// Combined Python energy plus gradient, for the cluster-search driver.
 struct CallableDiffObjective {
     fn_: Py<PyAny>,
@@ -3136,6 +3185,7 @@ struct CallableDiffObjective {
     bounds: Bounds<f64>,
     gradient_scale: f64,
     errors: std::sync::Arc<CallbackErrors>,
+    calls: std::sync::Arc<PythonCallCounts>,
 }
 
 impl Objective<f64> for CallableDiffObjective {
@@ -3151,6 +3201,7 @@ impl Objective<f64> for CallableDiffObjective {
         if self.errors.aborted() {
             return f64::INFINITY;
         }
+        self.calls.record_energy();
         Python::attach(|py| {
             let py_arr = py_view1(py, x);
             match self.fn_.call1(py, (py_arr,)) {
@@ -3170,6 +3221,7 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
         if self.errors.aborted() {
             return Array1::zeros(dim);
         }
+        self.calls.record_gradient();
         Python::attach(|py| {
             let py_arr = py_view1(py, x);
             match self.grad_fn.call1(py, (py_arr,)) {
@@ -3198,7 +3250,77 @@ impl eindir_core::gradient::Gradient<f64> for CallableDiffObjective {
     }
 }
 
-impl eindir_core::gradient::DifferentiableObjective<f64> for CallableDiffObjective {}
+impl eindir_core::gradient::DifferentiableObjective<f64> for CallableDiffObjective {
+    fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
+        let energy = self.eval(x);
+        let gradient = eindir_core::Gradient::grad(self, x);
+        self.calls.record_split_pair();
+        (energy, gradient)
+    }
+}
+
+/// `callbacks + internal + probe_unbacked == spent + split extras`.
+///
+/// Each term is counted on its own. `internal` is the lattice, reoccupy,
+/// quench and settle charges. `probe_unbacked` is the probe charges that
+/// had no callback. `extras` is the number of `value_and_gradient` entries.
+/// A residual would make this hold by arithmetic; these counters do not.
+fn set_charge_fields(
+    _py: Python<'_>,
+    ledger_split: &pyo3::Bound<'_, PyDict>,
+    ledger: &crate::methods::cluster_hopping::Ledger,
+    calls: &PythonCallCounts,
+    probe_unbacked: usize,
+) -> PyResult<()> {
+    let charges = ledger.charges();
+    ledger_split.set_item("spent", ledger.spent())?;
+    ledger_split.set_item("screen", charges.screen)?;
+    ledger_split.set_item("full", charges.full)?;
+    ledger_split.set_item("check", charges.check)?;
+    ledger_split.set_item("closure", charges.closure)?;
+    ledger_split.set_item("quench", charges.quench)?;
+    ledger_split.set_item("settle", charges.settle)?;
+    ledger_split.set_item("lattice", charges.lattice)?;
+    ledger_split.set_item("reoccupy", charges.reoccupy)?;
+    ledger_split.set_item("probe", charges.probe)?;
+    ledger_split.set_item("probe_unbacked", probe_unbacked)?;
+    ledger_split.set_item("callbacks", PythonCallCounts::load(&calls.total))?;
+    ledger_split.set_item("split_extras", PythonCallCounts::load(&calls.split_pairs))?;
+    Ok(())
+}
+
+fn reconcile_python_charges(
+    calls: &PythonCallCounts,
+    ledger: &crate::methods::cluster_hopping::Ledger,
+    probe_unbacked: usize,
+) -> PyResult<()> {
+    use crate::methods::cluster_hopping::ChargeSplit;
+    let callbacks = PythonCallCounts::load(&calls.total);
+    let extras = PythonCallCounts::load(&calls.split_pairs);
+    let charges: ChargeSplit = ledger.charges();
+    let internal = charges.internal().saturating_add(probe_unbacked);
+    assert_eq!(
+        callbacks.saturating_add(internal),
+        ledger.spent().saturating_add(extras),
+        "callbacks {callbacks} + internal {internal} != spent {} + extras {extras}; split {:?}",
+        ledger.spent(),
+        charges
+    );
+    ledger.assert_named_charges().map_err(search_failure)?;
+    Ok(())
+}
+
+/// `NoFiniteStart` is a value the search cannot use. `UnnamedCharge` is a
+/// broken ledger, the same class of failure at the search return and here.
+fn search_failure(err: crate::methods::cluster_hopping::SearchError) -> PyErr {
+    use crate::methods::cluster_hopping::SearchError;
+    match err {
+        SearchError::NoFiniteStart { .. } => PyValueError::new_err(err.to_string()),
+        SearchError::UnnamedCharge { .. } => {
+            pyo3::exceptions::PyRuntimeError::new_err(err.to_string())
+        }
+    }
+}
 
 fn cluster_gradient_scale(
     py: Python<'_>,
@@ -3208,6 +3330,7 @@ fn cluster_gradient_scale(
     seed: u64,
     at: Option<ArrayView1<'_, f64>>,
     errors: &CallbackErrors,
+    calls: &PythonCallCounts,
 ) -> PyResult<f64> {
     use crate::methods::cluster_hopping::random_cluster_in_radius;
 
@@ -3216,6 +3339,7 @@ fn cluster_gradient_scale(
     // gradient, counted in the run's warning; KeyboardInterrupt, SystemExit
     // and a return that is not a number end the call.
     let call = |f: &Py<PyAny>, x: Vec<f64>| -> PyResult<Option<Py<PyAny>>> {
+        calls.record_other();
         match f.call1(py, (PyArray1::from_vec(py, x),)) {
             Ok(value) => Ok(Some(value)),
             Err(err) if err.is_instance_of::<pyo3::exceptions::PyException>(py) => {
@@ -3341,7 +3465,9 @@ fn cluster_archive_search(
     obj: &CallableDiffObjective,
     cfg: &crate::methods::cluster_hopping::Config,
     ledger: &mut crate::methods::cluster_hopping::Ledger,
+    calls: &PythonCallCounts,
     seed: u64,
+    probe_unbacked: usize,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::archive_search::{Archive, archive_search};
     use crate::methods::cluster_hopping::random_cluster_in_radius;
@@ -3350,46 +3476,66 @@ fn cluster_archive_search(
     use rand::SeedableRng;
 
     let mut stats = RelaxStats::default();
-    let mut relax = warm_relax(obj, cfg, &mut stats, seed);
-    let mut grad = |led: &mut crate::methods::cluster_hopping::Ledger,
-                    x: ArrayView1<f64>|
-     -> Option<Array1<f64>> {
-        if !led.charge() {
-            return None;
-        }
-        Some(Gradient::grad(obj, x))
+    let out = {
+        let mut relax = warm_relax(obj, cfg, &mut stats, seed);
+        let mut grad = |led: &mut crate::methods::cluster_hopping::Ledger,
+                        x: ArrayView1<f64>|
+         -> Option<Array1<f64>> {
+            if !led.with_charge_name(
+                crate::methods::cluster_hopping::ChargeName::Closure,
+                |led| led.charge(),
+            ) {
+                return None;
+            }
+            Some(Gradient::grad(obj, x))
+        };
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let start = random_cluster_in_radius(
+            cfg.n_points,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut rng,
+        );
+        let mut archive = Archive::new();
+        archive_search(
+            cfg,
+            start.view(),
+            ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut archive,
+            &mut rng,
+        )
+        .map_err(search_failure)?
     };
-    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-    let start = random_cluster_in_radius(
-        cfg.n_points,
-        cfg.start_radius(),
-        cfg.min_separation,
-        &mut rng,
-    );
-    let mut archive = Archive::new();
-    let out = archive_search(
-        cfg,
-        start.view(),
-        ledger,
-        &mut relax,
-        Some(&mut grad),
-        &mut archive,
-        &mut rng,
-    );
     let dim = 3 * cfg.n_points;
     let best = out
         .best_state
         .map(|a| a.to_vec())
         .unwrap_or_else(|| vec![0.0; dim]);
     let dict = PyDict::new(py);
+    let charged = ledger.spent();
     dict.set_item("best", PyArray1::from_vec(py, best))?;
     dict.set_item("best_energy", out.best)?;
     dict.set_item("hops", out.full)?;
-    dict.set_item("charged", out.charged)?;
+    dict.set_item("charged", charged)?;
     dict.set_item("floors", out.floors)?;
     dict.set_item("returned", out.returned)?;
     dict.set_item("events", out.events)?;
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
+    dict.set_item("branch_on_stall", cfg.branch_on_stall)?;
+    let ledger_split = PyDict::new(py);
+    set_charge_fields(py, &ledger_split, ledger, calls, probe_unbacked)?;
+    ledger_split.set_item("quenches", stats.total())?;
+    ledger_split.set_item("converged", stats.converged)?;
+    ledger_split.set_item("capped", stats.capped)?;
+    ledger_split.set_item("screened_out", out.screens)?;
+    ledger_split.set_item("returned", out.returned)?;
+    ledger_split.set_item("branch_draws", out.branch_draws)?;
+    ledger_split.set_item("branch_spent", out.branch_spent)?;
+    ledger_split.set_item("overlap_rejected", stats.overlap_rejected)?;
+    ledger_split.set_item("basins", out.floors)?;
+    dict.set_item("ledger", ledger_split)?;
     Ok(dict.into())
 }
 
@@ -3399,7 +3545,9 @@ fn cluster_archive_search(
     _obj: &CallableDiffObjective,
     _cfg: &crate::methods::cluster_hopping::Config,
     _ledger: &mut crate::methods::cluster_hopping::Ledger,
+    _calls: &PythonCallCounts,
     _seed: u64,
+    _probe_unbacked: usize,
 ) -> PyResult<Py<PyDict>> {
     Err(PyValueError::new_err(
         "ras=True requires building with the graphkey feature",
@@ -3533,6 +3681,7 @@ fn rigid_probe(
 ///     `derived` when true. Not `Config.recommended`.
 ///   ras: residual archive search on the recommended preset. Keyword-only;
 ///     default false. Does not change `Config.recommended`.
+///   branch_on_stall: run fresh-start branches after the main walk stalls.
 ///   start: optional flat start. Cartesian length is `3n`. A rigid or water
 ///     start is `6n`, block Rodrigues unless `layout` is `interleaved`.
 ///   length_scale: optional physical length. When set with the recommended
@@ -3594,10 +3743,16 @@ fn rigid_probe(
 ///     search, the temperature and deposit height are read from the opening
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
+///   polish_on_improve: `Config::polish_on_improve`. When a hop improves
+///     the incumbent, polish that point at the component gradient
+///     tolerance and charge every evaluation. Unset keeps the preset's,
+///     which is off.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
 /// kept, and the exception is raised from this call.
+/// An opening quench that is never finite raises `ValueError`, including
+/// when `ras=True`.
 #[pyfunction]
 #[pyo3(signature = (
     obj_fn,
@@ -3610,6 +3765,7 @@ fn rigid_probe(
     communicating = false,
     *,
     ras = false,
+    branch_on_stall = false,
     start = None,
     length_scale = None,
     species = None,
@@ -3624,6 +3780,7 @@ fn rigid_probe(
     ring_moves = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
+    polish_on_improve = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
@@ -3636,6 +3793,7 @@ fn cluster_search(
     derived: bool,
     communicating: bool,
     ras: bool,
+    branch_on_stall: bool,
     start: Option<PyReadonlyArray1<'_, f64>>,
     length_scale: Option<f64>,
     species: Option<Vec<u32>>,
@@ -3650,6 +3808,7 @@ fn cluster_search(
     ring_moves: Option<bool>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
+    polish_on_improve: Option<bool>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
     use crate::methods::tric_opt::LocalStep;
@@ -3866,6 +4025,10 @@ fn cluster_search(
             cfg = cfg.with_species(labels, sigmas);
         }
     }
+    cfg.branch_on_stall = branch_on_stall;
+    if let Some(polish) = polish_on_improve {
+        cfg.polish_on_improve = polish;
+    }
     let errors: std::sync::Arc<CallbackErrors> = std::sync::Arc::default();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let mut ledger =
@@ -3876,6 +4039,8 @@ fn cluster_search(
         }
         ledger.stop_below(limit);
     }
+    let potential_calls = std::sync::Arc::new(PythonCallCounts::default());
+    let mut probe_unbacked = 0usize;
     let gradient_scale = if budget >= 4 {
         let probe_owned = if rigid_chart || molecular {
             Some(match start.as_ref() {
@@ -3893,9 +4058,15 @@ fn cluster_search(
             seed,
             probe_owned.as_ref().map(|probe| probe.view()),
             &errors,
+            &potential_calls,
         )?;
+        let probe_callbacks = PythonCallCounts::load(&potential_calls.total);
+        probe_unbacked = 3usize.saturating_sub(probe_callbacks);
         for _ in 0..3 {
-            assert!(ledger.charge());
+            assert!(ledger.with_charge_name(
+                crate::methods::cluster_hopping::ChargeName::Probe,
+                |ledger| ledger.charge()
+            ));
         }
         scale
     } else {
@@ -3919,10 +4090,23 @@ fn cluster_search(
         bounds,
         gradient_scale,
         errors: std::sync::Arc::clone(&errors),
+        calls: std::sync::Arc::clone(&potential_calls),
     };
     if ras {
-        let out = cluster_archive_search(py, &obj, &cfg, &mut ledger, seed);
+        let out = cluster_archive_search(
+            py,
+            &obj,
+            &cfg,
+            &mut ledger,
+            &potential_calls,
+            seed,
+            probe_unbacked,
+        );
+        // The charge identity is an assert. Finish a KeyboardInterrupt or
+        // other ending callback error first, or that assert becomes the
+        // exception the caller sees.
         errors.finish(py)?;
+        reconcile_python_charges(&potential_calls, &ledger, probe_unbacked)?;
         return out;
     }
     let (out, stats) = if interleaved {
@@ -3950,7 +4134,7 @@ fn cluster_search(
     } else {
         crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
     }
-    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+    .map_err(search_failure)?;
     errors.finish(py)?;
     let best_block = out
         .best_state
@@ -3967,6 +4151,19 @@ fn cluster_search(
     dict.set_item("hops", out.hops)?;
     dict.set_item("accepted", out.accepted)?;
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
+    dict.set_item("branch_on_stall", cfg.branch_on_stall)?;
+    let ledger_split = PyDict::new(py);
+    set_charge_fields(py, &ledger_split, &ledger, &potential_calls, probe_unbacked)?;
+    ledger_split.set_item("quenches", stats.total())?;
+    ledger_split.set_item("converged", stats.converged)?;
+    ledger_split.set_item("capped", stats.capped)?;
+    ledger_split.set_item("screened_out", out.screened_out)?;
+    ledger_split.set_item("returned", out.returned)?;
+    ledger_split.set_item("branch_draws", out.branch_draws)?;
+    ledger_split.set_item("branch_spent", out.branch_spent)?;
+    ledger_split.set_item("overlap_rejected", stats.overlap_rejected)?;
+    ledger_split.set_item("basins", out.basins)?;
+    dict.set_item("ledger", ledger_split)?;
     if let Some(path) = out.rigid_path {
         let counts = PyDict::new(py);
         counts.set_item("shell", path.shell)?;
@@ -3984,6 +4181,7 @@ fn cluster_search(
     };
     dict.set_item("local_step", quench)?;
     dict.set_item("quench_seconds", stats.quench_seconds)?;
+    reconcile_python_charges(&potential_calls, &ledger, probe_unbacked)?;
     Ok(dict.into())
 }
 

@@ -1,0 +1,205 @@
+Copyright (c) anneal developers
+
+conf-miss4 is an 8-molecule, 24-seed paired panel (seeds 2048-2071) of
+this series against its own base, develop
+`61fa67cf380e46876b569da45e7cc091647a775b`, and against openconf, plus a
+guard and pins record for the same two anneal revisions. Every number
+below is read from `rows.csv`, `panel.tsv`, `paired.tsv`,
+`local_step.csv`, `guard.csv`, `rescore.tsv` or `pins.txt`.
+
+The measured series changes no search behaviour (see "What the series
+changes"), so the question this panel asks of it is whether anything
+moved. Nothing did in the outcomes; the only difference measured is a
+small one in time. Naming each charge was added after that measurement
+and is not part of these rows.
+
+## Revisions and host
+
+- this series: anneal `259befae8221961d2249aa27d19ca426064af57b`,
+  tree `b1369a7edccdb56002f9667acff4f9c122083bb0`, the commit whose
+  tree the wheel was built from. Both the `anneal` and `openconf` rows
+  cite it. `paired()` reads `bin/anneal-head` once and assigns that
+  value to both arms; it cannot stamp the two arms with different
+  revisions. The raw rows first committed at `2235db00` likewise had
+  one stamp for both arms. The local hash in that first stamp is no
+  longer in the repository, and neither its tree nor its patch-id
+  survives, so it is not used as evidence for two different revisions.
+- guard and paired-statistics script:
+  `5c40c711f6f49ce0950d6025349adcde7f17cdce`, tree
+  `89078345063859912c378bb5344b959b365331c6`. The guard examples were
+  built from this tree and the guard rows cite it. This commit adds
+  only `scripts/openconf_h2h/paired_stats.py` and
+  `pytest/test_paired_stats.py`; `1dccb7eb` later changes both.
+  `2545c5754` renames the script to
+  `scripts/openconf_h2h/h2h_paired_stats.py`. `5c40c711` does
+  not touch the paired runner: `scripts/openconf_h2h/run_bench.py` is
+  the same blob, `61e041ae`, at this commit and at `259befae`, which is
+  its ancestor, so `git diff 259befae 5c40c711` of that file is empty.
+  The local guard hash in the first record is also gone, with no
+  surviving tree or patch-id, and is not cited.
+- where the paired runner code came from: `8da2e664f` added the
+  baseline (develop) arm, `paired --baseline` with its `build.sh` and
+  `paired_score.py` support. That commit is an ancestor of the base
+  `61fa67cf` and so not part of this series. `259befae` added the host
+  label in `bench_host.py` and its edit of `run_bench.py`.
+  These are where the code was introduced; `code_revision` below does
+  not record them.
+- `provenance.tsv` lists every repository revision the rows cite with
+  its tree. The audit checks each tree, each commit object and
+  reachability from an `origin` remote-tracking ref. This is a
+  merge-only audit: merge `c8581d69319a2f960c25ecb5f0261feb34a739b3`
+  has the measured series as its first parent and the develop line as
+  its second. The audit requires that exact two-parent merge in `HEAD`
+  and checks each cited revision against its assigned parent history;
+  unrelated ancestry through a later merge cannot satisfy it.
+- develop: `61fa67cf380e46876b569da45e7cc091647a775b`, built into its
+  own wheel, the `develop` rows. The series is built on this revision.
+- openconf: rowansci/openconf `e32c5fa7b6e6aac944bda31c851be42e14340235`
+  (v0.0.19), the settings of `../paired`. Its `code_revision` is
+  `259befae`, the same as the anneal rows. `code_revision` records the
+  revision the row was produced at: `paired()` in `run_bench.py` reads
+  `bin/anneal-head` and writes it into the openconf and anneal rows,
+  and `bin/baseline-head` into the develop row. It is not the
+  revision of openconf, which `openconf_revision` records, and not the
+  commit that introduced any of the paired runner code.
+- host label `cloud-vm`, an 8-core virtual machine. The label is the
+  `BENCH_HOST` the harness was given; `scripts/openconf_h2h/bench_host.py`
+  writes only that label, `bench` or `unlabelled`, never a node name.
+- The panel ran serially on one pinned core. For each molecule and seed
+  the openconf arm ran first; anneal and develop then ran in the order
+  selected by the paired runner's seeded coin flip, each given the
+  search budget `(energy_calls + grad_calls) // 2` of that openconf run.
+  Openconf requests energy and gradient separately
+  (`openconf/relax.py` `MMFFOptimizeMoleculeConfs` and
+  `openconf/constraints.py` `Minimize`, then a separate `CalcEnergy`;
+  low-mode scans call `CalcGrad` and `CalcEnergy` on their own), so each
+  of those calls is one evaluation. Anneal's search requests the pair
+  together, so that return is one charge. The integer passed to anneal
+  stays half of openconf's separate-call total.
+  Develop ran first on 98 of the 192 pairs and anneal on 94. This is
+  derived by replaying `PAIRED_SCHEDULE_SEED` over the molecule and
+  seed pairs present in `rows.csv`, including the runner's preceding
+  shuffle and coin flips for its standard paired seeds. The other cores
+  of the host were busy with
+  per-commit gates, example builds and the guard, so wall times here
+  are not quiet-host times; hits, calls and energies do not depend on
+  them. The committed `budget` column is the legacy search-point budget,
+  not the potential-call unit used by `calls`; for 915/openconf/2048 it
+  is 20066 while the paired allowance is 40132 potential calls. Current
+  rescoring adds `call_budget`. An old `job.json` with no `oracle_calls`
+  derives that allowance as twice the search budget, and is still scored
+  as `energy_calls + grad_calls`. A new anneal job records `oracle_calls`
+  from the ledger, one per oracle evaluation. Its `call_budget` equals
+  the search budget, and that oracle count is the score. The committed
+  rows are not rewritten.
+  `charged_calls` is written and is not the score. A develop run has no
+  ledger, so a new job records `oracle_calls` from the harvest count: a
+  together return is one evaluation, the same unit as an anneal ledger.
+  `energy_calls + grad_calls` would put the per-call time on a different
+  unit. The committed `calls` and `calls_to_hit` columns were not
+  rewritten.
+- `rows.csv` was scored by `scripts/openconf_h2h/paired_score.py` after
+  every candidate was polished; `hit` is its strict test (heavy-atom
+  RMSD below 0.25 A and energy within 0.5 kcal/mol of the reference)
+  and `hit_mirror` also accepts the reflected candidate, but only when
+  the reflected geometry keeps the reference stereo key: for a molecule
+  with no stereocentre or a meso one, not for a chiral molecule, whose
+  reflection is the other enantiomer.
+- `local_step.csv` records `local_step`, `spent`, `screen`, `full`,
+  `check`, `quenches`, `converged`, `capped`, `screened_out`, `returned`,
+  `overlap_rejected` and `basins`, followed by the revision and host.
+  Develop has no ledger, so its ledger columns are empty. This CSV
+  predates `branch_draws` and `branch_spent`; the stored files do not
+  contain enough data to derive those counters, so they are neither
+  backfilled nor claimed here.
+
+## What the series changes
+
+The measured revisions add a test that pins which double bonds the
+torsion move leaves alone, a `ledger` entry in the Python search
+result, a mirror-aware hit score that respects stereo, the host label
+above and a paired-statistics script. At those revisions the ledger
+was read after the search from counters the search already kept, and
+the panel and the guard below confirm the outcomes did not move. A
+later change records each charge under a name inside the search loop.
+`spent` still equals the sum of those names. No tuned constant is
+introduced.
+
+## Panel
+
+Hits (strict) over the 192 runs of each arm: this series 91, develop
+91, openconf 42. With `hit_mirror`: 94, 94 and 44.
+
+The mirror rule was corrected after the first record of this panel: a
+mirror match counts only when the reflected geometry keeps the reference
+stereo key. `rescore.tsv` compares the earlier scoring of these rows
+(the `rows.csv` of commit `2235db00`) with the one in this directory,
+per molecule and arm, and `rescore-cells.tsv` lists every differing
+cell of `hit`, `hit_mirror`, `calls_to_hit`, `delta_min_kcal`,
+`candidates` and `invalid`. It has no row: no hit or mirror hit of any
+of the 576 runs moved. The 8 runs that count only as a mirror hit are
+xld (3 anneal, 3 develop) and rq3 (2 openconf). Neither molecule has a
+stereocentre, so reflection keeps its key and the rule lets them stand.
+The earlier rule counted no run of this panel that the corrected rule
+rejects. The corrected rule is tested on ethanol-1-d, chiral by its
+deuterium alone (`pytest/test_h2h_mirror.py`).
+
+Per-seed outcome (hit, calls to the hit, energy above the reference,
+calls, candidates, invalid) is identical between this series and
+develop on all 192 seeds. Every exact two-sided McNemar test of
+`paired.tsv` therefore has no discordant seed and p = 1.0000. The hits
+per molecule, this series and develop alike, are 915 15/24, amprenavir
+3/24, fluvastatin 11/24, lopinavir 4/24, lorlatinib 11/24, rq3 24/24,
+xld 21/24 and z34 2/24.
+
+`invalid` counts candidates that fail the stereo check on polishing. It
+is 1 for each of this series and develop (lorlatinib) and 0 for
+openconf.
+
+`local_step`: all 384 anneal and develop runs resolved to `lbfgs`. On
+this base `Auto` picks the local step by timing one call of each, and
+on this host it picked `lbfgs` every time; a host with a more
+expensive potential may pick `tric`, and these rows say nothing about
+that case.
+
+## Time outside the potential
+
+`paired.tsv` compares, per seed, the time outside the potential per
+call, `outside_s / calls`, of this series with develop. The medians in
+microseconds per call, this series then develop, the median of the
+per-seed ratio, and the two-sided Wilcoxon signed-rank p. The p is
+exact; pairs with equal values are dropped first, and none of the 192
+pairs is equal or ties another in absolute difference, so scipy's
+automatic choice gives the same p here:
+
+| molecule    | series | develop | ratio  | p      |
+|-------------|--------|---------|--------|--------|
+| 915         | 15.20  | 15.00   | 1.0091 | 0.0179 |
+| amprenavir  | 29.54  | 29.32   | 1.0021 | 0.3596 |
+| fluvastatin | 21.05  | 21.03   | 1.0058 | 0.1074 |
+| lopinavir   | 47.21  | 47.54   | 1.0027 | 0.5646 |
+| lorlatinib  | 20.74  | 21.12   | 1.0051 | 0.9664 |
+| rq3         | 19.25  | 18.82   | 1.0226 | 0.0229 |
+| xld         | 22.80  | 22.92   | 0.9961 | 0.3748 |
+| z34         | 26.17  | 26.08   | 1.0235 | 0.1600 |
+
+The ratio is above 1 on seven molecules, by 0.2 to 2.4 per cent, and
+the p values are not corrected for eight tests; two are below 0.05 and
+none is below 0.05 / 8. Both arms run the same search code, so a ratio
+here is not a cost of this series. The host was shared, and the arm
+order was randomized: develop ran first on 98 pairs and anneal on 94.
+The table does not separate host load or run-order effects, so it does
+not say why the ratio is above 1 on seven molecules.
+
+## Guard
+
+`guard.csv` holds the 156 jobs of the 13-system guard (`lj38`, `lj55`,
+`lj75`, `lj98`, `lj102`, `lj103`, `lj104`, `lj150`, `au55`, `m55r6`,
+`m55r14`, `m80r6`, `m80r14`; seeds 2000-2011) for develop and for this
+series, 312 rows. Comparing the two row by row, `hit`, `evals_to_hit`,
+`charged` and `best` have 0 mismatches. 104 of the 156 jobs hit on each
+side.
+
+`pins.txt` is the 91-line output of `scripts/covalent_h2h/pins.sh` for
+this series. The output for develop is byte-identical; sha1
+`83d07464f1493b3846bc92b3d1f191331dacd586`.

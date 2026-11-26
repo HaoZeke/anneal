@@ -61,6 +61,20 @@ fn default_witness_ceiling_is_absent_from_the_resolved_json() {
         cfg.resolved_sha256().unwrap(),
         "32e59764f29aea5583d64df9975c1c1418616d61298f5846c50e5f56666712d6"
     );
+    assert!(!cfg.polish_on_improve);
+    assert!(!json.contains("polish_on_improve"));
+    let mut polishing = cfg.clone();
+    polishing.polish_on_improve = true;
+    assert!(
+        polishing
+            .resolved_json()
+            .unwrap()
+            .contains("\"polish_on_improve\":true")
+    );
+    assert_ne!(
+        polishing.resolved_sha256().unwrap(),
+        cfg.resolved_sha256().unwrap()
+    );
     let mut uniform = cfg;
     uniform.arm_selection = ArmSelection::Uniform;
     assert!(uniform.depth_reward);

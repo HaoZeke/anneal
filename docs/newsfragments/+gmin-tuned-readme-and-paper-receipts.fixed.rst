@@ -1,0 +1,2 @@
+``bench/gmin-tuned/README.md``, the procedure ``scripts/gmin_panel/tuned.py`` reads in ``--self-test`` and splices results into in ``--report``, is restored, so both modes run again.
+``paper/jctc/labels-manuscript.tex`` and ``paper/jctc/labels-si.tex`` are rewritten by ``cross_labels.py`` to match the labels of ``manuscript.tex`` and ``si.tex``, and ``paper/jctc/logs/pdf-length.txt`` records the current manuscript, macros and label sources.

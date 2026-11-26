@@ -440,7 +440,10 @@ fn main() {
     fs::create_dir_all(&outdir).expect("outdir");
     assert!(budget > 0, "budget must be positive");
 
-    let cfg = Config::recommended_molecular(built.species.clone(), built.groups.clone(), 1.0);
+    let mut cfg = Config::recommended_molecular(built.species.clone(), built.groups.clone(), 1.0);
+    if std::env::var("H2H_POLISH_ON_IMPROVE").ok().as_deref() == Some("1") {
+        cfg.polish_on_improve = true;
+    }
     let mut rng = StdRng::seed_from_u64(seed);
     let packed = repack_rigid_groups(
         built.template.view(),
@@ -495,6 +498,7 @@ fn main() {
     writeln!(meta, "molecules: {}", built.groups.len()).ok();
     writeln!(meta, "seed: {seed}").ok();
     writeln!(meta, "budget: {budget}").ok();
+    writeln!(meta, "polish_on_improve: {}", cfg.polish_on_improve).ok();
     writeln!(meta, "spread_steps: {spread_steps}").ok();
     writeln!(meta, "start_intact: {intact}").ok();
     writeln!(meta, "crate: {}", env!("CARGO_PKG_VERSION")).ok();

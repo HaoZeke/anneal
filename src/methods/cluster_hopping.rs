@@ -507,14 +507,27 @@ impl QuenchBoundary {
 /// first-encounter statistic the list exists to report.
 const IMPROVEMENT_CAP: usize = 512;
 
-/// A search stopped because no initial quench was finite.
+/// A search stopped because no initial quench was finite, or because the
+/// ledger already held an unnamed charge.
+///
+/// A later release may add a reason, so a `match` outside this crate needs
+/// a wildcard arm.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum SearchError {
     /// The initial evaluation was non-finite on every attempt.
     #[error("no finite start after {attempts} attempts")]
     NoFiniteStart {
         /// Quenches tried before the search stopped.
         attempts: usize,
+    },
+    /// The ledger held charges with no name.
+    ///
+    /// A release build used to abort. The search returns this instead.
+    #[error("{count} unnamed charges on the ledger")]
+    UnnamedCharge {
+        /// Unnamed units present when the search refused them.
+        count: usize,
     },
 }
 
@@ -600,6 +613,156 @@ impl TailHold {
     }
 }
 
+/// Which named counter a charge belongs to.
+///
+/// One charge is one oracle evaluation. An energy and its gradient
+/// returned together are one charge. [`ChargeName::Unnamed`] is only a
+/// gap: a finished search has none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ChargeName {
+    #[default]
+    /// A charge that has not been given a name.
+    Unnamed,
+    /// Screening relaxation.
+    Screen,
+    /// Full relaxation, including a continuation of one.
+    Full,
+    /// A gradient-only confirmation, or a bank sample checked the same way.
+    Check,
+    /// An energy-and-gradient evaluation outside the relaxation counters.
+    Closure,
+    /// Engine work settled as a lump, or a lattice quench of pair rows.
+    Quench,
+    /// The staged settle of moved atoms.
+    Settle,
+    /// Lattice pair sums charged through [`crate::methods::lattice_search::charge_oracle`].
+    Lattice,
+    /// Occupation moves inside a reoccupy.
+    Reoccupy,
+    /// The gradient-orientation probe taken before a Python search.
+    Probe,
+}
+
+/// Named charges on one ledger.
+///
+/// `spent` equals [`ChargeSplit::total`] after every charge. A finished
+/// search also has [`ChargeSplit::unnamed`] at zero, so `spent` equals
+/// [`ChargeSplit::named`]. The total check is an `assert`. An unnamed
+/// remainder is [`SearchError::UnnamedCharge`], so a release build
+/// returns it instead of aborting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ChargeSplit {
+    /// Screening-relaxation charges.
+    pub screen: usize,
+    /// Full-relaxation charges.
+    pub full: usize,
+    /// Confirmation charges.
+    pub check: usize,
+    /// Energy-and-gradient charges outside a relaxation counter.
+    pub closure: usize,
+    /// Quench and external-work charges.
+    pub quench: usize,
+    /// Staged-settle charges.
+    pub settle: usize,
+    /// Lattice pair-sum charges.
+    pub lattice: usize,
+    /// Reoccupy charges.
+    pub reoccupy: usize,
+    /// Gradient-orientation probe charges.
+    pub probe: usize,
+    /// Charges with no name. A finished search has zero.
+    pub unnamed: usize,
+}
+
+impl ChargeSplit {
+    /// Charges that carry a name. Unnamed units are excluded.
+    pub fn named(self) -> usize {
+        self.screen
+            .saturating_add(self.full)
+            .saturating_add(self.check)
+            .saturating_add(self.closure)
+            .saturating_add(self.quench)
+            .saturating_add(self.settle)
+            .saturating_add(self.lattice)
+            .saturating_add(self.reoccupy)
+            .saturating_add(self.probe)
+    }
+
+    /// Named charges plus unnamed ones.
+    pub fn total(self) -> usize {
+        self.named().saturating_add(self.unnamed)
+    }
+
+    /// Lattice, reoccupy, quench and settle: charges that do not enter
+    /// the Python objective.
+    pub fn internal(self) -> usize {
+        self.lattice
+            .saturating_add(self.reoccupy)
+            .saturating_add(self.quench)
+            .saturating_add(self.settle)
+    }
+
+    fn add(&mut self, name: ChargeName, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let slot = match name {
+            ChargeName::Unnamed => &mut self.unnamed,
+            ChargeName::Screen => &mut self.screen,
+            ChargeName::Full => &mut self.full,
+            ChargeName::Check => &mut self.check,
+            ChargeName::Closure => &mut self.closure,
+            ChargeName::Quench => &mut self.quench,
+            ChargeName::Settle => &mut self.settle,
+            ChargeName::Lattice => &mut self.lattice,
+            ChargeName::Reoccupy => &mut self.reoccupy,
+            ChargeName::Probe => &mut self.probe,
+        };
+        *slot = slot.saturating_add(n);
+    }
+
+    /// Merges `side` for exactly `paid` units.
+    ///
+    /// A side that recorded more than was paid is clipped, unnamed units
+    /// first, then probe, reoccupy, lattice, settle, quench, closure,
+    /// check, full and screen. A side that recorded less leaves the gap
+    /// in unnamed so the release check can see it.
+    pub fn absorb_paid(&mut self, mut side: Self, paid: usize) {
+        let mut extra = side.total().saturating_sub(paid);
+        for slot in [
+            &mut side.unnamed,
+            &mut side.probe,
+            &mut side.reoccupy,
+            &mut side.lattice,
+            &mut side.settle,
+            &mut side.quench,
+            &mut side.closure,
+            &mut side.check,
+            &mut side.full,
+            &mut side.screen,
+        ] {
+            if extra == 0 {
+                break;
+            }
+            let cut = extra.min(*slot);
+            *slot -= cut;
+            extra -= cut;
+        }
+        self.screen = self.screen.saturating_add(side.screen);
+        self.full = self.full.saturating_add(side.full);
+        self.check = self.check.saturating_add(side.check);
+        self.closure = self.closure.saturating_add(side.closure);
+        self.quench = self.quench.saturating_add(side.quench);
+        self.settle = self.settle.saturating_add(side.settle);
+        self.lattice = self.lattice.saturating_add(side.lattice);
+        self.reoccupy = self.reoccupy.saturating_add(side.reoccupy);
+        self.probe = self.probe.saturating_add(side.probe);
+        self.unnamed = self.unnamed.saturating_add(side.unnamed);
+        let short = paid.saturating_sub(side.total());
+        self.unnamed = self.unnamed.saturating_add(short);
+    }
+}
+
 /// Charged objective-work ledger with optional per-relaxation evidence.
 pub struct Ledger {
     id: u64,
@@ -640,6 +803,15 @@ pub struct Ledger {
     /// When set, a gradient check may reuse a value the relaxation already
     /// paid for and must not charge another evaluation.
     gradient_reuse_only: bool,
+    /// Whether the current relaxation is the screening prefix of a hop.
+    ///
+    /// The iteration cap cannot identify this phase when a caller chooses
+    /// `relax_steps <= screen_steps`.
+    screening_relax: bool,
+    /// Counter the next charge is recorded under.
+    charge_name: ChargeName,
+    /// Split of [`Ledger::spent`].
+    charges: ChargeSplit,
     quench_boundaries: Vec<QuenchBoundary>,
     diagnostic_quench: bool,
     /// Energy at or below which the hop may stop.
@@ -713,6 +885,9 @@ impl Ledger {
             walker_state: None,
             chain_is_separate: true,
             gradient_reuse_only: false,
+            screening_relax: false,
+            charge_name: ChargeName::Unnamed,
+            charges: ChargeSplit::default(),
             quench_boundaries: Vec::new(),
             diagnostic_quench: false,
             target: None,
@@ -861,6 +1036,12 @@ impl Ledger {
         child.target = self.target;
         let offset = self.budget.saturating_sub(room.min(self.remaining()));
         child.spent = offset;
+        // The offset is opening spend, not a new evaluation. It has to sit
+        // in the counters or the next charge fails the split check. Settle
+        // removes this unnamed seed before the real charges move.
+        if offset > 0 {
+            child.charges.add(ChargeName::Unnamed, offset);
+        }
         (child, offset)
     }
 
@@ -901,18 +1082,81 @@ impl Ledger {
     }
 
     /// Charges one unit, returning `false` when the budget is gone.
+    ///
+    /// The unit is recorded under the current [`ChargeName`]. `spent`
+    /// stays equal to the counter total, including in a release build.
     pub fn charge(&mut self) -> bool {
         if self.spent >= self.budget || self.stopped() {
             self.closed_charge_attempts = self.closed_charge_attempts.saturating_add(1);
             return false;
         }
         self.spent += 1;
+        self.charges.add(self.charge_name, 1);
+        self.assert_split();
         true
     }
 
     /// Evaluation requests refused because this ledger was closed.
     fn closed_charge_attempts(&self) -> usize {
         self.closed_charge_attempts
+    }
+
+    /// Runs `body` with charges recorded under `name`, then restores the
+    /// previous name. A nested call restores the outer name first.
+    pub fn with_charge_name<R>(
+        &mut self,
+        name: ChargeName,
+        body: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        struct Restore<'a> {
+            ledger: &'a mut Ledger,
+            previous: ChargeName,
+        }
+        impl Drop for Restore<'_> {
+            fn drop(&mut self) {
+                self.ledger.charge_name = self.previous;
+            }
+        }
+        let previous = self.charge_name;
+        self.charge_name = name;
+        let restore = Restore {
+            ledger: self,
+            previous,
+        };
+        body(restore.ledger)
+    }
+
+    /// The split of [`Ledger::spent`].
+    pub fn charges(&self) -> ChargeSplit {
+        self.charges
+    }
+
+    fn assert_split(&self) {
+        assert_eq!(
+            self.spent,
+            self.charges.total(),
+            "spent diverged from the charge counters"
+        );
+    }
+
+    /// `spent` equals the sum of the named counters, and nothing is unnamed.
+    ///
+    /// An unnamed charge is [`SearchError::UnnamedCharge`], including in a
+    /// release build. The counter identity stays an `assert`.
+    pub fn assert_named_charges(&self) -> Result<(), SearchError> {
+        self.assert_split();
+        if self.charges.unnamed != 0 {
+            return Err(SearchError::UnnamedCharge {
+                count: self.charges.unnamed,
+            });
+        }
+        assert_eq!(
+            self.spent,
+            self.charges.named(),
+            "spent is not the sum of the named counters: {:?}",
+            self.charges
+        );
+        Ok(())
     }
 
     /// Charges a fraction of one evaluation, for work that touches a subset
@@ -989,13 +1233,33 @@ impl Ledger {
     /// caller who counts calls still finds `calls + priced == spent` for a
     /// run that settled children. A side probe starts with none priced, so
     /// its offset never holds any.
+    ///
+    /// The child's named split moves with the units that fit. The opening
+    /// spend of a side probe is an unnamed seed and does not move. Units
+    /// past the child's own cap have no name yet; the part that fits here
+    /// is filed as a quench so the overrun is still a named charge.
     pub fn settle_child(&mut self, child: &Ledger, offset: usize) -> bool {
         let calls = child
             .spent
             .saturating_sub(offset)
             .saturating_add(child.settled_beyond_cap);
         self.priced = self.priced.saturating_add(child.priced);
-        self.charge_many(calls)
+        let open_room = self.remaining();
+        let owed_room = self.budget.saturating_sub(self.spent);
+        let paid = calls.min(owed_room);
+        self.spent += paid;
+        self.settled_beyond_cap = self.settled_beyond_cap.saturating_add(calls - paid);
+        let mut real = child.charges;
+        let seed = offset.min(real.unnamed);
+        real.unnamed = real.unnamed.saturating_sub(seed);
+        let named = paid.min(real.total());
+        self.charges.absorb_paid(real, named);
+        let gap = paid.saturating_sub(named);
+        if gap > 0 {
+            self.charges.add(ChargeName::Quench, gap);
+        }
+        self.assert_split();
+        calls <= open_room
     }
 
     /// Charges `n` completed evaluations, returning `false` when they do not
@@ -1018,6 +1282,25 @@ impl Ledger {
         let paid = n.min(owed_room);
         self.spent += paid;
         self.settled_beyond_cap = self.settled_beyond_cap.saturating_add(n - paid);
+        self.charges.add(self.charge_name, paid);
+        self.assert_split();
+        n <= open_room
+    }
+
+    /// Settles a child ledger onto this one, keeping the child's split.
+    ///
+    /// The spend follows [`Ledger::charge_many`]: the debt is paid up to
+    /// the budget even after a caller stop. The child's counters move
+    /// with the units that were paid, instead of being filed again under
+    /// this ledger's current name.
+    pub fn absorb_charges(&mut self, side: &Ledger) -> bool {
+        let n = side.spent;
+        let open_room = self.remaining();
+        let owed_room = self.budget.saturating_sub(self.spent);
+        let paid = n.min(owed_room);
+        self.spent += paid;
+        self.charges.absorb_paid(side.charges, paid);
+        self.assert_split();
         n <= open_room
     }
 
@@ -1072,6 +1355,14 @@ impl Ledger {
 
     pub(crate) fn gradient_reuse_only(&self) -> bool {
         self.gradient_reuse_only
+    }
+
+    pub(crate) fn set_screening_relax(&mut self, screening: bool) {
+        self.screening_relax = screening;
+    }
+
+    pub(crate) fn is_screening_relax(&self) -> bool {
+        self.screening_relax
     }
 
     fn record_published(&mut self, value: f64, state: ArrayView1<f64>) {
@@ -1310,6 +1601,10 @@ pub struct Outcome {
     pub overlap_rejected: usize,
     /// Trials abandoned because their partial relaxation was going home.
     pub returned: usize,
+    /// Fresh-start branches actually run by [`Config::branch_on_stall`].
+    pub branch_draws: u64,
+    /// Charged evaluations spent inside fresh-start branches.
+    pub branch_spent: usize,
     /// Escape scale at the end of the run, when the controller is used.
     pub escape_scale: f64,
     /// Acceptance threshold at the end of the run.
@@ -1547,6 +1842,14 @@ pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f
 /// this campaign has already made once.
 pub type EnergyGradFn<'g> =
     dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + Send + 'g;
+
+/// Polishes the incumbent after a hop improves it.
+///
+/// The closure charges every evaluation on the ledger it is given. `None`
+/// means the ledger closed before a finite point. The hop records the point
+/// only when it is lower than the incumbent.
+pub(crate) type ImprovePolish<'a> =
+    dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + 'a;
 
 /// A borrow of one, for a caller that has a gradient to lend.
 ///
@@ -2899,6 +3202,34 @@ pub fn run<R: Rng + ?Sized>(
     run_with_gradient(cfg, start, ledger, relax, None, rng)
 }
 
+/// As [`run`], polishing the incumbent when [`Config::polish_on_improve`] is set.
+#[cfg(test)]
+pub(crate) fn run_polished<'p, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    improve: Option<&mut ImprovePolish<'p>>,
+    rng: &mut R,
+) -> Result<Outcome, SearchError> {
+    let mut checkpoint = continue_without_checkpoint;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &mut checkpoint,
+        rng,
+        improve,
+    )
+}
+
 /// As [`run`], with a gradient for the soft-mode escape.
 ///
 /// Without one, [`Config::minima_hopping`] falls back to scaling the ordinary
@@ -2927,6 +3258,7 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
         None,
         &mut checkpoint,
         rng,
+        None,
     )
 }
 
@@ -2953,6 +3285,7 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
         None,
         &mut checkpoint,
         rng,
+        None,
     )
 }
 
@@ -2981,6 +3314,36 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
         None,
         &mut checkpoint,
         rng,
+        None,
+    )
+}
+
+/// As [`run_with_energy_gradient`], with a polish of each new incumbent.
+pub(crate) fn run_with_energy_gradient_polished<'g, 'p, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    improve: Option<&mut ImprovePolish<'p>>,
+    rng: &mut R,
+) -> Result<Outcome, SearchError> {
+    let mut checkpoint = continue_without_checkpoint;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        None,
+        None,
+        None,
+        None,
+        &mut checkpoint,
+        rng,
+        improve,
     )
 }
 
@@ -3020,6 +3383,45 @@ where
         Some(checkpoint_interval),
         checkpoint,
         rng,
+        None,
+    )
+}
+
+/// As [`run_with_energy_gradient_at_checkpoints`], polishing each new incumbent.
+pub(crate) fn run_with_energy_gradient_at_checkpoints_polished<'g, 'p, R, H>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    improve: Option<&mut ImprovePolish<'p>>,
+    rng: &mut R,
+    checkpoint_interval: usize,
+    checkpoint: &mut H,
+) -> Result<Outcome, SearchError>
+where
+    R: Rng + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    assert!(
+        checkpoint_interval > 0,
+        "checkpoint interval must be positive"
+    );
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        None,
+        None,
+        None,
+        Some(checkpoint_interval),
+        checkpoint,
+        rng,
+        improve,
     )
 }
 
@@ -3064,6 +3466,7 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
         None,
         &mut checkpoint,
         rng,
+        None,
     )
 }
 
@@ -3106,6 +3509,7 @@ where
         Some(checkpoint_interval),
         checkpoint,
         rng,
+        None,
     )
 }
 
@@ -3137,6 +3541,36 @@ pub fn run_with_history<'g, R: Rng + ?Sized>(
         None,
         &mut checkpoint,
         rng,
+        None,
+    )
+}
+
+/// As [`run_with_history`], polishing each new incumbent.
+pub(crate) fn run_with_history_polished<'g, 'p, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    history: Option<&mut dyn HistoryHook>,
+    improve: Option<&mut ImprovePolish<'p>>,
+    rng: &mut R,
+) -> Result<Outcome, SearchError> {
+    let mut checkpoint = continue_without_checkpoint;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        None,
+        None,
+        None,
+        history,
+        None,
+        &mut checkpoint,
+        rng,
+        improve,
     )
 }
 
@@ -3182,6 +3616,7 @@ where
         Some(checkpoint_interval),
         checkpoint,
         rng,
+        None,
     )
 }
 
@@ -5990,6 +6425,43 @@ fn rigid_archive_due(book: &RigidStallBook, archive_patience: usize, spent: usiz
     spent.saturating_sub(book.charged_at_archive_best) >= archive_patience
 }
 
+/// Polishes the ledger's incumbent after it improved.
+///
+/// An off preset returns before any charge, so its call sequence is the
+/// one the hop would have made without this option. The closure's point
+/// replaces the incumbent only when it is lower. Recording a point at the
+/// stop target makes the caller stop with [`HopStop::Target`].
+fn polish_improved_incumbent(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    improve: &mut Option<&mut ImprovePolish<'_>>,
+    improvements: &mut Vec<(usize, usize, usize, f64)>,
+    hops: usize,
+    basins: usize,
+) {
+    if !cfg.polish_on_improve {
+        return;
+    }
+    let Some(polish) = improve.as_mut() else {
+        return;
+    };
+    if ledger.target_reached() || ledger.stopped() || ledger.remaining() == 0 {
+        return;
+    }
+    let Some(state) = ledger.best_state.clone() else {
+        return;
+    };
+    let Some((energy, point)) = polish(ledger, state.view()) else {
+        return;
+    };
+    if energy < ledger.best && quench_is_sane(cfg, energy, point.view()) {
+        ledger.record(energy, point.view());
+        if improvements.len() < 512 {
+            improvements.push((hops, ledger.spent(), basins, energy));
+        }
+    }
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -6003,6 +6475,7 @@ fn run_full<'g, R, H>(
     checkpoint_interval: Option<usize>,
     checkpoint: &mut H,
     rng: &mut R,
+    improve: Option<&mut ImprovePolish<'_>>,
 ) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
@@ -6024,6 +6497,7 @@ where
             checkpoint_interval,
             checkpoint,
             rng,
+            improve,
         )
     } else {
         run_search::<R, H, false>(
@@ -6039,6 +6513,7 @@ where
             checkpoint_interval,
             checkpoint,
             rng,
+            improve,
         )
     }
 }
@@ -6056,6 +6531,7 @@ fn run_search<'g, R, H, const RIGID: bool>(
     checkpoint_interval: Option<usize>,
     checkpoint: &mut H,
     rng: &mut R,
+    mut improve: Option<&mut ImprovePolish<'_>>,
 ) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
@@ -6955,6 +7431,17 @@ where
     // adoption only has to record it, at the hop it was found on and not
     // the hop the walk ends on.
     let mut pending_packing: Option<(f64, Array1<f64>, usize, usize, usize)> = None;
+
+    if cfg.polish_on_improve {
+        polish_improved_incumbent(
+            cfg,
+            ledger,
+            &mut improve,
+            &mut improvements,
+            0,
+            bias.n_basins(),
+        );
+    }
     let stop = loop {
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
@@ -8004,7 +8491,9 @@ where
                 }
                 CheckpointAction::ProbeProposal { state, action } => Some((state, action, false)),
                 CheckpointAction::ExternalWork { external_calls } => {
-                    ledger.charge_many(external_calls);
+                    ledger.with_charge_name(ChargeName::Quench, |ledger| {
+                        ledger.charge_many(external_calls);
+                    });
                     None
                 }
                 CheckpointAction::ExternalProposal {
@@ -8012,7 +8501,9 @@ where
                     action,
                     external_calls,
                 } => {
-                    if ledger.charge_many(external_calls) {
+                    if ledger.with_charge_name(ChargeName::Quench, |ledger| {
+                        ledger.charge_many(external_calls)
+                    }) {
                         Some((state, action, false))
                     } else {
                         // The engine's own work drained the budget; the
@@ -8025,7 +8516,9 @@ where
                     action,
                     external_calls,
                 } => {
-                    if ledger.charge_many(external_calls) {
+                    if ledger.with_charge_name(ChargeName::Quench, |ledger| {
+                        ledger.charge_many(external_calls)
+                    }) {
                         Some((state, action, true))
                     } else {
                         None
@@ -9367,7 +9860,9 @@ where
         {
             let moved = crate::neighbors::NeighborTable::moved_between(x.view(), trial.view());
             if !moved.is_empty() && moved.len() * 8 <= n {
-                trial = st(ledger, trial.view(), &moved, cfg.settle_iters);
+                trial = ledger.with_charge_name(ChargeName::Settle, |ledger| {
+                    st(ledger, trial.view(), &moved, cfg.settle_iters)
+                });
             }
         }
         // A frozen frame is the frame: no recentring, since that drags the
@@ -9531,6 +10026,7 @@ where
         // screen of that point falls back into the well it left, and the
         // return test then skips the quench. Relax it once, in full.
         let quenched_in_place = rigid_quench || species_escape_trial || cfg.quench_once;
+        ledger.set_screening_relax(!quenched_in_place);
         let (e_screen, x_screen) = relax(
             ledger,
             trial.view(),
@@ -9540,6 +10036,7 @@ where
                 cfg.screen_steps
             },
         );
+        ledger.set_screening_relax(false);
         if ledger.stopped() {
             // The caller already stopped. This screen paid for `e_screen`,
             // and dropping it returns an older minimum above an energy the
@@ -11642,6 +12139,16 @@ where
         // about a fifth of the budget on a chain that hops basins every
         // slice.
         let improved_record = ledger.best < best_before_iteration - STRICT_IMPROVEMENT;
+        if improved_record && cfg.polish_on_improve {
+            polish_improved_incumbent(
+                cfg,
+                ledger,
+                &mut improve,
+                &mut improvements,
+                hops,
+                bias.n_basins(),
+            );
+        }
         let visit_due = moved_basin
             && ledger.spent().saturating_sub(last_polish_spent)
                 >= cfg.polish_records.saturating_mul(4);
@@ -12118,6 +12625,8 @@ where
         settled_beyond_cap: ledger.settled_beyond_cap(),
         overlap_rejected: proposal_overlaps,
         returned,
+        branch_draws,
+        branch_spent,
         escape_scale: feedback.escape(),
         escape_threshold: feedback.threshold(),
         visit_counts: (feedback.n_same, feedback.n_known, feedback.n_new),
@@ -12484,6 +12993,30 @@ pub fn optimize_with_energy_gradient<'g>(
         relax,
         grad,
         energy_grad,
+        &mut rng,
+    )
+}
+
+/// As [`optimize_with_energy_gradient`], polishing each new incumbent.
+pub(crate) fn optimize_with_energy_gradient_polished<'g, 'p>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    improve: Option<&mut ImprovePolish<'p>>,
+    seed: u64,
+) -> Result<Outcome, SearchError> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    run_with_energy_gradient_polished(
+        cfg,
+        start.view(),
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        improve,
         &mut rng,
     )
 }
@@ -14764,6 +15297,89 @@ mod tests {
     }
 
     #[test]
+    fn absorb_paid_clips_the_extra_from_unnamed_through_screen() {
+        let side = ChargeSplit {
+            unnamed: 2,
+            probe: 3,
+            reoccupy: 4,
+            lattice: 5,
+            settle: 6,
+            quench: 7,
+            closure: 8,
+            check: 9,
+            full: 10,
+            screen: 11,
+        };
+        assert_eq!(side.total(), 65);
+        let mut host = ChargeSplit {
+            screen: 1,
+            ..ChargeSplit::default()
+        };
+        host.absorb_paid(side, 50);
+        assert_eq!(host.unnamed, 0);
+        assert_eq!(host.probe, 0);
+        assert_eq!(host.reoccupy, 0);
+        assert_eq!(host.lattice, 0);
+        assert_eq!(host.settle, 5);
+        assert_eq!(host.quench, 7);
+        assert_eq!(host.closure, 8);
+        assert_eq!(host.check, 9);
+        assert_eq!(host.full, 10);
+        assert_eq!(host.screen, 12);
+        assert_eq!(host.total(), 51);
+    }
+
+    #[test]
+    fn absorb_paid_files_a_shortfall_as_unnamed() {
+        let mut host = ChargeSplit::default();
+        let side = ChargeSplit {
+            full: 2,
+            screen: 1,
+            ..ChargeSplit::default()
+        };
+        host.absorb_paid(side, 7);
+        assert_eq!(host.full, 2);
+        assert_eq!(host.screen, 1);
+        assert_eq!(host.unnamed, 4);
+        assert_eq!(host.total(), 7);
+    }
+
+    #[test]
+    fn with_charge_name_restores_the_outer_name() {
+        let mut ledger = Ledger::new(10);
+        assert!(ledger.with_charge_name(ChargeName::Screen, |ledger| ledger.charge()));
+        assert!(ledger.charge());
+        assert_eq!(ledger.charges().screen, 1);
+        assert_eq!(ledger.charges().unnamed, 1);
+        ledger.with_charge_name(ChargeName::Full, |ledger| {
+            assert!(ledger.charge());
+            ledger.with_charge_name(ChargeName::Check, |ledger| {
+                assert!(ledger.charge());
+            });
+            assert!(ledger.charge());
+        });
+        assert_eq!(ledger.charges().full, 2);
+        assert_eq!(ledger.charges().check, 1);
+        assert!(ledger.charge());
+        assert_eq!(ledger.charges().unnamed, 2);
+    }
+
+    #[test]
+    fn charge_many_pays_only_what_the_budget_has_left() {
+        let mut ledger = Ledger::new(5);
+        assert!(ledger.with_charge_name(ChargeName::Closure, |ledger| ledger.charge_many(3)));
+        assert_eq!(ledger.spent(), 3);
+        assert_eq!(ledger.charges().closure, 3);
+        assert!(!ledger.with_charge_name(ChargeName::Probe, |ledger| ledger.charge_many(4)));
+        assert_eq!(ledger.spent(), 5);
+        assert_eq!(ledger.charges().probe, 2);
+        assert_eq!(ledger.charges().closure, 3);
+        assert!(!ledger.charge_many(1));
+        assert_eq!(ledger.spent(), 5);
+        assert_eq!(ledger.charges().unnamed, 0);
+    }
+
+    #[test]
     fn rigid_and_constrained_configs_skip_observed_basis_probes() {
         let ledger = Ledger::new(20);
         let mut seen = std::collections::HashSet::new();
@@ -15496,6 +16112,116 @@ mod tests {
             outcome.swaps_tried, 0,
             "replica swaps ran after target was reached"
         );
+    }
+
+    fn armed_post_hop_config() -> Config {
+        let mut cfg = quiet_basis_search(4);
+        cfg.escape_on_stall = false;
+        cfg.restart_on_stall = true;
+        cfg.stall_patience = 1;
+        cfg.polish_records = 7;
+        cfg.superbasin_escape = true;
+        cfg.superbasin_period = 1;
+        cfg.replicas = 2;
+        cfg.swap_period = 1;
+        cfg.ladder_pilot = 1;
+        cfg.path_on_stall = true;
+        cfg.max_hops = Some(2);
+        cfg
+    }
+
+    /// The option is off on this configuration, and the charged sequence is
+    /// the one measured on develop ade36267.
+    #[test]
+    fn polish_off_keeps_the_develop_charged_sequence() {
+        let mut cfg = armed_post_hop_config();
+        cfg.polish_on_improve = false;
+        let mut ledger = Ledger::new(400);
+        ledger.stop_below(-10.0);
+        let tetra = regular_tetrahedron();
+        let mut calls = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            calls += 1;
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let energy = if calls >= 4 { -5.0 } else { 0.0 };
+            (energy, tetra.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert_eq!(ledger.spent(), 29);
+        assert_eq!(outcome.stop, Some(HopStop::MaxHops));
+        assert_eq!(outcome.best, -5.0);
+        assert_eq!(ledger.encounters(), &[(4, 0.0), (17, -5.0)]);
+        assert_eq!(calls, 8);
+        assert_eq!(outcome.swaps_tried, 2);
+    }
+
+    /// The first polish charge that crosses the target is the encounter, the
+    /// stop is Target, and the stages that follow a hop do not run.
+    #[test]
+    fn a_polish_on_improvement_target_hit_is_the_encounter() {
+        let mut cfg = armed_post_hop_config();
+        cfg.polish_on_improve = true;
+        let mut ledger = Ledger::new(400);
+        ledger.stop_below(-10.0);
+        let tetra = regular_tetrahedron();
+        let mut calls = 0usize;
+        let mut polish_calls = 0usize;
+        let mut post_target_calls = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            if led.target_reached() {
+                post_target_calls += 1;
+            }
+            if steps == cfg.polish_records {
+                polish_calls += 1;
+            }
+            calls += 1;
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            (0.0, tetra.clone())
+        };
+        let mut polish_charges = Vec::new();
+        let mut polish = |led: &mut Ledger, state: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            polish_charges.push(led.spent());
+            Some((-20.0, state.to_owned()))
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_polished(
+            &cfg,
+            tetra.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut polish),
+            &mut rng,
+        )
+        .expect("search");
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(outcome.best, -20.0);
+        assert_eq!(polish_calls, 0, "polish_records ran after target hit");
+        assert_eq!(post_target_calls, 0, "relax ran after target was reached");
+        assert_eq!(
+            outcome.swaps_tried, 0,
+            "replica swaps ran after target was reached"
+        );
+        let hit = *ledger
+            .encounters()
+            .last()
+            .expect("the polished point is an encounter");
+        assert_eq!(hit.1, -20.0);
+        assert_eq!(polish_charges, vec![hit.0]);
+        assert_eq!(ledger.spent(), hit.0, "a charge landed after the crossing");
+        assert!(calls >= 1);
+        assert!(ledger.encounters()[0].1 > -10.0);
     }
 
     #[test]

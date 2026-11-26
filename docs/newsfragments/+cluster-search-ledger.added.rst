@@ -1,0 +1,10 @@
+``cluster_search`` returns a ``ledger`` dict that says where the search's budget went.
+One charge is one oracle evaluation. An energy and a gradient returned together are one charge, and a separate energy call and a separate gradient call are two.
+``spent`` equals the sum of ``screen``, ``full``, ``check``, ``closure``, ``quench``, ``settle``, ``lattice``, ``reoccupy`` and ``probe``, in a release build as well as a debug build.
+A search that finds an unnamed charge returns an error instead of aborting.
+``callbacks`` counts raw Python callbacks and ``split_extras`` counts the together-returns, each on its own. ``probe_unbacked`` is the probe charges that had no callback. ``callbacks`` plus the internal charges plus ``probe_unbacked`` equals ``spent`` plus ``split_extras``.
+The dict also counts the relaxations that ``converged`` or were ``capped``, the trials the screen dropped (``screened_out``) or the return test sent home (``returned``), the fresh-start branches run (``branch_draws``), their charged evaluations (``branch_spent``), the line-search geometries refused for overlap (``overlap_rejected``) and the ``basins`` registered.
+On archive searches, ``charged`` and ``ledger.spent`` are that same charge total.
+The Python entry point accepts ``branch_on_stall=True`` to run and report the fresh-start branch path.
+The openconf pairing job (``scripts/openconf_h2h/h2h_job.py``) writes the ledger of each run into its ``job.json``.
+Head-to-head scoring uses this one unit for both codes. Openconf requests energy and gradient separately, so its count remains ``energy_calls + grad_calls``. An anneal run records ``oracle_calls``, and its ``call_budget`` equals the search budget. A develop run has no ledger, so its ``oracle_calls`` is the harvest count. That count matches ``spent`` when the run charges no lattice pair rows. An atomic lattice run's ``spent`` also counts those rows. A job file with no ``oracle_calls`` still derives twice the search-point budget. Archive search checks the same callback identity as the other Python adapters.
