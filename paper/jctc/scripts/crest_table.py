@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Copyright (c) anneal developers
 """Write the CREST table of the manuscript from the committed GFN2-xTB rows.
 
