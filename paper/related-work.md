@@ -1818,3 +1818,11 @@ Relevance: This is an evaluation path for GFN2-xTB, beside `luXtbloom2026` and t
 Release check on 26 November 2026: no numbered release is newer than the 25 November pass. `crest-lab/crest` remains `v3.0.2` (25 August 2024). `grimme-lab/xtb` remains `v6.8.0` (5 November 2026); the rolling `bleed` release still points at `de1e3af6`. `pele-python/pele` remains `v0.1.2` (12 October 2026). The `ase/ase` GitLab releases list is empty and the newest tag is still `3.29.0` (21 June 2026). `agox/agox` remains tagged at `v3.11.1` (4 February 2026). `ksags/GOFEE` returns HTTP 404. A GitHub search for a Wales-group GMIN repository returned no hits, and a GitLab name search for GMIN returned unrelated projects.
 
 Cite `hanGpuXtb2026`.
+
+## 2026-11-26 (pass 2) — ABCluster hydrates of iodine oxides
+
+Engsvang, Hasan, and Elm, ChemRxiv (26 November 2026), doi:10.26434/chemrxiv.15012805/v1, sample hydrates of iodine oxyacid and iodine oxide clusters and the hydrolysis of selected small oxide hydrates. The abstract says the configurations come from ABCluster. Structures and thermochemistry are at \(\omega\)B97X-D3BJ/aug-cc-pVTZ-PP, and binding energies are refined at ZORA-DLPNO-CCSD(T0)/ma-def2-TZVPP. Iodine oxyacid clusters take up little water, and hydration slightly suppresses their nucleation. Iodine oxide clusters take up substantially more water, and hydration enhances nucleation, most strongly near 20--40% relative humidity. The abstract says iodine-oxide hydrolysis can be fast enough to matter in the atmosphere once the clusters are larger.
+
+Relevance: Hasan and Elm are authors of `hasanAcidClusters2026`, which already samples atmospheric acid--base clusters with ABCluster and CREST. This preprint is iodine oxides and oxyacids. The abstract gives no Cambridge energy and no hexamer count. It does not contradict 121 of 192, 97 of 192, or the polished gaps. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+
+Cite `engsvangIodineHydrates2026`.
