@@ -50,7 +50,7 @@ class Ledger:
         # The count a benchmark reads: every settled call.
         return self.spent + self.settled_beyond_cap
 
-    def settle_child(self, child: "Ledger", offset: int = 0) -> bool:
+    def settle_child(self, child: Ledger, offset: int = 0) -> bool:
         # The child's own overrun is settled with its spend, so an
         # evaluation past a sub-ledger's cap still reaches the parent. The
         # units it priced are part of that spend and settle with it.
@@ -72,7 +72,7 @@ def i1_partition(led: Ledger) -> bool:
 
 
 def test_i1_through_charges() -> bool:
-    for B in range(0, 12):
+    for B in range(12):
         led = Ledger(B)
         if not i1_partition(led):
             return False
@@ -169,9 +169,9 @@ def test_overrun_is_recorded_apart() -> bool:
 
 
 def test_every_settled_call_is_on_one_field() -> bool:
-    for budget in range(0, 8):
+    for budget in range(8):
         for batches in ([1], [3, 4], [5, 5, 5], [0, 2, 9], [4, 1, 1, 1]):
-            for stop_at in range(0, len(batches) + 1):
+            for stop_at in range(len(batches) + 1):
                 led = Ledger(budget)
                 total = 0
                 for index, n in enumerate(batches):
@@ -189,7 +189,7 @@ def test_every_settled_call_is_on_one_field() -> bool:
 
 
 def test_child_overrun_reaches_the_parent() -> bool:
-    for parent_budget in range(0, 9):
+    for parent_budget in range(9):
         for child_budget in range(1, 6):
             for batches in ([2], [5, 4], [1, 1, 9], [0, 7]):
                 parent = Ledger(parent_budget)
@@ -209,7 +209,7 @@ def test_child_overrun_reaches_the_parent() -> bool:
 
 
 def test_priced_is_summed_over_children() -> bool:
-    for parent_budget in range(0, 12):
+    for parent_budget in range(12):
         for plan in ([(2, 3)], [(1, 0), (4, 2)], [(0, 5), (3, 3), (2, 0)]):
             parent = Ledger(parent_budget)
             expected = 0
