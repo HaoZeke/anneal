@@ -817,13 +817,12 @@ in the archive search's near-miss push
 (src/methods/archive_search.rs:122).
 
 The continuous-symmetry class gate, =preserves_classes= in =src/csm.rs=,
-keeps an operation when the RMS distance from each operated atom to the
-nearest atom of its own class is under 0.25 on unit-radius coordinates
-(=DETECTION_TOLERANCE=). A swap of two atoms of different classes still
-passes when those atoms lie closer than 0.25, because each image is
-scored only against its own class. An octahedron axis against its
-equator stays above the bound. The number is the detector's deviation
-cap.
+keeps an operation when every image lands within 0.25 of a distinct atom
+of its own class, on unit-radius coordinates (=DETECTION_TOLERANCE=).
+The bound is per atom, not a mean RMS. A swap onto a different class
+fails however short the gap, including two atoms 0.08 apart. An
+octahedron axis against its equator fails with it. The number is the
+detector's deviation cap.
 
 ** Census calibration
 

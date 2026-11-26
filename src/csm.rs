@@ -8,9 +8,10 @@
 //! projects onto the `D_5h`, `C_5` and `C_i` templates at orientations from
 //! the inertia tensor plus one fixed one-fifth turn.
 //! [`crate::csm::propose_for`] with detected symmetry on instead projects,
-//! in the input frame, onto the operations detected on the structure whose
-//! same-class RMS is under 0.25. A short swap of two classes can pass that
-//! bound. Neither draws a random number.
+//! in the input frame, onto the operations detected on the structure. An
+//! operation is kept when each image lands within 0.25 of a distinct atom
+//! of its own class. A short swap of two classes does not. Neither draws
+//! a random number.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -256,11 +257,10 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
 /// when it is off.
 ///
 /// A detected projection keeps only operations that carry every atom onto
-/// the atoms of its own class, and its [`GroupProjection::group`] is
-/// `"detected"`. The same-class test is an RMS under 0.25 on unit-radius
-/// coordinates ([`DETECTION_TOLERANCE`]). A swap of two atoms of different
-/// classes still passes when those atoms lie closer than that, because each
-/// image is scored against the nearest atom of its own class.
+/// a distinct atom of its own class, and its [`GroupProjection::group`] is
+/// `"detected"`. Each image must land within [`DETECTION_TOLERANCE`] of
+/// that atom on unit-radius coordinates. A swap onto a different class
+/// fails even when the two atoms lie closer than that bound.
 pub fn propose_for(
     detected_symmetry: bool,
     x: ArrayView1<'_, f64>,
@@ -307,10 +307,10 @@ fn conjugate_ops(ops: &[[[f64; 3]; 3]], rotation: &[[f64; 3]; 3]) -> Vec<[[f64; 
         .collect()
 }
 
-/// Largest same-class RMS, on unit-radius coordinates, that
-/// [`preserves_classes`] accepts. Detection uses the same cap. A class
-/// swap closer than this still passes, because each image is scored
-/// against the nearest atom of its own class.
+/// Largest per-atom distance, on unit-radius coordinates, that
+/// [`preserves_classes`] accepts. Detection uses the same cap. The image
+/// must land on a distinct atom of the same class. A nearer atom of
+/// another class is a swap and is rejected.
 const DETECTION_TOLERANCE: f64 = 0.25;
 
 /// The closed operation set detected on `x` whose every element carries each
@@ -357,32 +357,38 @@ fn detected_ops(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<Vec<[[f64; 3]
     .then_some(group)
 }
 
-/// Whether `op` carries `centred` onto itself class by class: the RMS
-/// distance from each operated atom to the nearest atom of its class is
-/// under [`DETECTION_TOLERANCE`], the measure the detector applies to the
-/// whole cloud.
+/// Whether `op` carries `centred` onto itself class by class.
 ///
-/// The comparison is strict and the bound is 0.25. A swap of two atoms of
-/// different classes passes when they lie closer than that bound. A wider
-/// separation, such as an octahedron axis against its equator, does not.
+/// Each image must land within [`DETECTION_TOLERANCE`] of a distinct atom
+/// of the same class. The bound is the detector's deviation cap, applied
+/// per atom rather than as a mean. A swap onto another class fails however
+/// short the gap. An octahedron axis against its equator fails with it.
 fn preserves_classes(op: &[[f64; 3]; 3], centred: &[[f64; 3]], classes: &[u32]) -> bool {
     let n = centred.len();
-    let mut total = 0.0;
+    if n == 0 || classes.len() != n {
+        return false;
+    }
+    let limit = DETECTION_TOLERANCE * DETECTION_TOLERANCE;
+    let mut claimed = vec![false; n];
     for (atom, &point) in centred.iter().enumerate() {
         let image = mul_vec(op, point);
-        let nearest = centred
-            .iter()
-            .zip(classes)
-            .filter(|&(_, &class)| class == classes[atom])
-            .map(|(other, _)| {
-                (0..3)
-                    .map(|axis| (image[axis] - other[axis]).powi(2))
-                    .sum::<f64>()
-            })
-            .fold(f64::INFINITY, f64::min);
-        total += nearest;
+        let mut partner = 0;
+        let mut best = f64::INFINITY;
+        for (other, other_point) in centred.iter().enumerate() {
+            let distance = (0..3)
+                .map(|axis| (image[axis] - other_point[axis]).powi(2))
+                .sum::<f64>();
+            if distance < best {
+                best = distance;
+                partner = other;
+            }
+        }
+        if best >= limit || classes[partner] != classes[atom] || claimed[partner] {
+            return false;
+        }
+        claimed[partner] = true;
     }
-    (total / n as f64).sqrt() < DETECTION_TOLERANCE
+    true
 }
 
 const CSM_CLOSURE: f64 = 0.27;
@@ -1685,6 +1691,71 @@ mod tests {
         for (got, want) in projection.coordinates.iter().zip(octahedron.iter()) {
             assert!((got - want).abs() < 1e-9, "{got} vs {want}");
         }
+    }
+
+    /// Two atoms 0.08 apart. The half turn about z exchanges each with the
+    /// neighbour of the other class. The mean same-class RMS is that gap,
+    /// under 0.25. The labelled projection must not follow the turn.
+    #[test]
+    fn a_short_class_swap_is_rejected() {
+        let coords = Array1::from_vec(vec![
+            1.0, 0.04, 0.0, 1.0, -0.04, 0.0, -1.0, -0.04, 0.0, -1.0, 0.04, 0.0,
+        ]);
+        let swapped = [0u32, 1, 1, 0];
+        let (centred, _, _) = centre_and_scale(coords.view(), 4).expect("scale");
+        let half = rot_z(std::f64::consts::PI);
+        let mut total = 0.0;
+        for (atom, &point) in centred.iter().enumerate() {
+            let image = mul_vec(&half, point);
+            let nearest = centred
+                .iter()
+                .zip(&swapped)
+                .filter(|&(_, &class)| class == swapped[atom])
+                .map(|(other, _)| {
+                    (0..3)
+                        .map(|axis| (image[axis] - other[axis]).powi(2))
+                        .sum::<f64>()
+                })
+                .fold(f64::INFINITY, f64::min);
+            total += nearest;
+        }
+        let rms = (total / 4.0).sqrt();
+        assert!(rms < DETECTION_TOLERANCE, "{rms}");
+        let moved = propose_detected(coords.view(), &swapped);
+        let shift = moved.as_ref().map_or(f64::NAN, |projection| {
+            projection
+                .coordinates
+                .iter()
+                .zip(coords.iter())
+                .map(|(got, want)| (got - want).abs())
+                .fold(0.0, f64::max)
+        });
+        assert!(
+            !preserves_classes(&half, &centred, &swapped),
+            "a class swap closer than 0.25 was kept, rms {rms}, shift {shift}"
+        );
+        let projection = moved.expect("labelled mirror");
+        assert!(shift < 1e-8, "{shift}");
+        assert!(projection.measure < 1e-10, "{}", projection.measure);
+    }
+
+    /// Exchanging two adjacent atoms of one class is a mirror of this
+    /// dimer. The projection stays on the input.
+    #[test]
+    fn an_adjacent_same_class_exchange_stays_put() {
+        let coords = Array1::from_vec(vec![
+            1.0, 0.04, 0.0, 1.0, -0.04, 0.0, -1.0, -0.04, 0.0, -1.0, 0.04, 0.0,
+        ]);
+        let classes = [0u32; 4];
+        let projection = propose_detected(coords.view(), &classes).expect("same class");
+        let shift = projection
+            .coordinates
+            .iter()
+            .zip(coords.iter())
+            .map(|(got, want)| (got - want).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(shift < 1e-8, "{shift}");
+        assert!(projection.measure < 1e-10, "{}", projection.measure);
     }
 
     #[test]
