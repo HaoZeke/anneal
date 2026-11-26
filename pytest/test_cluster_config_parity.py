@@ -640,7 +640,7 @@ def test_cluster_search_invalid_stock_inputs_and_docstring():
     ras_keys = set(
         re.findall(r'dict\.set_item\(\s*"([^"]+)"', ras_fn_match.group(0))
     )
-    assert len(ras_keys) == 12
+    assert len(ras_keys) == 14
 
     try:
         ras_out = anneal._core.cluster_search(lj4, None, 4, 200, seed=1, ras=True)
