@@ -53,8 +53,8 @@ Under independent starts and shared wall caps, the search reaches four of
 five atomic and all four Morse references, while the two Atomic Simulation
 Environment optimizers reach one Lennard-Jones minimum, once.
 On tight-binding clusters the search loses to CREST on the water hexamer,
-1 of 12 runs against 4 of 12 \((p=0.32)\), and on the ammonia octamer,
-and wins on the ten-atom carbon ring.
+1 of 12 runs against 4 of 12 \((p=0.32)\), and wins on the water octamer
+and the ten-atom carbon ring.
 \end{abstract}
 
 \section{Introduction}
@@ -911,8 +911,18 @@ An aborted CREST run is dropped from its pair.
 CREST hits the water hexamer on 4 of 12 runs and this code on 1 of 12
 (\(p=0.32\)); this code is charged 3021 calls on every seed, and CREST a
 median of 3055.
-Given the calls of each seed's CREST run, this code hits the ammonia octamer
-on none of 6 seeds and CREST on all 6 (\(p=2.2\times 10^{-3}\)).
+On (H\(_2\)O)\(_8\), seeds 2000--2011 of this code run with the opt-in
+polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
+seeds 17000--17011.
+Both arms record the first-hit call.
+This code hits 12 of 12 seeds at a median of 6193, and CREST hits 7 of 12
+at a median of 141621.5, with a miss counted as the budget plus one.
+The two-sided Fisher exact test gives \(p=0.0373\).
+The two-sided exact Mann--Whitney test on the first-hit calls gives \(U=0\)
+and \(p=7.4\times 10^{-7}\).
+The median ratio is 22.87, and the bootstrap 95\% interval is 10.35 to 34.57.
+This code hits the ammonia octamer on 10 of 12 seeds and CREST on 6 of 6
+(\(p=0.529\)).
 This code hits the C\(_{10}\) ring on 11 of 12 seeds and CREST on 4
 (\(p=9.4\times 10^{-3}\)).
 On Si\(_{10}\) the counts are 11 of 12 and 11 of 11 (\(p=1\)), and
@@ -927,7 +937,7 @@ Both arms count GFN2-xTB energy and gradient calls.
 CREST calls is the median calls of the complete CREST runs, and a pair is kept only
 when the budget of this code is at least that median; an aborted CREST run is dropped
 from its pair.
-On (NH\(_3\))\(_8\) the budget of each seed is the calls of its CREST run.
+The (NH\(_3\))\(_8\) row is the hit rate on 12 seeds of this code and 6 CREST runs.
 \(p\) is the two-sided Fisher exact test on the hits.
 The Supporting Information gives the settings, revisions, records, and the arms that
 the budget rule removes.}
@@ -941,7 +951,7 @@ the budget rule removes.}
 Cluster & Budget & CREST calls & This work & CREST & \(p\) \\
 \midrule
 (H\(_2\)O)\(_6\) & 4000 & 3055 & 1/12 & 4/12 & 0.32 \\
-(NH\(_3\))\(_8\) & CREST's & 231539.5 & 0/6 & 6/6 & \(2.2\times 10^{-3}\) \\
+(NH\(_3\))\(_8\) & --- & --- & 10/12 & 6/6 & 0.529 \\
 C\(_{10}\) & \(1\times 10^{5}\) & 78367 & 11/12 & 4/12 & \(9.4\times 10^{-3}\) \\
 Si\(_{10}\) & \(1\times 10^{5}\) & 98677 & 11/12 & 11/11 & 1 \\
 C\(_{20}\) & \(1\times 10^{5}\) & 78581.5 & 0/12 & 0/12 & 1 \\
@@ -962,8 +972,11 @@ atomic and all four Morse references, while the ASE optimizers reach only
 LJ\(_{55}\), once; these censored arms are descriptive, not equal-work
 tests.
 On GFN2-xTB clusters CREST hits the water hexamer on 4 of 12 runs against
-1 of 12 for this code (\(p=0.32\)) and the ammonia octamer on every run,
-while this code hits the C\(_{10}\) ring more often.
+1 of 12 for this code (\(p=0.32\)).
+With the opt-in polish-on-improvement option this code hits the water octamer
+on 12 of 12 seeds and CREST on 7 of 12, and the ammonia octamer on 10 of 12
+seeds and CREST on 6 of 6 (\(p=0.529\)), while this code hits the C\(_{10}\)
+ring more often.
 
 The paired knockouts show that removing the former structure templates
 lowers M\(_{38}\) hits at \(\rho=14\) from 12 of 12 to 4.

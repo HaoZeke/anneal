@@ -178,6 +178,7 @@ KNOWN_GAPS = {
     "bench/growpal-h2h/seeds.csv": "revision and host unrecorded (no revision or host column)",
     "bench/metal-cluster-h2h/ptcu-b3d03061/icosa-23.csv": "revision and host unrecorded (no revision or host column)",
     "bench/nh3-octamer/ladder.csv": "revision and host unrecorded (no revision or host column)",
+    "bench/nh3-octamer/results.csv": "revision and host unrecorded (no revision or host column)",
     "paper/jctc/data/literature.tsv": "revision and host unrecorded (no revision or host column)",
 }
 
@@ -1694,8 +1695,9 @@ def gmin_rerun(audit: Audit) -> None:
             audit.record(word not in part, path, f"the GMIN comparison does not print {word}", "absent",
                          "absent" if word not in part else "present")
     for path in (TEX, SI):
-        audit.record("Mann--Whitney" not in audit.text(path), path, "no Mann--Whitney test is reported", "absent",
-                     "absent" if "Mann--Whitney" not in audit.text(path) else "present")
+        count = audit.text(path).count("Mann--Whitney")
+        audit.record(count == 1, path, "the only Mann--Whitney test is the water-octamer first-hit",
+                     "1", str(count))
     manuscript = audit.text(TEX)
     gmin_results = manuscript.split("\\label{sec:protocol}", 1)[1].split("\\label{sec:ase}", 1)[0]
     for marker in ("gmin-panel", "tip4p-gmin"):
@@ -6858,6 +6860,177 @@ def crest_equal(audit: Audit) -> None:
             audit.cell(where, f"{arm} Mann-Whitney p on {key}", summary[arm][column], p)
 
 
+H2O8_STATS_COMMIT = "b1b7338d4891348f41bb5bf493936cd83ffb42fd"
+H2O8_STATS_TREE = "63a349daaa7015807f3faad875133169990152a4"
+H2O8_ANNEAL_COMMIT = "42e708289a718d3d916b46e5ae43f26cf0a677c1"
+H2O8_ANNEAL_TREE = "ce01f4dc590926748b68c01167ef75bd09cec552"
+H2O8_CREST_COMMIT = "7ad8eab67d61f1d5835a9ce7b67e7b2cb2b4ede9"
+H2O8_CREST_TREE = "e161694dae3f663d407763dd1f415127b9bedb69"
+NH3_RECORD_COMMIT = "d3c3e351e2bfd8c26a279943a26e5a8230467284"
+NH3_RECORD_TREE = "47353ceea9816654aa80b95d35062d482be10dba"
+_STALE_H2O8 = ("15.47", "8253.5", "8 of 8", "8/8")
+
+
+def _record_text(commit: str, path: str) -> str:
+    shown = git("show", f"{commit}:{path}")
+    return shown.stdout if shown.returncode == 0 else ""
+
+
+def _record_tree(commit: str) -> str:
+    return git("rev-parse", "--verify", "--quiet", f"{commit}^{{tree}}").stdout.strip()
+
+
+def _record_csv(commit: str, path: str) -> list[dict[str, str]]:
+    text = _record_text(commit, path)
+    if not text:
+        return []
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+def _call_text(value: float) -> str:
+    rounded = round(value)
+    if abs(value - rounded) < 1e-9:
+        return str(int(rounded))
+    return f"{value:.1f}"
+
+
+def _seed_span(seeds: list[int]) -> str:
+    ordered = sorted(seeds)
+    if ordered != list(range(ordered[0], ordered[-1] + 1)):
+        return " ".join(map(str, ordered))
+    return f"{ordered[0]}--{ordered[-1]}"
+
+
+def h2o8_prose(row: dict[str, object]) -> str:
+    """The first-hit sentence, built from the record rows rather than a fixed string of digits."""
+    return (
+        f"On (H\\(_2\\)O)\\(_8\\), seeds {row['anneal_seeds']} of this code run with the "
+        f"opt-in polish-on-improvement option (\\texttt{{polish\\_on\\_improve}}), and CREST uses "
+        f"seeds {row['crest_seeds']}. Both arms record the first-hit call. "
+        f"This code hits {row['anneal_hits']} of {row['anneal_n']} seeds at a median of "
+        f"{_call_text(float(row['anneal_median']))}, and CREST hits {row['crest_hits']} of {row['crest_n']} "
+        f"at a median of {_call_text(float(row['crest_median']))}, with a miss counted as the budget plus one. "
+        f"The two-sided Fisher exact test gives \\(p={float(row['fisher']):.4f}\\). "
+        f"The two-sided exact Mann--Whitney test on the first-hit calls gives \\(U={int(row['u'])}\\) "
+        f"and \\(p={pp(float(row['mannwhitney']))}\\). The median ratio is "
+        f"{float(row['ratio']):.2f}, and the bootstrap 95\\% interval is "
+        f"{float(row['low']):.2f} to {float(row['high']):.2f}."
+    )
+
+
+def nh3_prose(row: dict[str, object]) -> str:
+    return (
+        f"This code hits the ammonia octamer on {row['anneal_hits']} of {row['anneal_n']} seeds and "
+        f"CREST on {row['crest_hits']} of {row['crest_n']} (\\(p={float(row['fisher']):.3f}\\))."
+    )
+
+
+def octamer_records(audit: Audit) -> dict[str, dict[str, object]] | None:
+    """(H2O)8 first-hit and the ammonia hit rate, read from the record commits."""
+    pins = (
+        (H2O8_STATS_COMMIT, H2O8_STATS_TREE, "bench/h2o8-poi-vs-crest/results.json"),
+        (H2O8_ANNEAL_COMMIT, H2O8_ANNEAL_TREE, "bench/octamer-matched/h2o8/poi/results.csv"),
+        (H2O8_CREST_COMMIT, H2O8_CREST_TREE, "bench/h2o8-crest-firsthit/rows.csv"),
+        (NH3_RECORD_COMMIT, NH3_RECORD_TREE, "bench/octamer-matched/nh3x8/results.csv"),
+    )
+    ready = True
+    for commit, tree, path in pins:
+        held = _record_tree(commit)
+        audit.record(held == tree, path, f"record {commit[:8]} tree", tree[:8], held[:8] or "absent")
+        present = bool(_record_text(commit, path))
+        audit.record(present, path, "the record file is on the pinned commit", path, "present" if present else "absent")
+        ready = ready and held == tree and present
+    for path in (TEX, SI, COVER):
+        text = audit.text(path)
+        for token in _STALE_H2O8:
+            audit.record(token not in text, path, f"no stale (H2O)8 figure {token}", "absent",
+                         "absent" if token not in text else "present")
+    if not ready:
+        return None
+    summary = json.loads(_record_text(H2O8_STATS_COMMIT, "bench/h2o8-poi-vs-crest/results.json"))
+    anneal = _record_csv(H2O8_ANNEAL_COMMIT, "bench/octamer-matched/h2o8/poi/results.csv")
+    crest = _record_csv(H2O8_CREST_COMMIT, "bench/h2o8-crest-firsthit/rows.csv")
+    anneal_calls = [int(r["calls_to_hit"]) for r in anneal]
+    crest_calls = [int(r["first_hit_call"]) for r in crest]
+    anneal_hits = sum(r["hit"] == "1" for r in anneal)
+    crest_hits = sum(r["hit"] == "1" for r in crest)
+    misses = [r for r in crest if r["hit"] != "1"]
+    miss_rule = all(int(r["first_hit_call"]) == int(float(r["total_calls"])) + 1 for r in misses)
+    audit.record(miss_rule, "bench/h2o8-crest-firsthit/rows.csv",
+                 "a CREST miss is stored as the budget plus one", "budget+1",
+                 "budget+1" if miss_rule else "other")
+    audit.record(summary["anneal"]["calls"] == anneal_calls and summary["crest"]["calls"] == crest_calls,
+                 "bench/h2o8-poi-vs-crest/results.json", "the summary call lists are the row calls",
+                 "equal", "equal" if summary["anneal"]["calls"] == anneal_calls and summary["crest"]["calls"] == crest_calls else "differ")
+    anneal_median = median([float(v) for v in anneal_calls])
+    crest_median = median([float(v) for v in crest_calls])
+    fisher_p = fisher(anneal_hits, len(anneal), crest_hits, len(crest))
+    # U for this code is the number of pairs in which its call is larger.
+    rank_u = float(sum(a > c for a in anneal_calls for c in crest_calls)
+                   + 0.5 * sum(a == c for a in anneal_calls for c in crest_calls))
+    audit.cell("bench/h2o8-poi-vs-crest/results.json", "anneal median calls_to_hit",
+               _call_text(float(summary["anneal"]["median"])), anneal_median)
+    audit.cell("bench/h2o8-poi-vs-crest/results.json", "CREST median first_hit_call",
+               _call_text(float(summary["crest"]["median"])), crest_median)
+    audit.cell("bench/h2o8-poi-vs-crest/results.json", "Fisher p",
+               f"{summary['fisher_exact']['p_value']:.4f}", fisher_p)
+    audit.cell("bench/h2o8-poi-vs-crest/results.json", "Mann-Whitney U",
+               f"{summary['mann_whitney']['u_anneal']:.0f}", rank_u)
+    ratio = crest_median / anneal_median
+    recorded_ratio = float(summary["median_ratio_crest_over_anneal"]["ratio"])
+    audit.cell("bench/h2o8-poi-vs-crest/results.json", "median ratio", f"{recorded_ratio:.2f}", ratio)
+    water = {
+        "anneal_seeds": _seed_span([int(r["seed"]) for r in anneal]),
+        "crest_seeds": _seed_span([int(r["seed"]) for r in crest]),
+        "anneal_hits": anneal_hits,
+        "anneal_n": len(anneal),
+        "crest_hits": crest_hits,
+        "crest_n": len(crest),
+        "anneal_median": anneal_median,
+        "crest_median": crest_median,
+        "fisher": fisher_p,
+        "u": rank_u,
+        "mannwhitney": float(summary["mann_whitney"]["p_value"]),
+        "ratio": recorded_ratio,
+        "low": float(summary["median_ratio_crest_over_anneal"]["ci95"][0]),
+        "high": float(summary["median_ratio_crest_over_anneal"]["ci95"][1]),
+    }
+    prose = h2o8_prose(water)
+    for path in (TEX, SI):
+        audit.said(path, prose)
+    nh3_anneal = _record_csv(NH3_RECORD_COMMIT, "bench/octamer-matched/nh3x8/results.csv")
+    nh3_crest = [r for r in audit.rows("bench/nh3-octamer/results.csv") if r["arm"] == "crest" and r["row"] == "v4"]
+    nh3_hits = sum(r["hit"] in ("yes", "true", "1") for r in nh3_anneal)
+    crest_nh3_hits = sum(r["hit"] in ("yes", "true", "1") for r in nh3_crest)
+    nh3 = {
+        "anneal_hits": nh3_hits,
+        "anneal_n": len(nh3_anneal),
+        "crest_hits": crest_nh3_hits,
+        "crest_n": len(nh3_crest),
+        "fisher": fisher(nh3_hits, len(nh3_anneal), crest_nh3_hits, len(nh3_crest)),
+        "anneal_seeds": _seed_span([int(r["seed"]) for r in nh3_anneal]),
+    }
+    audit.cell("bench/octamer-matched/nh3x8/results.csv", "ammonia hits of this code",
+               f"{nh3_hits}/{len(nh3_anneal)}", frac(nh3_anneal))
+    audit.cell("bench/nh3-octamer/results.csv", "ammonia hits of CREST",
+               f"{crest_nh3_hits}/{len(nh3_crest)}", frac(nh3_crest))
+    audit.cell("bench/octamer-matched/nh3x8/results.csv", "ammonia Fisher p",
+               f"{nh3['fisher']:.3f}", nh3["fisher"])
+    sentence = nh3_prose(nh3)
+    audit.record("median" not in sentence and "call" not in sentence.lower(),
+                 TEX, "the ammonia octamer states no call comparison", "hits only",
+                 "hits only" if "median" not in sentence and "call" not in sentence.lower() else sentence)
+    audit.said(TEX, sentence)
+    audit.said(SI, sentence)
+    audit.said(SI, "The rows of this code are \\path{bench/octamer-matched/h2o8/poi/results.csv} and the CREST "
+                   "rows are \\path{bench/h2o8-crest-firsthit/rows.csv}.")
+    audit.said(SI, "The comparison is \\path{bench/h2o8-poi-vs-crest/results.json}.")
+    audit.said(SI, f"The hit rate of this code is the {len(nh3_anneal)} seeds of "
+                   "\\path{bench/octamer-matched/nh3x8/results.csv}, and CREST is the "
+                   f"{len(nh3_crest)} \\texttt{{v4}} rows of \\path{{bench/nh3-octamer/results.csv}}.")
+    return {"h2o8": water, "nh3": nh3}
+
+
 def crest_table(audit: Audit) -> None:
     """tab:crest and its prose, recomputed from the GFN2-xTB rows; the hexamer counts from rows.csv directly."""
     table = load_script("crest_table_audit", "paper/jctc/scripts/crest_table.py")
@@ -6886,17 +7059,20 @@ def crest_table(audit: Audit) -> None:
                     f"{hits_of(anneal)} of {len(anneal)} (\\(p={p:.2f}\\)); this code is charged {charged[0]} calls on "
                     f"every seed, and CREST a median of {middle:g}.")
     audit.cell(TEX, "the hexamer charges one count", "1", float(len(charged)))
+    records = octamer_records(audit)
     for path in (TEX, COVER):
         audit.said(path, f"On tight-binding clusters the search loses to CREST on the water hexamer, {hits_of(anneal)} "
-                         f"of {len(anneal)} runs against {hits_of(crest)} of {len(crest)} \\((p={p:.2f})\\), and on the "
-                         "ammonia octamer, and wins on the ten-atom carbon ring.")
-    audit.said(TEX, f"On GFN2-xTB clusters CREST hits the water hexamer on {hits_of(crest)} of {len(crest)} runs "
-                    f"against {hits_of(anneal)} of {len(anneal)} for this code (\\(p={p:.2f}\\)) and the ammonia octamer "
-                    "on every run, while this code hits the C\\(_{10}\\) ring more often.")
-    nh3 = counts("(NH3)8")
-    words = {0: "none", 6: "all 6"}
-    audit.said(TEX, f"this code hits the ammonia octamer on {words[nh3[0]]} of {nh3[1]} seeds and CREST on "
-                    f"{words[nh3[2]]} (\\(p={table.pvalue(pairs['(NH3)8']['p']).strip(chr(92) + '()')}\\)).")
+                         f"of {len(anneal)} runs against {hits_of(crest)} of {len(crest)} \\((p={p:.2f})\\), and wins "
+                         "on the water octamer and the ten-atom carbon ring.")
+    if records is not None:
+        water, nh3 = records["h2o8"], records["nh3"]
+        audit.said(TEX, f"On GFN2-xTB clusters CREST hits the water hexamer on {hits_of(crest)} of {len(crest)} runs "
+                        f"against {hits_of(anneal)} of {len(anneal)} for this code (\\(p={p:.2f}\\)). "
+                        "With the opt-in polish-on-improvement option this code hits the water octamer on "
+                        f"{water['anneal_hits']} of {water['anneal_n']} seeds and CREST on {water['crest_hits']} of "
+                        f"{water['crest_n']}, and the ammonia octamer on {nh3['anneal_hits']} of {nh3['anneal_n']} "
+                        f"seeds and CREST on {nh3['crest_hits']} of {nh3['crest_n']} "
+                        f"(\\(p={float(nh3['fisher']):.3f}\\)), while this code hits the C\\(_{{10}}\\) ring more often.")
     c10, si10, c20 = counts("C10"), counts("Si10"), counts("C20")
     audit.said(TEX, f"This code hits the C\\(_{{10}}\\) ring on {c10[0]} of {c10[1]} seeds and CREST on {c10[2]} "
                     f"(\\(p={table.pvalue(pairs['C10']['p']).strip(chr(92) + '()')}\\)).")

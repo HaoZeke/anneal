@@ -14,7 +14,9 @@ paired with those of this code.
 from __future__ import annotations
 
 import csv
+import io
 import statistics
+import subprocess
 import sys
 from pathlib import Path
 
@@ -27,15 +29,28 @@ from paired_stats import fisher_exact
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
 BENCH = ROOT / "bench"
 MARKS = ("% crest table: start", "% crest table: end")
-NH3_REFERENCE_EH = -35.470769324714
-NH3_TOLERANCE_EH = 1e-6
 SI10_ANNEAL_REVISION = "f3d6a050"
 C20_REVISION = "5351f272"
+# Twelve-seed ammonia record. The printed row is the hit rate against the six
+# CREST runs already in bench/nh3-octamer/results.csv. No call column is printed.
+NH3_RECORD = "d3c3e351e2bfd8c26a279943a26e5a8230467284"
+NH3_RECORD_PATH = "bench/octamer-matched/nh3x8/results.csv"
 
 
 def read(path: Path) -> list[dict[str, str]]:
     with path.open(newline="") as handle:
         return list(csv.DictReader(line for line in handle if line.strip() and not line.startswith("#")))
+
+
+def show_csv(commit: str, path: str) -> list[dict[str, str]]:
+    """Rows of one file on a record commit. The audit checks the same object."""
+    proc = subprocess.run(
+        ["git", "show", f"{commit}:{path}"],
+        cwd=ROOT, capture_output=True, text=True, check=False,
+    )
+    if proc.returncode != 0:
+        raise SystemExit(f"crest_table: {commit}:{path} is not in this clone")
+    return list(csv.DictReader(io.StringIO(proc.stdout)))
 
 
 def hits(rows: list[dict[str, str]]) -> int:
@@ -59,19 +74,13 @@ def water_hexamer() -> dict[str, object]:
 
 
 def ammonia_octamer() -> dict[str, object]:
-    results = read(BENCH / "nh3-octamer" / "results.csv")
-    crest = [r for r in results if r["arm"] == "crest" and r["row"] == "v4"]
-    calls = {r["seed"]: int(r["calls"]) for r in crest}
-    ladder = {}
-    for row in read(BENCH / "nh3-octamer" / "ladder.csv"):
-        if row["seed"] in calls and int(row["budget"]) == calls[row["seed"]]:
-            ladder[row["seed"]] = row
-    if set(ladder) != set(calls):
-        raise SystemExit(f"nh3-octamer: ladder seeds {sorted(ladder)} against CREST {sorted(calls)}")
-    anneal = [dict(r, hit="true" if float(r["energy_Eh"]) <= NH3_REFERENCE_EH + NH3_TOLERANCE_EH else "false")
-              for r in ladder.values()]
+    """Hit rate only: twelve seeds of this code against the six recorded CREST runs."""
+    anneal = show_csv(NH3_RECORD, NH3_RECORD_PATH)
+    crest = [r for r in read(BENCH / "nh3-octamer" / "results.csv") if r["arm"] == "crest" and r["row"] == "v4"]
+    if len(anneal) != 12 or len(crest) != 6:
+        raise SystemExit(f"nh3-octamer: {len(anneal)} anneal rows and {len(crest)} CREST rows")
     return {"system": "(NH\\(_3\\))\\(_8\\)", "budget": None, "anneal": anneal, "crest": crest,
-            "crest_calls": [float(r["calls"]) for r in crest]}
+            "crest_calls": [], "hits_only": True}
 
 
 def covalent() -> list[dict[str, object]]:
@@ -108,10 +117,14 @@ def covalent() -> list[dict[str, object]]:
 def pairs() -> list[dict[str, object]]:
     kept = []
     for pair in (water_hexamer(), ammonia_octamer(), *covalent()):
+        a, c = pair["anneal"], pair["crest"]
+        if pair.get("hits_only"):
+            pair.update(median=None, p=fisher_exact(hits(a), len(a), hits(c), len(c)))
+            kept.append(pair)
+            continue
         median = statistics.median(pair["crest_calls"])
         if pair["budget"] is not None and pair["budget"] < median:
             continue
-        a, c = pair["anneal"], pair["crest"]
         pair.update(median=median, p=fisher_exact(hits(a), len(a), hits(c), len(c)))
         kept.append(pair)
     return kept
@@ -143,6 +156,8 @@ def pvalue(p: float) -> str:
 
 
 def table() -> str:
+    kept = pairs()
+    nh3 = next(pair for pair in kept if pair.get("hits_only"))
     lines = [
         "\\begin{table}",
         "\\caption{This code against CREST 3.0.2 on GFN2-xTB clusters.",
@@ -150,7 +165,8 @@ def table() -> str:
         "CREST calls is the median calls of the complete CREST runs, and a pair is kept only",
         "when the budget of this code is at least that median; an aborted CREST run is dropped",
         "from its pair.",
-        "On (NH\\(_3\\))\\(_8\\) the budget of each seed is the calls of its CREST run.",
+        f"The (NH\\(_3\\))\\(_8\\) row is the hit rate on {len(nh3['anneal'])} seeds of this code "
+        f"and {len(nh3['crest'])} CREST runs.",
         "\\(p\\) is the two-sided Fisher exact test on the hits.",
         "The Supporting Information gives the settings, revisions, records, and the arms that",
         "the budget rule removes.}",
@@ -164,8 +180,12 @@ def table() -> str:
         "Cluster & Budget & CREST calls & This work & CREST & \\(p\\) \\\\",
         "\\midrule",
     ]
-    for pair in pairs():
+    for pair in kept:
         a, c = pair["anneal"], pair["crest"]
+        if pair.get("hits_only"):
+            lines.append(f"{pair['system']} & --- & --- & {hits(a)}/{len(a)} & {hits(c)}/{len(c)} & "
+                         f"{pair['p']:.3f} \\\\")
+            continue
         lines.append(f"{pair['system']} & {budget(pair['budget'])} & {number(pair['median'])} & "
                      f"{hits(a)}/{len(a)} & {hits(c)}/{len(c)} & {pvalue(pair['p'])} \\\\")
     lines += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]

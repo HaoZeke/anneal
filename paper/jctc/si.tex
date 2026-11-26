@@ -263,7 +263,8 @@ The water hexamer rows are revision
 history.
 The Si\(_{10}\) and C\(_{20}\) rows name \texttt{f3d6a050} and
 \texttt{5351f272}, local builds that are not commits of the repository.
-The C\(_{10}\) rows and the ammonia octamer rows name no revision.
+The C\(_{10}\) rows name no revision.
+The ammonia octamer row is the hit rate in Section~\ref{sec:si-crest}.
 Section~\ref{sec:si-crest} names the record of each row.
 
 \section{Earlier template-assisted revision}
@@ -757,17 +758,27 @@ A CREST arm at 0.11~ps, the shortest length that finished, has a median of
 916.5 calls and hits 0 of 12 (\(p=1\) against this code); the table prints
 the 0.90~ps arm, whose calls are nearest those of this code.
 
+\emph{Water octamer.}
+On (H\(_2\)O)\(_8\), seeds 2000--2011 of this code run with the opt-in
+polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
+seeds 17000--17011.
+Both arms record the first-hit call.
+This code hits 12 of 12 seeds at a median of 6193, and CREST hits 7 of 12
+at a median of 141621.5, with a miss counted as the budget plus one.
+The two-sided Fisher exact test gives \(p=0.0373\).
+The two-sided exact Mann--Whitney test on the first-hit calls gives \(U=0\)
+and \(p=7.4\times 10^{-7}\).
+The median ratio is 22.87, and the bootstrap 95\% interval is 10.35 to 34.57.
+The rows of this code are \path{bench/octamer-matched/h2o8/poi/results.csv}
+and the CREST rows are \path{bench/h2o8-crest-firsthit/rows.csv}.
+The comparison is \path{bench/h2o8-poi-vs-crest/results.json}.
+
 \emph{Ammonia octamer.}
-The rows are in \path{bench/nh3-octamer/}, seeds 17000--17005, serial on
-host \texttt{bench}.
-CREST runs on native xtb, and its rows are the \texttt{v4} rows of
-\path{results.csv}.
-The rows of this code are those of \path{ladder.csv} at the calls of each
-seed's CREST run, with the molecular preset; where a seed has two such rows,
-the later one is used.
-A hit is within \(10^{-6}\)~Eh of \(-35.470769324714\)~Eh, the lowest intact
-energy either arm found.
-The ladder rows name no revision.
+The hit rate of this code is the 12 seeds of
+\path{bench/octamer-matched/nh3x8/results.csv}, and CREST is the 6
+\texttt{v4} rows of \path{bench/nh3-octamer/results.csv}.
+This code hits the ammonia octamer on 10 of 12 seeds and CREST on 6 of 6
+(\(p=0.529\)).
 
 \emph{Carbon and silicon clusters.}
 The rows are in \path{bench/covalent-h2h/gfn2/}, at an electronic
