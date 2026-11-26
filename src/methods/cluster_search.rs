@@ -3207,11 +3207,17 @@ mod tests {
             Config::recommended(8).resolved_sha256().unwrap(),
             "2787e86e47a5fc7b0c5444bc59e7ff4d4f6b6ea73a3426ad6047ed5d6cfb21d5"
         );
+        // Featomic keying replaces sorted distances and sets the merge
+        // radius to 0.10. The other hash is that preset without the feature.
+        #[cfg(feature = "featomic")]
+        let molecular_sha = "ff16f77f6a22da1a7e58771cff72eba41b106bd5840364bc44f65fcd5ce96177";
+        #[cfg(not(feature = "featomic"))]
+        let molecular_sha = "4856a5a88eb0b87d0ec02a86a816587a4e0cf6a1643d73cecce35bf382826c14";
         assert_eq!(
             Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0)
                 .resolved_sha256()
                 .unwrap(),
-            "4856a5a88eb0b87d0ec02a86a816587a4e0cf6a1643d73cecce35bf382826c14"
+            molecular_sha
         );
         assert_eq!(
             Config::recommended_tip4p(4).resolved_sha256().unwrap(),

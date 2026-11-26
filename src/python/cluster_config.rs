@@ -2867,6 +2867,16 @@ impl PyClusterConfig {
     }
 
     #[getter]
+    fn detected_symmetry(&self) -> bool {
+        self.inner.detected_symmetry
+    }
+
+    #[setter]
+    fn set_detected_symmetry(&mut self, value: bool) {
+        self.inner.detected_symmetry = value;
+    }
+
+    #[getter]
     fn surface_hop_on_best(&self) -> bool {
         self.inner.surface_hop_on_best
     }
