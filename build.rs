@@ -114,6 +114,8 @@ fn main() {
 fn link_libpython_for_test_binaries() {
     println!("cargo:rerun-if-env-changed=PYO3_BUILD_EXTENSION_MODULE");
     println!("cargo:rerun-if-env-changed=PYO3_PYTHON");
+    // `python3` is taken from PATH when PYO3_PYTHON is unset.
+    println!("cargo:rerun-if-env-changed=PATH");
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if os != "macos" && os != "linux" {
         return;
@@ -203,9 +205,11 @@ print("1" if on(shared) or on(pyframework) else "0")
     } else if shared {
         flags.push(format!("-l{lib_name}"));
     } else {
+        // `-l:libpythonX.Y.a` is rejected by ld64. The archive path that
+        // was found is accepted by that linker and by GNU ld.
         let archive = format!("lib{lib_name}.a");
-        if config_dir_has(&archive, libdir, libpl) {
-            flags.push(format!("-l:{archive}"));
+        if let Some(path) = config_dir_file(&archive, libdir, libpl) {
+            flags.push(path.display().to_string());
         } else {
             flags.push(format!("-l{lib_name}"));
         }
@@ -224,13 +228,24 @@ print("1" if on(shared) or on(pyframework) else "0")
     }
 }
 
-fn config_dir_has(name: &str, libdir: &str, libpl: &str) -> bool {
+fn config_dir_file(name: &str, libdir: &str, libpl: &str) -> Option<std::path::PathBuf> {
     if name.is_empty() {
-        return false;
+        return None;
     }
-    [libdir, libpl]
-        .into_iter()
-        .any(|dir| !dir.is_empty() && std::path::Path::new(dir).join(name).is_file())
+    for dir in [libdir, libpl] {
+        if dir.is_empty() {
+            continue;
+        }
+        let path = std::path::Path::new(dir).join(name);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn config_dir_has(name: &str, libdir: &str, libpl: &str) -> bool {
+    config_dir_file(name, libdir, libpl).is_some()
 }
 
 fn python_interpreter() -> String {
