@@ -53,6 +53,7 @@ HARNESS_FILES = (
     "bench/gate-pr186-ledgerx5/run_gate.py",
     "bench/gate-pr186-ledgerx5/guard_trace.rs",
     "bench/gate-pr186-ledgerx5/analyze.py",
+    "bench/gate-pr186-ledgerx5/rdff_count.c",
 )
 MIN_SAMPLE_S = 0.05
 MAX_REPS = 64
