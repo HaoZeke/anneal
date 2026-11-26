@@ -18,6 +18,7 @@ import paired_stats  # noqa: E402
 
 BOOT_RESAMPLES = 10_000
 BOOT_SEED = 20261123
+MISS_CODE = 4_000_001
 
 
 def mann_whitney_u(left: list[float], right: list[float]) -> tuple[float, float]:
@@ -243,6 +244,97 @@ def calls_of(rows: list[dict[str, str]]) -> list[float]:
     return [float(r["calls_to_hit"]) for r in rows]
 
 
+def wall_coded(rows: list[dict[str, str]]) -> list[float]:
+    """Wall-to-hit with a miss coded as budget + 1."""
+    coded: list[float] = []
+    for row in rows:
+        if row.get("hit") == "1" and row.get("wall_to_hit_s"):
+            coded.append(float(row["wall_to_hit_s"]))
+        else:
+            coded.append(float(MISS_CODE))
+    return coded
+
+
+def hit_median_ci(rows: list[dict[str, str]]) -> tuple[str, str]:
+    walls = hit_walls(rows)
+    if not walls:
+        return "NA", "NA"
+    est, lo, hi = bootstrap_ci(walls, statistics.median)
+    return f"{est:.3f}", f"[{lo:.3f}; {hi:.3f}]"
+
+
+def arm_provenance(rows: list[dict[str, str]]) -> str:
+    if not rows:
+        return "nproc= affinity= machine_id="
+
+    def uniq(key: str) -> str:
+        return "|".join(sorted({r.get(key) or "" for r in rows}))
+
+    return (
+        f"nproc={uniq('nproc')} affinity={uniq('pinned_cores')} "
+        f"machine_id={uniq('machine_id')}"
+    )
+
+
+def print_arm(label: str, rows: list[dict[str, str]]) -> None:
+    n = len(rows)
+    hits = sum(r.get("hit") == "1" for r in rows)
+    med, ci = hit_median_ci(rows)
+    print(
+        f"ARM {label} n={n} hits={hits}/{n} "
+        f"wall_to_hit_med_s={med} wall_ci95={ci} {arm_provenance(rows)}"
+    )
+
+
+def print_agreement(
+    tag: str,
+    left_name: str,
+    right_name: str,
+    left: list[dict[str, str]],
+    right: list[dict[str, str]],
+) -> None:
+    if not left or not right:
+        print(
+            f"INCONCLUSIVE: {tag} missing rows "
+            f"n_left={len(left)} n_right={len(right)}"
+        )
+        return
+    left_hits = sum(r.get("hit") == "1" for r in left)
+    right_hits = sum(r.get("hit") == "1" for r in right)
+    fisher_p = paired_stats.fisher_exact(
+        left_hits, len(left), right_hits, len(right)
+    )
+    u_stat, mwu_p = mann_whitney_u(wall_coded(left), wall_coded(right))
+    left_med, left_ci = hit_median_ci(left)
+    right_med, right_ci = hit_median_ci(right)
+    print(
+        f"COMPARE {tag} hits={left_hits}/{len(left)} vs "
+        f"{right_hits}/{len(right)} fisher_p={fisher_p:.6g} "
+        f"mwu_U={u_stat:.1f} mwu_p={mwu_p:.6g} "
+        f"wall_med={left_med} {left_ci} vs {right_med} {right_ci}"
+    )
+    if len(left) != 12 or len(right) != 12:
+        print(f"INCONCLUSIVE: {tag} n={len(left)} vs {len(right)}")
+        return
+    hits_state = "same" if fisher_p > 0.05 else "different"
+    wall_state = "same" if mwu_p > 0.05 else "different"
+    if hits_state == "same" and wall_state == "same":
+        print(
+            f"AGREE: {left_name} and {right_name} agree on hits "
+            "and wall-to-hit"
+        )
+        return
+    parts = []
+    if hits_state != "same":
+        parts.append("hits")
+    if wall_state != "same":
+        parts.append("wall-to-hit")
+    print(
+        f"DISAGREE: {left_name} and {right_name} differ on "
+        + ", ".join(parts)
+    )
+
+
 def provenance(rows: list[dict[str, str]]) -> str:
     if not rows:
         return "empty"
@@ -261,9 +353,15 @@ def summarize_followup(path: Path) -> None:
     Efficiency is T1/(p*Tp) on hit-conditioned wall-to-hit medians.
     Oversubscribed rungs (p > nproc) are excluded. Misses stay at
     budget+1 for the calls-to-hit median and the Mann-Whitney test.
+
+    Sessions p1-control and p2-control are a later same-VM rerun.
+    Those comparisons use Fisher's exact test on hits and a
+    Mann-Whitney U test on wall-to-hit, with a miss coded as
+    budget+1. Medians stay hit-conditioned, with a 10,000-resample
+    percentile bootstrap 95% CI at seed 20261123.
     """
     rows = load_rows(path)
-    known = {"", "primary", "control"}
+    known = {"", "primary", "control", "p1-control", "p2-control"}
     bad = sorted({session_of(r) for r in rows} - known)
     if bad:
         raise SystemExit(f"unexpected session values: {bad}")
@@ -388,6 +486,31 @@ def summarize_followup(path: Path) -> None:
             "DISAGREE: original-session p=2 and control p=2 differ on "
             + ", ".join(parts)
         )
+
+    p1_control = [r for r in rows if session_of(r) == "p1-control"]
+    p2_control = [r for r in rows if session_of(r) == "p2-control"]
+    if any(int(r["workers"]) != 1 for r in p1_control):
+        raise SystemExit("p1-control session is only the p=1 rung")
+    if any(int(r["workers"]) != 2 for r in p2_control):
+        raise SystemExit("p2-control session is only the p=2 rung")
+    print_arm("p1-control", p1_control)
+    print_arm("recorded-p1", primary)
+    print_arm("p2-control", p2_control)
+    print_arm("original-p2", original.get(2, []))
+    print_agreement(
+        "p2_control_vs_original_p2",
+        "same-VM p=2",
+        "original p=2",
+        p2_control,
+        original.get(2, []),
+    )
+    print_agreement(
+        "p1_control_vs_recorded_p1",
+        "p=1 control",
+        "recorded p=1",
+        p1_control,
+        primary,
+    )
 
 
 def main() -> None:

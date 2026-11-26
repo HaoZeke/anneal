@@ -12,8 +12,10 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(REPO / "scripts" / "paper_0120"))
 import run_panel  # noqa: E402
+from machine_provenance import machine_provenance  # noqa: E402
 
 def load_budgets():
     return run_panel.PAPER_BUDGETS
@@ -55,6 +57,7 @@ ROW_FIELDS = [
     "pinned_cores",
     "oversubscribed",
     "session",
+    "machine_id",
 ]
 
 
@@ -132,6 +135,7 @@ def run_job(
     model: str,
     rows_path: Path,
     session: str,
+    machine_id: str,
 ) -> None:
     oversubscribed = workers > nproc
     max_core = min(workers, nproc) - 1
@@ -199,12 +203,14 @@ def run_job(
         "pinned_cores": pinned,
         "oversubscribed": "true" if oversubscribed else "false",
         "session": session,
+        "machine_id": machine_id,
     }
     append_row(rows_path, row)
     print(
         f"session={session or '-'} comm-p{workers} seed={seed} hit={row['hit']} "
         f"calls={row['calls_to_hit']} wall={row['wall_s']}s cpu={row['cpu_s']}s "
-        f"rss={row['peak_rss_anon_kib']}KiB pin={pinned} best={row['best_energy']}",
+        f"rss={row['peak_rss_anon_kib']}KiB nproc={nproc} affinity={pinned} "
+        f"machine_id={machine_id} best={row['best_energy']}",
         flush=True,
     )
 
@@ -255,6 +261,7 @@ def main() -> None:
     revision = git_head()
     nproc = os.cpu_count() or 1
     model = cpu_model()
+    machine_id, _machine_cpu = machine_provenance()
     done = load_done(args.rows)
 
     if args.rotate:
@@ -277,7 +284,7 @@ def main() -> None:
 
     print(
         f"revision={revision} nproc={nproc} cpu_model={model} budget={BUDGET} "
-        f"jobs={len(planned)}",
+        f"machine_id={machine_id} jobs={len(planned)}",
         flush=True,
     )
     if args.dry_run:
@@ -302,7 +309,15 @@ def main() -> None:
         if (session, arm, seed) in done:
             continue
         run_job(
-            binary, workers, seed, revision, nproc, model, args.rows, session
+            binary,
+            workers,
+            seed,
+            revision,
+            nproc,
+            model,
+            args.rows,
+            session,
+            machine_id,
         )
         done.add((session, arm, seed))
 
