@@ -15,7 +15,8 @@ crate-type = ["cdylib"]
 # maturin and CI pass `--features python,graphkey`; the module is always
 # the Python build of anneal-core.
 python = []
-# cluster_search(ras=True), the residual archive search. Every wheel enables it.
+# Residual archive search (`ras=True`). Release wheels enable it.
+# A build that does not pass `graphkey` leaves it off.
 graphkey = ["anneal-core/graphkey"]
 
 [dependencies]

@@ -30,6 +30,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ROWS = ROOT / "bench" / "outside-time" / "rows.csv"
@@ -231,7 +232,7 @@ def jobs(seed: int, bindir: Path, scratch: Path) -> list[tuple[str, list[str]]]:
 
 
 def main() -> None:
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         raise SystemExit("uts hostname is not bench")
     if Path.cwd() != Path("/work"):
         raise SystemExit("working directory is not /work")
@@ -248,7 +249,7 @@ def main() -> None:
     wanted = set(args.systems.split(","))
     seeds = [int(item) for item in args.seeds.split(",")] if args.seeds else SEEDS
     rev = revision()
-    host = os.uname().nodename
+    host = host_label(os.uname().nodename)
     env = child_env(args.sc_lib)
     scratch = Path("/work/outside-time-traces")
     scratch.mkdir(parents=True, exist_ok=True)

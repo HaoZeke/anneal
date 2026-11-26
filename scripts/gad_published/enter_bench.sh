@@ -27,6 +27,7 @@ mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs"
 cp -a "$HERE/run_campaign.py" "$HERE/read_deposit.py" \
   "$HERE/gad_rerun.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/gmin_pin.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 chmod +x "$WORK/bin/gad_published" "$WORK/bin/GMIN"
 
 cat > "$WORK/bin/inside.sh" << EOF
@@ -49,7 +50,7 @@ export RAYON_NUM_THREADS=1
 export TQDM_DISABLE=1
 cd $WORK
 if [ "\$#" -eq 0 ]; then
-  set -- --summary $ROOT/bench/gad-published/rows.csv
+  set -- --summary /work/gad-published/rows.csv
 fi
 HEAD=\$(cat $WORK/anneal-head)
 exec taskset -c $CORE $WORK/venv/bin/python -u $WORK/bin/run_campaign.py \\

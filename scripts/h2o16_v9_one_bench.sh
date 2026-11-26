@@ -49,7 +49,7 @@ machine_raw() {
   local dest=$1
   local when=$2
   mkdir -p "$dest"
-  cat /proc/sys/kernel/random/boot_id > "$dest/${when}_boot_id.raw"
+  python3 "$SCRIPTS_DIR/machine_provenance.py" boot-label > "$dest/${when}_boot_id.raw"
   cp /proc/uptime "$dest/${when}_uptime.raw"
   awk '/^cpu MHz/ {print}' /proc/cpuinfo > "$dest/${when}_mhz.raw"
   lscpu > "$dest/${when}_lscpu.raw"

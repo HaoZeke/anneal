@@ -110,7 +110,7 @@ if [[ ! -f $SOURCE_COMMIT_FILE ]]; then
   exit 1
 fi
 IFS= read -r SOURCE_COMMIT <"$SOURCE_COMMIT_FILE"
-if [[ ! $SOURCE_COMMIT =~ ^[0-9a-f]{40}$ ]]; then
+if ! python3 "$SOURCE_ROOT/scripts/revision_reach.py" full-sha "$SOURCE_COMMIT"; then
   echo "source commit record must contain one full Git object ID" >&2
   exit 1
 fi
@@ -135,7 +135,7 @@ if [[ ! -s $RGPOT_SOURCE_COMMIT_FILE || ! -s $RGPOT_PIXI_LOCK_SHA256_FILE ]]; th
 fi
 IFS= read -r RGPOT_SOURCE_COMMIT <"$RGPOT_SOURCE_COMMIT_FILE"
 IFS= read -r RGPOT_PIXI_LOCK_SHA256 <"$RGPOT_PIXI_LOCK_SHA256_FILE"
-if [[ ! $RGPOT_SOURCE_COMMIT =~ ^[0-9a-f]{40}$ || ! $RGPOT_PIXI_LOCK_SHA256 =~ ^[0-9a-f]{64}$ ]]; then
+if ! python3 "$SOURCE_ROOT/scripts/revision_reach.py" full-sha "$RGPOT_SOURCE_COMMIT" || [[ ! $RGPOT_PIXI_LOCK_SHA256 =~ ^[0-9a-f]{64}$ ]]; then
   echo "invalid rgpot source provenance below $ROOT" >&2
   exit 2
 fi
@@ -361,7 +361,7 @@ peek_sha256=$(sha256sum "$PEEK" | awk '{print $1}')
   printf 'server_sha256=%s\n' "$server_sha256"
   printf 'peek_sha256=%s\n' "$peek_sha256"
   printf 'slurm_job_id=%s\n' "$SLURM_JOB_ID"
-  printf 'host=%s\n' "$(hostname)"
+  printf 'host=%s\n' "$(python3 "$SOURCE_ROOT/scripts/machine_provenance.py" host-label)"
   if [[ $SYSTEM == cuh2 ]]; then
     printf 'input_sha256=%s\n' "$(sha256sum "$CON" | awk '{print $1}')"
   fi

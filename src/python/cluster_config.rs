@@ -2625,6 +2625,17 @@ impl PyClusterConfig {
         self.inner.branch_on_stall = value;
     }
 
+    /// Polish the incumbent when a hop improves it.
+    #[getter]
+    fn polish_on_improve(&self) -> bool {
+        self.inner.polish_on_improve
+    }
+
+    #[setter]
+    fn set_polish_on_improve(&mut self, value: bool) {
+        self.inner.polish_on_improve = value;
+    }
+
     #[getter]
     fn jump_on_stall(&self) -> bool {
         self.inner.jump_on_stall

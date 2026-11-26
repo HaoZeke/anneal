@@ -20,6 +20,7 @@ mkdir -p "$RUN/runs" "$RUN/starts"
 cp -a "$HERE/run_campaign.py" "$HERE/ase_bh.py" \
   "$ROOT/scripts/target_tol.py" "$ROOT/scripts/gmin_pin.py" \
   "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 cp -a "$ROOT/examples/h2h_gmin_sw.data" "$WORK/bin/h2h_gmin_sw.data"
 cp -a "$ROOT/examples/h2h_gmin_tc.data" "$WORK/bin/h2h_gmin_tc.data"
 cp -a /work/gmin-h2h/bin/GMIN "$WORK/bin/GMIN"

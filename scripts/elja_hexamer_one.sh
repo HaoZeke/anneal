@@ -3,7 +3,7 @@
 # One water-hexamer seed at the frozen 4000-eval paper budget, comm kernel.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_hexamer_one.sh: run under sbatch, not on $(hostname)" >&2
+  echo "elja_hexamer_one.sh: run under sbatch, not directly" >&2
   exit 1
 fi
 ROOT=${ANNEAL_ROOT:-$HOME/build/anneal-hunt}
@@ -15,7 +15,7 @@ export LD_LIBRARY_PATH="${HOME}/rgpot/.pixi/envs/xtbbld/lib:${HOME}/ira/lib:${GC
 export SEED_OFFSET=${SEED_OFFSET:-${SLURM_ARRAY_TASK_ID:-0}}
 OUT=${COMM_OUT:-$ROOT/hexamer-comm}
 mkdir -p "$OUT"
-echo "host=$(hostname) job=$SLURM_JOB_ID seed=$SEED_OFFSET"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID seed=$SEED_OFFSET"
 "$BIN" 6 4000 1 comm | tee "$OUT/seed${SEED_OFFSET}.out"
 if grep -q SOLVED "$OUT/seed${SEED_OFFSET}.out"; then
   echo HEX_OK

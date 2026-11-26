@@ -79,7 +79,7 @@ mkdir -p "$OUT"
     source_commit=$(cat "$ROOT/SOURCE_COMMIT")
   fi
   printf 'source=%s\n' "${source_commit:-unknown}"
-  printf 'host=%s\n' "$(hostname)"
+  printf 'host=%s\n' "$(python3 "$ROOT/scripts/machine_provenance.py" host-label)"
   printf 'job=%s\n' "$SLURM_JOB_ID"
   printf 'mol_budget=%s\n' "$MOL_BUDGET"
   printf 'slab_budget=%s\n' "$SLAB_BUDGET"

@@ -44,6 +44,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         sys.path.insert(0, str(_candidate))
         break
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 
 HIT_TOL = DEFAULT_HIT_TOL
@@ -64,7 +65,7 @@ def _write_carbon_atom(path: Path) -> None:
 
 
 def run_seed(n: int, seed: int, budget: int, reference: float, work: Path, upstream: Path) -> dict:
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         raise SystemExit("uts hostname is not bench")
     work.mkdir(parents=True, exist_ok=True)
     for stale in work.glob("result_*.xyz"):

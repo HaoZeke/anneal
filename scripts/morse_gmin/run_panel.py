@@ -34,6 +34,7 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from gmin_pin import read_svnrev  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
+    host_label,
     machine_columns,
     machine_fieldnames,
     read_built_gmin_provenance,
@@ -246,7 +247,7 @@ def anneal_line(
         "outside_s": cols[10],
         "code_revision": revision,
         "gmin_build_key": "",
-        "host": socket.gethostname() if host is None else host,
+        "host": host_label(socket.gethostname()) if host is None else host,
         **stamped_machine,
     }
 
@@ -302,7 +303,7 @@ def gmin_line(
         "outside_s": f"{outside:.6f}",
         "code_revision": revision,
         "gmin_build_key": stamped_key,
-        "host": socket.gethostname() if host is None else host,
+        "host": host_label(socket.gethostname()) if host is None else host,
         **stamped_machine,
     }
 
@@ -590,8 +591,8 @@ def main(
     ):
         self_test()
         return 0
-    if socket.gethostname() != "bench":
-        print(f"uts hostname is {socket.gethostname()}, expected bench", file=sys.stderr)
+    if host_label(socket.gethostname()) != "bench":
+        print(f"uts hostname is {host_label(socket.gethostname())}, expected bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)

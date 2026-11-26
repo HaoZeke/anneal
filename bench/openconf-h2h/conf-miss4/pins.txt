@@ -1,0 +1,91 @@
+h2h_seed lj 13 0 20000 2000 trace=bf3f05a42814c47c1f034d24f42175e2b292c6c4 lowest=e913abd0a39f1ff87275ff5ef0fe7b36405e3d57
+h2h_seed lj 38 0 200000 2000 trace=3bf8009e111a26241aa3d426258ced6cfd9bec18 lowest=b63f095cb8b6c1b34e39091131714f8d17f8f646
+h2h_seed lj 55 0 100000 2000 trace=c2d1941f555cdf832c9210ba2e789d59a0d7241c lowest=b7940863f8bf640f7a38eae6594696d1d9246142
+h2h_seed lj 75 0 200000 2000 trace=87f8a83ce9b3b6ec5871d1b9aa3797aaf08fd2de lowest=b43ad350ab9cc11de5cdda3cdc016912e2434959
+h2h_seed morse 38 14 100000 2000 trace=9d732c5cb657f7b0b057320ad6c9a4c3873bef9a lowest=6283215be3a07ca35811f0d165ca1010a6de81e7
+h2h_seed lj 13 0 20000 2001 trace=d4045efd37a2753f6931e4256d01925d79afe6e0 lowest=0694bb1a8081779f2dd30635e2cb0420f5ce8b53
+h2h_seed lj 38 0 200000 2001 trace=3c2c80d7094e2d14dd5fd02be99cc74e6d23c9bf lowest=29b29895c78405cad6a6e38176d0e1ae4acb1437
+h2h_seed lj 55 0 100000 2001 trace=0c2f965f5c498c9cc0ecfefad92210470d3b731f lowest=4022a4ad11e9834451eeb70b1593ea94a8a68735
+h2h_seed lj 75 0 200000 2001 trace=48f7251222a8ed9f91a170c4d05f4319f505bd3b lowest=c5221600e18a010a247844748bebda8bf56ec5aa
+h2h_seed morse 38 14 100000 2001 trace=1e0ca5d9b60847e0450448828d23440d05975050 lowest=a063b93cc6e944c32bbc6fdf579864c8ba64bff3
+h2h_seed lj 13 0 20000 2002 trace=b39381af5974ca92093981555ae2a2eb150cf48d lowest=c6c12c0fa09163c882a44cbf44991d7e844cbc3d
+h2h_seed lj 38 0 200000 2002 trace=f132d68f5e78a94c48c4bdf890b7401f8ed585b8 lowest=04b041da42b1b60f9d7fd80b6167a2af082fafe6
+h2h_seed lj 55 0 100000 2002 trace=bd8a912d0b5395593636326f9581dde083eeeb40 lowest=17235990bd79e25c9b673ccd2f8c742944cb63d1
+h2h_seed lj 75 0 200000 2002 trace=1e357e735b33ab3e69ff7510487747a6ebe56864 lowest=73a47d3c82a11eff9840a747681205a60129988a
+h2h_seed morse 38 14 100000 2002 trace=9791691fe2b9b4537e7366d3dcee93c2c2966f89 lowest=bb3923875186eb491944588a295caa3c3f8e171c
+h2h_seed tip4p 8 0 50000 2000 trace=05014b4bb38921931686e0bc0b5c0997c8656031 lowest=9c9a65fee78885e1adeff583326ddbc38e24c9d4
+h2h_seed tip4p 12 0 50000 2000 trace=08bd231f0391f1ec5b3ebd4b81ea219f4c1b8204 lowest=1c8283b8906535193260f6d577d9bf3c1cb484e3
+h2h_seed tip4p 8 0 50000 2001 trace=68ea1c989da11e0a0f49d2335df784a3a4659153 lowest=1036e574d4f976d134c84b57054cb0723b67e815
+h2h_seed tip4p 12 0 50000 2001 trace=d781dd1ec005e310f1751d27df68b00ddb8b2a24 lowest=67e2b4fa544e9c30caf74fe8f6b110be8b316d0a
+m38r6,anneal,2000,400000,true,67722,67722,-157.47710811
+arm single draws 74 accepts 43 best -157.242290
+arm surface draws 56 accepts 23 best -155.031371
+arm sym draws 105 accepts 80 best -157.242290
+arm burst draws 30 accepts 11 best -154.194069
+arm soap draws 56 accepts 38 best -156.111497
+arm dls-kernel draws 172 accepts 137 best -157.242290
+m38r6,anneal,2001,400000,true,247613,247613,-157.47699843
+arm single draws 512 accepts 233 best -157.406902
+arm surface draws 424 accepts 188 best -156.779567
+arm sym draws 931 accepts 665 best -157.406902
+arm burst draws 231 accepts 70 best -155.397590
+arm soap draws 400 accepts 96 best -157.242290
+arm dls-kernel draws 1409 accepts 899 best -157.406902
+m38r6,anneal,2002,400000,true,19477,19477,-157.47710811
+arm single draws 17 accepts 10 best -154.850186
+arm surface draws 11 accepts 6 best -155.481984
+arm sym draws 24 accepts 22 best -157.062948
+arm burst draws 15 accepts 5 best -153.934567
+arm soap draws 18 accepts 10 best -157.062948
+arm dls-kernel draws 32 accepts 30 best -157.062948
+m38r14,anneal,2000,400000,false,400000,400000,-142.71594037
+arm single draws 746 accepts 191 best -142.694457
+arm surface draws 549 accepts 186 best -142.715938
+arm sym draws 585 accepts 149 best -142.686215
+arm burst draws 731 accepts 133 best -142.697797
+arm soap draws 206 accepts 21 best -141.690377
+arm dls-kernel draws 1565 accepts 1094 best -142.715940
+m38r14,anneal,2001,400000,true,219638,219665,-144.32105392
+arm single draws 167 accepts 49 best -140.315855
+arm surface draws 405 accepts 139 best -141.205172
+arm sym draws 238 accepts 68 best -141.339919
+arm burst draws 432 accepts 76 best -141.194659
+arm soap draws 162 accepts 15 best -139.654933
+arm dls-kernel draws 607 accepts 445 best -142.321644
+m38r14,anneal,2002,400000,false,400000,400000,-142.68775213
+arm single draws 376 accepts 78 best -142.629464
+arm surface draws 730 accepts 249 best -142.629383
+arm sym draws 552 accepts 98 best -142.653360
+arm burst draws 830 accepts 157 best -142.629383
+arm soap draws 311 accepts 31 best -142.653360
+arm dls-kernel draws 1701 accepts 1073 best -142.697898
+m55r14,anneal,2000,1000000,true,103415,103415,-220.64585570
+arm single draws 15 accepts 5 best -219.580072
+arm surface draws 43 accepts 16 best -217.545090
+arm sym draws 64 accepts 30 best -219.583446
+arm burst draws 54 accepts 15 best -218.614813
+arm soap draws 45 accepts 19 best -219.676992
+arm dls-kernel draws 162 accepts 130 best -219.676992
+m55r14,anneal,2001,1000000,true,485439,485439,-220.64585570
+arm single draws 558 accepts 134 best -220.498275
+arm surface draws 648 accepts 231 best -220.498341
+arm sym draws 707 accepts 166 best -220.498480
+arm burst draws 696 accepts 142 best -220.498480
+arm soap draws 248 accepts 16 best -219.504589
+arm dls-kernel draws 1783 accepts 1205 best -220.498480
+m55r14,anneal,2002,1000000,false,1000000,1000000,-220.51853338
+arm single draws 2082 accepts 408 best -220.518087
+arm surface draws 2001 accepts 829 best -220.518533
+arm sym draws 1568 accepts 394 best -220.514496
+arm burst draws 3323 accepts 667 best -220.518431
+arm soap draws 541 accepts 52 best -220.518533
+arm dls-kernel draws 4770 accepts 3036 best -220.518533
+zn38,anneal,2000,50000,false,50000,50000,-50.46284756
+zn38,anneal,2001,50000,true,47448,47448,-50.49998335
+zn38,anneal,2002,50000,false,50000,50000,-50.47179171
+cu19au19,anneal,2000,80000,false,80000,80000,-122.89202971
+cu19au19,anneal,2001,80000,false,80000,80000,-122.85764460
+cu19au19,anneal,2002,80000,false,80000,80000,-122.89202971
+pt13,anneal,2000,100000,false,100000,100000,-64.91633912
+pt13,anneal,2001,100000,false,100000,100000,-64.91633912
+pt13,anneal,2002,100000,false,100000,100000,-64.91633912

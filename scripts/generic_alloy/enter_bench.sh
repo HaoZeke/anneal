@@ -50,6 +50,7 @@ user_site=$(python3 -c 'import site; print(site.getusersitepackages())')
 mkdir -p "$WORK/bin" "$scratch/user" "$scratch/scratch" "$WORK/logs" "$OUT"
 cp -f "$HERE/run_ablation.py" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 
 cat > "$WORK/bin/inside.sh" << EOF
 #!/bin/bash

@@ -12,9 +12,9 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 WORK=/work/tip4p-rates
 BUDGET=500000
-# 0.001 kcal/mol. The thermochemical calorie is 4.184 kJ.
-TOL_KJ=0.004184
-CSV="$ROOT/bench/tip4p-water-rates/rates.csv"
+# 0.001 kcal/mol times the library kcal-to-kJ factor.
+TOL_KJ=$(PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'from codata2018 import KJ_PER_KCAL; print(format(0.001 * KJ_PER_KCAL, ".12g"))')
+CSV="${TIP4P_RATES_CSV:-$ROOT/bench/tip4p-water-rates/rates.csv}"
 
 SIZE_ARG=
 SEED_ARG=
@@ -72,9 +72,9 @@ prefix=\$7
 stop=\$(python3 -c 'import sys; print(repr(float(sys.argv[1]) + float(sys.argv[2])))' "\$ref" "\$tol")
 cd /work
 {
-  printf 'hostname=%s\n' "\$(hostname)"
+  printf 'hostname=%s\n' "\$(python3 $ROOT/scripts/machine_provenance.py host-label)"
   printf 'cwd=%s\n' "\$(pwd)"
-  printf 'boot_id=%s\n' "\$(cat /proc/sys/kernel/random/boot_id)"
+  printf 'boot_id=%s\n' "\$(python3 $ROOT/scripts/machine_provenance.py boot-label)"
   printf 'uptime=%s\n' "\$(cat /proc/uptime)"
   $WORK/bin/inside.sh tip4p "\$n" 0 "\$budget" "\$seed" recommended "\$stop" "\$prefix"
 } > "\$log" 2>&1

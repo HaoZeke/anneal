@@ -27,6 +27,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
+    host_label,
     machine_columns,
     machine_fieldnames,
     read_built_gmin_provenance,
@@ -371,7 +372,7 @@ def panel(
     head = subprocess.run(
         ["git", "-C", str(root), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
     ).stdout.strip()
-    host = os.uname().nodename
+    host = host_label(os.uname().nodename)
     machine = machine_columns()
     rows: list[dict[str, str]] = []
     for system in SYSTEMS:

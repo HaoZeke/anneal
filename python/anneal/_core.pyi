@@ -562,6 +562,7 @@ class Config:
     restart_on_stall: bool
     restart_patience: int
     branch_on_stall: bool
+    polish_on_improve: bool
     jump_on_stall: bool
     jump_patience: int
     jump_steps: int
@@ -1065,6 +1066,7 @@ def cluster_search(
     communicating: bool = False,
     *,
     ras: bool = False,
+    branch_on_stall: bool = False,
     start: npt.NDArray[np.float64] | None = None,
     length_scale: float | None = None,
     energy_scale: float | None = None,
@@ -1081,6 +1083,7 @@ def cluster_search(
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
     config: Config | None = None,
+    polish_on_improve: bool | None = None,
 ) -> dict[str, Any]: ...
 def quench(
     fg_fn: Callable[[npt.NDArray[np.float64]], tuple[float, Sequence[float]]] | _NativeClusterPotential,

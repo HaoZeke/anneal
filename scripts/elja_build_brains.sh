@@ -3,7 +3,7 @@
 # Occupancy tests and per-replica brain build via `pixi run -e cluster`.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_build_brains.sh: run under srun, not on $(hostname)" >&2
+  echo "elja_build_brains.sh: run under srun, not directly" >&2
   exit 1
 fi
 ROOT=${LJ_ROOT:-$HOME/anneal-occ-brains}
@@ -32,7 +32,7 @@ if [[ ! -d .pixi/envs/cluster ]]; then
   echo "missing .pixi/envs/cluster; run pixi install -e cluster first" >&2
   exit 1
 fi
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 echo "source=$(cat SOURCE_COMMIT)"
 echo "pixi=$($PIXI --version)"
 echo "rustc=$($PIXI run -e cluster rustc --version)"

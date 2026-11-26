@@ -64,7 +64,7 @@ export RAYON_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 export LJ_BOARD_ROOT=results/lj-board
 cd $ROOT
-host=\$(cat /proc/sys/kernel/hostname)
+host=\$(python3 $ROOT/scripts/machine_provenance.py host-label)
 if [ "\$host" != bench ]; then
   echo "uts hostname is not bench" >&2
   exit 2

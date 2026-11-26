@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Summarise the Gupta gold rows in bench/gold-gupta/seeds.csv.
+"""Summarize the Gupta gold rows in bench/gold-gupta/seeds.csv.
 
 Medians are Hyndman–Fan type 7. Inside and outside microseconds are the
 median of the per-seed rates, ``1e6 * seconds / charged``. ``code_revision``
@@ -8,12 +8,11 @@ is the tree the row was annealed on; older rows store that in ``revision``.
 ``host`` is the UTS hostname. Rows are never overwritten.
 
 On ``351152695c97`` all twelve Au75 seeds, including 2007, reach
-−263.27183577 and all twelve Au98 seeds reach −345.98489186. Seed 2007
-used to stop at −263.04663180. Routing a physical bond off the
-reduced-unit fivefold SOAP residual and onto the observed-cloud
-residual leaves that minimum where it is and moves the time outside
-the potential from about 12 s to about 551 s, so that change is not in
-this tree.
+−263.27183577 and all twelve Au98 seeds reach −345.98489186. Routing a
+physical bond off the reduced-unit fivefold SOAP residual and onto the
+observed-cloud residual leaves those minima where they are and moves
+the time outside the potential from about 12 s to about 551 s, so this
+tree does not route bonds that way.
 """
 
 from __future__ import annotations

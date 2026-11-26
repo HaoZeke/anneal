@@ -30,10 +30,42 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import h2h_common as hc  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from bench_host import host_label as openconf_host  # noqa: E402
+from machine_provenance import host_label  # noqa: E402
 
 # A recorded minimum of a molecular search is at 5e-2 eV/Å.
 RECORD_GRADIENT = 5.0e-2
+
+
+def charged_value_gradient_calls(counts: dict) -> int:
+    """Potential-call units: every energy and every gradient evaluation."""
+    try:
+        energy = int(counts["energy_calls"])
+        gradient = int(counts["grad_calls"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("energy_calls and grad_calls are required") from error
+    if energy < 0 or gradient < 0:
+        raise ValueError("energy_calls and grad_calls must be non-negative")
+    return energy + gradient
+
+
+def oracle_calls_of(result: dict, harvest_calls: int) -> int:
+    """Oracle evaluations for one anneal or develop run.
+
+    A ledger ``spent`` of zero is present. A develop search has no
+    ledger, so the count is ``harvest_calls``. A together return is one
+    evaluation. That matches ``spent`` when the run charges no lattice
+    pair rows. An atomic lattice run charges those rows on the ledger
+    and the harvest never sees them, so ``spent`` is larger by the
+    lattice counter. ``energy_calls + grad_calls`` is about twice a
+    together return and is not the fallback.
+    """
+    ledger = result.get("ledger") if isinstance(result.get("ledger"), dict) else None
+    spent = None if ledger is None else ledger.get("spent")
+    if spent is None:
+        return int(harvest_calls)
+    return int(spent)
 
 
 class Harvest:
@@ -41,8 +73,10 @@ class Harvest:
 
     A quench ends where its gradient first stays under the record gate; the
     next evaluation above the gate is a new proposal or a new quench.
-    ``found`` holds, per minimum, the energy plus gradient calls made up to
-    and including the gradient call that recorded it.
+    ``found`` holds, per minimum, the oracle evaluations up to and including
+    the gradient that recorded it. An energy and a gradient on the same
+    point are one evaluation. A gradient with no matching energy, or an
+    energy with no matching gradient, is its own evaluation.
     """
 
     def __init__(self, gate: float) -> None:
@@ -50,15 +84,24 @@ class Harvest:
         self.minima: list[tuple[np.ndarray, float]] = []
         self.found: list[int] = []
         self.calls = 0
+        self.callbacks = 0
         self._run: tuple[np.ndarray, float, int] | None = None
         self._last: tuple[bytes, float] | None = None
+        self._pair_open = False
 
     def energy(self, x: np.ndarray, e: float) -> None:
+        self.callbacks += 1
         self.calls += 1
+        self._pair_open = True
         self._last = (x.tobytes(), e)
 
     def gradient(self, x: np.ndarray, g: np.ndarray) -> None:
-        self.calls += 1
+        self.callbacks += 1
+        if self._pair_open and self._last is not None and self._last[0] == x.tobytes():
+            self._pair_open = False
+        else:
+            self.calls += 1
+            self._pair_open = False
         if self._last is None or self._last[0] != x.tobytes():
             return
         e = self._last[1]
@@ -89,6 +132,7 @@ def write_trace(path: Path, symbols: list[str], frames: list[tuple[np.ndarray, f
 
 def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | None = None) -> dict:
     import anneal
+    import h2h_common as hc
 
     mol = hc.build_mol(row["smiles"])
     z = [atom.GetAtomicNum() for atom in mol.GetAtoms()]
@@ -139,14 +183,20 @@ def run_anneal(row: dict, seed: int, budget: int, out: Path, local_step: str | N
         found.append(harvest.calls)
     hc.write_xyz(out / "candidates.xyz", hc.symbols(mol), frames)
     write_trace(out / "trace.xyz", hc.symbols(mol), [(x, e, c) for (x, e), c in zip(frames, found, strict=True)])
+    oracle_calls = oracle_calls_of(result, harvest.calls)
     return {
-        "callback_calls": harvest.calls,
+        "callback_calls": harvest.callbacks,
+        "oracle_calls": oracle_calls,
         "error": error,
         "wall_s": wall,
         **counts,
+        "charged_calls": charged_value_gradient_calls(counts),
         "budget": budget,
+        "call_budget": budget,
         "hops": result.get("hops"),
         "accepted": result.get("accepted"),
+        "ledger": result.get("ledger"),
+        "branch_on_stall": result.get("branch_on_stall"),
         "best_kcal": float(result["best_energy"]) * hc.KCAL_PER_EV if error is None else None,
         "candidates": len(frames),
         "groups": len(groups),
@@ -176,6 +226,7 @@ def _pin_mmff94():
 
 
 def _phase_embedding():
+    import h2h_common as hc
     from rdkit.Chem import AllChem
 
     for name in ("EmbedMultipleConfs", "EmbedMolecule"):
@@ -190,6 +241,7 @@ def _phase_embedding():
 
 def _trace_pool(trace: list[tuple[np.ndarray, float, int]]):
     """Record every conformer offered to openconf's pool, with the calls spent so far."""
+    import h2h_common as hc
     from openconf.pool import ConformerPool
 
     insert = ConformerPool.insert
@@ -197,13 +249,15 @@ def _trace_pool(trace: list[tuple[np.ndarray, float, int]]):
     def traced(self, conf_id, energy, *args, **kwargs):
         counts = hc.counter().read()
         x = self.mol.GetConformer(int(conf_id)).GetPositions()
-        trace.append((x, float(energy), counts["energy_calls"] + counts["grad_calls"]))
+        trace.append((x, float(energy), charged_value_gradient_calls(counts)))
         return insert(self, conf_id, energy, *args, **kwargs)
 
     ConformerPool.insert = traced
 
 
 def run_openconf(row: dict, seed: int, out: Path) -> dict:
+    import h2h_common as hc
+
     _pin_mmff94()
     _phase_embedding()
     trace: list[tuple[np.ndarray, float, int]] = []
@@ -238,6 +292,7 @@ def run_openconf(row: dict, seed: int, out: Path) -> dict:
     return {
         "wall_s": wall,
         **counts,
+        "charged_calls": charged_value_gradient_calls(counts),
         "candidates": len(frames),
         "trace_frames": len(trace),
         "best_kcal": min((e for _, e in frames), default=float("nan")),
@@ -252,6 +307,8 @@ _RUNTIME = re.compile(r"CREST runtime \(total\)\s+(\d+) d,\s+(\d+) h,\s+(\d+) mi
 
 
 def run_crest(row: dict, seed: int, out: Path, crest: str) -> dict:
+    import h2h_common as hc
+
     mol = hc.build_mol(row["smiles"])
     x0 = hc.embed(mol, seed)
     hc.write_xyz(out / "start.xyz", hc.symbols(mol), [(x0, 0.0)])
@@ -279,7 +336,7 @@ def run_crest(row: dict, seed: int, out: Path, crest: str) -> dict:
         for sym, x, comment in hc.read_xyz(ensemble):
             if sym != want:
                 raise RuntimeError("CREST reordered atoms")
-            frames.append((x, float(comment.split()[0]) * 627.509474))
+            frames.append((x, float(comment.split()[0]) * hc.HARTREE_KCAL))
         hc.write_xyz(out / "candidates.xyz", want, frames)
     for name in ("MDFILES", "crest_dynamics.trj", "crest_rotamers_0.xyz", "crest_rotamers_1.xyz"):
         path = out / name
@@ -314,6 +371,8 @@ def main() -> int:
     parser.add_argument("--local-step", choices=["lbfgs", "tric", "auto"], help="anneal quench; default the preset's")
     parser.add_argument("--anneal-path", type=Path, help="import anneal from this directory first (the develop arm)")
     args = parser.parse_args()
+    import h2h_common as hc
+
     row = hc.molecules()[args.molecule]
     args.out.mkdir(parents=True, exist_ok=True)
     if args.arm == "develop" and args.anneal_path is None:
@@ -335,7 +394,8 @@ def main() -> int:
         arm=args.arm,
         molecule=args.molecule,
         seed=args.seed,
-        hostname=os.uname().nodename,
+        host=openconf_host(),
+        hostname=host_label(),
     )
     if info.get("pot_s") is not None:
         info["outside_s"] = max(info["wall_s"] - info["pot_s"], 0.0)

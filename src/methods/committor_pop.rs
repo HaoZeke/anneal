@@ -91,7 +91,7 @@ pub fn committor_population(
                 .expect("finite start");
             segments += 1;
             nve_unavailable |= out.nve_unavailable;
-            if !ledger.charge_many(sub.spent()) {
+            if !ledger.absorb_charges(&sub) {
                 // The slice overran the remaining budget; the overrun is
                 // charged and the loop ends on the next check.
             }

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright (c) anneal developers
-"""Summarise a cooperative LJ campaign written by elja_coop_lj.sh.
+"""Summarize a cooperative LJ campaign written by elja_coop_lj.sh.
 
 Usage: coop_summarize.py <campaign-dir> [target-energy] [tolerance]
 

@@ -4,7 +4,7 @@
 Crest cost is the energy and gradient total in the crest log.
 Anneal cost is the search ledger plus the polish ledger, plus the
 reported-geometry evaluation when that line is present.
-A missing total is left blank. This script does not print wall time.
+A total that the log does not carry is left blank. This script does not print wall time.
 """
 
 import re

@@ -6,10 +6,13 @@ set -eu
 here=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 sh "$here/check_message_newlines.sh"
 if [ $# -ge 1 ]; then
-  python3 - "$1" << 'PY'
+  python3 - "$1" "$here/../../../scripts" << 'PY'
 import hashlib
 import sys
 from pathlib import Path
+
+sys.path.insert(0, sys.argv[2])
+import revision_reach
 
 root = Path(sys.argv[1])
 bundle = root / "series.bundle"
@@ -93,7 +96,7 @@ if fields["OUTER"] != sums_sha:
     raise SystemExit("STORE_READY OUTER is not sha256 of SHA256SUMS")
 if fields["BUNDLE_SHA256"] != bundle_sha:
     raise SystemExit("STORE_READY BUNDLE_SHA256 is not the bundle sha")
-if len(fields["TIP"]) != 40 or len(fields["TREE"]) != 40:
+if not (revision_reach.is_full_sha(fields["TIP"]) and revision_reach.is_full_sha(fields["TREE"])):
     raise SystemExit("STORE_READY tip or tree is not a sha")
 print("seal order ok")
 PY

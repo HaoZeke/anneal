@@ -30,6 +30,7 @@ from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     gmin_row_key,
+    host_label,
     machine_columns,
     read_built_gmin_provenance,
     require_csv_schema,
@@ -763,7 +764,7 @@ def campaign(
     svnrev_path: Path | None = None,
     gmin_source_path: Path | None = None,
 ) -> None:
-    if socket.gethostname() != "bench":
+    if host_label(socket.gethostname()) != "bench":
         raise SystemExit("refusing to run unless the hostname is bench")
     resolved_svnrev = svnrev_path or Path(
         os.environ.get("GMIN_SVNREV_FILE", "/work/gmin-h2h/src/wales/GMIN/source/SVNREV")
@@ -780,7 +781,7 @@ def campaign(
         ["git", "-C", str(ROOT), "-c", "core.hooksPath=/dev/null", "rev-parse", "HEAD"],
         text=True,
     ).strip()
-    host = socket.gethostname()
+    host = host_label(socket.gethostname())
     rows: list[dict[str, str]] = []
     require_csv_schema(seeds_path, SEED_FIELDS)
     if seeds_path.is_file():

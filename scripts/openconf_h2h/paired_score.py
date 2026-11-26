@@ -10,9 +10,10 @@ run:
 
 - ``hit``: one of the run's reported conformers is the lowest reference
   conformer (heavy-atom RMSD under 0.25 Å, energy within 0.5 kcal/mol)
-- ``calls_to_hit``: energy plus gradient calls spent when the run's trace
-  first held a minimum that polishes to that conformer; the run's total
-  when only its final output does
+- ``calls_to_hit``: oracle evaluations spent when the run's trace first
+  held a minimum that polishes to that conformer. A together return
+  counts once. Separate energy and gradient calls each count. A hit
+  without that trace count is rejected
 - ``n_3kcal``: distinct conformers within 3 kcal/mol of E_ref
 - ``error``: the exception a run raised; it is scored on what it harvested
 
@@ -22,6 +23,17 @@ Fisher's exact test on hits and the Mann-Whitney U test on calls to hit
 (normal approximation with the tie and continuity corrections at every
 sample size), both two-sided, anneal against openconf in ``--stats`` and
 anneal against develop in ``--versus-develop``.
+
+``calls`` is one count for both codes. An energy and a gradient returned
+together are one evaluation. Separate energy and gradient calls are two.
+An anneal job records that count as ``oracle_calls``. Openconf requests
+energy and gradient separately, so its count stays ``energy_calls +
+grad_calls``. ``budget`` retains the anneal driver's search budget.
+When ``oracle_calls`` is present that budget is already in oracle units,
+so ``call_budget`` equals it. A legacy ``job.json`` with no
+``oracle_calls`` is still scored as ``energy_calls + grad_calls``, and
+its allowance stays twice the search-point budget. A ``charged_calls``
+field is not that count.
 """
 
 from __future__ import annotations
@@ -34,17 +46,20 @@ import statistics
 import sys
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
-from scipy.stats import fisher_exact, mannwhitneyu
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import h2h_common as hc  # noqa: E402
-from h2h_score import WINDOW, Molecule, _fmt  # noqa: E402
+from bench_host import run_host  # noqa: E402
+
+if TYPE_CHECKING:
+    from h2h_score import Molecule
 
 ARMS = ("anneal", "openconf", "develop")
 ROW_FIELDS = [
-    "molecule", "arm", "seed", "budget", "calls", "energy_calls", "grad_calls", "hit", "calls_to_hit",
+    "molecule", "arm", "seed", "budget", "call_budget", "calls", "energy_calls", "grad_calls",
+    "hit", "hit_mirror", "calls_to_hit",
     "delta_min_kcal", "n_3kcal", "reference_3kcal", "candidates", "invalid", "wall_s", "pot_s",
     "outside_s", "embed_s", "e_ref_kcal", "error", "openconf_revision", "code_revision", "host",
 ]
@@ -55,6 +70,9 @@ _MOLS: dict[str, Molecule] = {}
 
 def _molecule(name: str) -> Molecule:
     if name not in _MOLS:
+        import h2h_common as hc
+        from h2h_score import Molecule
+
         _MOLS[name] = Molecule(hc.molecules()[name])
     return _MOLS[name]
 
@@ -64,6 +82,8 @@ def polished_frames(name: str, job_dir: Path) -> tuple[np.ndarray, np.ndarray, n
     if cache.is_file():
         data = np.load(cache)
         return data["x"], data["e"], data["ok"]
+    import h2h_common as hc
+
     m = _molecule(name)
     path = job_dir / "candidates.xyz"
     frames = hc.read_xyz(path) if path.is_file() else []
@@ -85,6 +105,8 @@ def first_hit(name: str, arm: str, job_dir: Path, lowest: tuple[np.ndarray, floa
     An anneal arm's trace holds the same frames as its candidates, so their
     polished geometries are reused.
     """
+    import h2h_common as hc
+
     m = _molecule(name)
     path = job_dir / "trace.xyz"
     if not path.is_file():
@@ -101,11 +123,72 @@ def first_hit(name: str, arm: str, job_dir: Path, lowest: tuple[np.ndarray, floa
     return None
 
 
+def required_charged_calls(info: dict) -> int:
+    """Count every potential evaluation from old or new job records."""
+    try:
+        energy = int(info["energy_calls"])
+        gradient = int(info["grad_calls"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(
+            "job.json needs valid energy_calls and grad_calls; "
+            "rescore legacy jobs without adding charged_calls"
+        ) from error
+    if energy < 0 or gradient < 0:
+        raise ValueError("job.json energy_calls and grad_calls must be non-negative")
+    oracle = info.get("oracle_calls")
+    if oracle is None:
+        return energy + gradient
+    try:
+        oracle = int(oracle)
+    except (TypeError, ValueError) as error:
+        raise ValueError("job.json oracle_calls must be an integer") from error
+    if oracle < 0:
+        raise ValueError("job.json oracle_calls must be non-negative")
+    return oracle
+
+
+def call_budget(info: dict, calls: int) -> int:
+    """Allowance in the same unit as ``calls``.
+
+    A job that records ``oracle_calls`` is in oracle units, including
+    when that count is zero. Its allowance is the search budget. A
+    stored allowance of twice the budget is the older separate-call
+    unit and is not used for that job. A legacy job with only
+    ``budget`` keeps twice that figure.
+    """
+    if info.get("oracle_calls") is not None and info.get("budget") is not None:
+        value = int(info["budget"])
+    elif info.get("call_budget") is not None:
+        value = int(info["call_budget"])
+    elif info.get("budget") is not None:
+        value = 2 * int(info["budget"])
+    else:
+        value = calls
+    if value < 0:
+        raise ValueError("job.json call budget must be non-negative")
+    return value
+
+
+def required_first_hit(job_dir: Path, calls_to_hit: int | None, calls: int) -> int:
+    """Validate a hit's trace count without substituting its run total."""
+    if calls_to_hit is None:
+        raise ValueError(f"{job_dir}: hit has no first-hit trace count")
+    if calls_to_hit > calls:
+        raise ValueError(
+            f"{job_dir}: calls_to_hit {calls_to_hit} exceeds charged_calls {calls}"
+        )
+    return calls_to_hit
+
+
 def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
     done = set()
     if rows_path.is_file():
+        existing_fields(rows_path)
         with rows_path.open(newline="") as handle:
             done = {(r["molecule"], r["arm"], int(r["seed"])) for r in csv.DictReader(handle)}
+    import h2h_common as hc
+    from h2h_score import WINDOW, _fmt
+
     mols = {name: _molecule(name) for name in hc.molecules()}
     infos = [(path.parent, json.loads(path.read_text())) for path in sorted(runs.glob("*/*/*/job.json"))]
     infos = [(job_dir, info) for job_dir, info in infos if info["arm"] in ARMS]
@@ -148,12 +231,17 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
             key = (name, info["arm"], int(info["seed"]))
             if info["molecule"] != name or key in done:
                 continue
-            calls = int(info["energy_calls"]) + int(info["grad_calls"])
+            calls = required_charged_calls(info)
+            calls_budget = call_budget(info, calls)
+            if info["arm"] in ("anneal", "develop") and calls > calls_budget:
+                raise ValueError(
+                    f"{job_dir}: calls {calls} exceeds call_budget {calls_budget}"
+                )
             hit = any(m.same(lowest, item) for item in mine)
+            hit_mirror = hit or any(m.same_or_mirror(lowest, item) for item in mine)
             to_hit = None
             if hit:
-                to_hit = trace_hit[job_dir]
-                to_hit = calls if to_hit is None else min(to_hit, calls)
+                to_hit = required_first_hit(job_dir, trace_hit[job_dir], calls)
             window = [item for item in mine if item[1] - e_ref <= WINDOW]
             new.append(
                 {
@@ -161,10 +249,12 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
                     "arm": info["arm"],
                     "seed": int(info["seed"]),
                     "budget": info.get("budget"),
+                    "call_budget": calls_budget,
                     "calls": calls,
                     "energy_calls": info["energy_calls"],
                     "grad_calls": info["grad_calls"],
                     "hit": int(hit),
+                    "hit_mirror": int(hit_mirror),
                     "calls_to_hit": to_hit,
                     "delta_min_kcal": (min(e for _, e in mine) - e_ref) if mine else None,
                     "n_3kcal": len(window),
@@ -179,17 +269,38 @@ def score_runs(runs: Path, rows_path: Path, workers: int) -> None:
                     "error": info.get("error"),
                     "openconf_revision": info.get("openconf_revision"),
                     "code_revision": info.get("code_revision"),
-                    "host": info["hostname"],
+                    "host": run_host(info),
                 }
             )
     fresh = not rows_path.is_file()
     rows_path.parent.mkdir(parents=True, exist_ok=True)
     with rows_path.open("a", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
+        fields = ROW_FIELDS if fresh else existing_fields(rows_path)
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
         if fresh:
             writer.writeheader()
         for row in sorted(new, key=lambda r: (r["molecule"], r["arm"], r["seed"])):
-            writer.writerow({k: _fmt(row.get(k)) for k in ROW_FIELDS})
+            writer.writerow({k: _fmt(row.get(k)) for k in fields})
+
+
+def existing_fields(rows_path: Path) -> list[str]:
+    """Return the exact current header or reject an incompatible rows file."""
+    with rows_path.open(newline="") as handle:
+        fields = next(csv.reader(handle))
+    if fields != ROW_FIELDS:
+        raise ValueError(
+            f"{rows_path}: CSV header mismatch; "
+            f"expected {','.join(ROW_FIELDS)}, got {','.join(fields)}"
+        )
+    return fields
+
+
+def mirror_hits(group: list[dict]) -> str:
+    """``hits_mirror`` of a group; empty when the rows predate the column."""
+    marks = [r.get("hit_mirror", "") for r in group]
+    if any(m in ("", None) for m in marks):
+        return ""
+    return f"{sum(int(m) for m in marks)}/{len(group)}"
 
 
 def _num(value: str) -> float | None:
@@ -197,11 +308,14 @@ def _num(value: str) -> float | None:
 
 
 def summarise(rows_path: Path, summary_path: Path, stats_path: Path, versus_path: Path | None = None) -> None:
+    import h2h_common as hc
+    from h2h_score import _fmt
+
     with rows_path.open(newline="") as handle:
         rows = list(csv.DictReader(handle))
     order = [name for name in hc.molecules() if any(r["molecule"] == name for r in rows)]
     summary_fields = [
-        "molecule", "arm", "n", "hits", "n_3kcal_median", "reference_3kcal", "calls_median",
+        "molecule", "arm", "n", "hits", "hits_mirror", "n_3kcal_median", "reference_3kcal", "calls_median",
         "calls_to_hit_median", "delta_min_median_kcal", "wall_median_s", "pot_median_s",
         "outside_median_s", "pot_share", "invalid_total", "errors",
     ]
@@ -227,6 +341,7 @@ def summarise(rows_path: Path, summary_path: Path, stats_path: Path, versus_path
                         "arm": arm,
                         "n": len(group),
                         "hits": f"{sum(int(r['hit']) for r in group)}/{len(group)}",
+                        "hits_mirror": mirror_hits(group),
                         "n_3kcal_median": _fmt(med(group, "n_3kcal")),
                         "reference_3kcal": group[-1]["reference_3kcal"],
                         "calls_median": _fmt(med(group, "calls")),
@@ -246,6 +361,9 @@ def summarise(rows_path: Path, summary_path: Path, stats_path: Path, versus_path
 
 
 def write_stats(path: Path, order: list[str], by: dict, other: str) -> None:
+    from scipy.stats import fisher_exact, mannwhitneyu
+    from h2h_score import _fmt
+
     fields = [
         "molecule", "hits_anneal", f"hits_{other}", "fisher_odds_ratio", "fisher_p",
         "hit_runs_anneal", f"hit_runs_{other}", "mannwhitney_u", "mannwhitney_p",

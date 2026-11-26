@@ -13,14 +13,14 @@ bin=$2
 mkdir -p "$work/logs" "$work/requench" "$work/receipts"
 if [[ ! -f $work/receipts/before-first-search.txt ]]; then
   date '+%Y-%m-%dT%H:%M:%S%z' > "$work/receipts/before-first-search.txt"
-  hostname > "$work/receipts/uts.txt"
+  python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label > "$work/receipts/uts.txt"
   lscpu > "$work/receipts/lscpu.txt"
   cat /proc/loadavg > "$work/receipts/load-at-start.txt"
   echo "pin=0" > "$work/receipts/affinity.txt"
 fi
 header() {
   echo "start=$(date '+%Y-%m-%dT%H:%M:%S%z')"
-  echo "uts=$(hostname)"
+  echo "uts=$(python3 "$(dirname "$0")/../../../scripts/machine_provenance.py" host-label)"
   echo "load=$(cat /proc/loadavg)"
   echo "affinity=$(taskset -pc $$)"
   echo "pin=0"

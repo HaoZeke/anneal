@@ -15,6 +15,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+PINNED_TOOLCHAIN = "1.88.0"
+NIGHTLY_TOOLCHAIN = "nightly-2026-11-01"
+COVERAGE_TOOLCHAINS = (PINNED_TOOLCHAIN, NIGHTLY_TOOLCHAIN)
+
 
 def version(toolchain: str, tool: str) -> str:
     return subprocess.check_output(
@@ -56,15 +60,13 @@ def main(argv: list[str] | None = None) -> int:
     out = Path(args[2])
     out.mkdir(parents=True, exist_ok=True)
     wanted = [line.strip() for line in Path(args[3]).read_text().splitlines() if line.strip()]
-    pinned = "1.88.0"
-    nightly = "nightly-2026-11-01"
     header = [
-        f"rustc_188 {version(pinned, 'rustc')}",
-        f"cargo_188 {version(pinned, 'cargo')}",
-        f"rustc_nightly {version(nightly, 'rustc')}",
-        f"cargo_nightly {version(nightly, 'cargo')}",
+        f"rustc_188 {version(PINNED_TOOLCHAIN, 'rustc')}",
+        f"cargo_188 {version(PINNED_TOOLCHAIN, 'cargo')}",
+        f"rustc_nightly {version(NIGHTLY_TOOLCHAIN, 'rustc')}",
+        f"cargo_nightly {version(NIGHTLY_TOOLCHAIN, 'cargo')}",
         "branch_flag -Zcoverage-options=branch",
-        "branch_toolchain nightly-2026-11-01",
+        f"branch_toolchain {NIGHTLY_TOOLCHAIN}",
     ]
     for name in wanted:
         line = lines.get(name)

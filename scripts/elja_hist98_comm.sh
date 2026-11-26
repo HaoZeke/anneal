@@ -4,7 +4,7 @@
 # Same split as the orbit98 shared-history table (private 10/48, shared 10/48).
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "elja_hist98_comm.sh: run under sbatch, not on $(hostname)" >&2
+  echo "elja_hist98_comm.sh: run under sbatch, not directly" >&2
   exit 1
 fi
 ROOT=${ANNEAL_ROOT:-$HOME/build/anneal-hunt}
@@ -24,7 +24,7 @@ export HISTORY=${HISTORY:-shared}
 export HISTORY_POLICY=${HISTORY_POLICY:-accepted}
 OUT=${COMM_OUT:-$ROOT/hist98-comm}
 mkdir -p "$OUT"
-echo "host=$(hostname) job=$SLURM_JOB_ID seed=$SEED_OFFSET replicas=$HISTORY_REPLICAS"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID seed=$SEED_OFFSET replicas=$HISTORY_REPLICAS"
 echo "RUN $BIN 98 16000000 1 comm"
 "$BIN" 98 16000000 1 comm | tee "$OUT/seed${SEED_OFFSET}.out"
 if grep -q SOLVED "$OUT/seed${SEED_OFFSET}.out"; then

@@ -37,15 +37,20 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use anneal_core::catalog::molecular::{bohr_angstrom, hartree_ev};
 use anneal_core::energy_hits;
 use eindir_core::gradient::DifferentiableObjective;
 use ndarray::ArrayView1;
 use rgpot_eindir::{OVERLAP_SEPARATION_A, RgpotObjective};
 use water_oh_wall::{OH_WALL_EV_PER_A2, OH_WALL_ONSET_A, oh_wall};
 
-/// xtb 6.7.1 conversion factors, so the driver round-trips xtb's own units.
-const AUTOEV: f64 = 27.21138505;
-const AUTOAA: f64 = 0.52917726;
+/// Bohr in angstroms (CODATA 2018), matching rgpot::units and readcon-core.
+/// The driver converts `$coord` with this factor on entry and divides by it
+/// on exit, so coordinates round-trip to xtb and match rgpot's Bohr/Angstrom
+/// boundary identically.
+fn autoaa() -> f64 {
+    bohr_angstrom()
+}
 
 const STATUS_OK: u8 = 0;
 const STATUS_REFUSED: u8 = 1;
@@ -95,11 +100,12 @@ fn read_coord(path: &Path) -> (Vec<String>, Vec<f64>) {
         }
         let parts: Vec<&str> = line.split_whitespace().collect();
         assert!(parts.len() >= 4, "{}: short coord line", path.display());
+        let bohr_a = autoaa();
         for value in &parts[..3] {
             let bohr: f64 = value
                 .parse()
                 .unwrap_or_else(|_| panic!("{}: bad coordinate", path.display()));
-            coords.push(bohr * AUTOAA);
+            coords.push(bohr * bohr_a);
         }
         symbols.push(parts[3].to_string());
     }
@@ -149,14 +155,31 @@ struct Served {
 }
 
 fn serve(socket: &Path, rundir: &Path, molecules: usize, budget: u64, target: f64) {
-    fs::create_dir_all(rundir).expect("rundir");
-    let _ = fs::remove_file(socket);
-    let _ = fs::remove_file(rundir.join("stop"));
     let atmnrs: Vec<i32> = (0..molecules).flat_map(|_| [8, 1, 1]).collect();
     let box_ = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
     let mut pot = RgpotObjective::xtb_with_overlap_limit(&atmnrs, box_, OVERLAP_SEPARATION_A);
     pot.restart();
-    let dim = 3 * atmnrs.len();
+    serve_with(socket, rundir, molecules, budget, target, |coords| {
+        let (energy, gradient) = pot.wrapper().value_and_gradient(ArrayView1::from(coords));
+        (energy, gradient.iter().copied().collect())
+    });
+}
+
+fn serve_with<F>(
+    socket: &Path,
+    rundir: &Path,
+    molecules: usize,
+    budget: u64,
+    target: f64,
+    mut eval: F,
+) where
+    F: FnMut(&[f64]) -> (f64, Vec<f64>),
+{
+    fs::create_dir_all(rundir).expect("rundir");
+    let _ = fs::remove_file(socket);
+    let _ = fs::remove_file(rundir.join("stop"));
+    let atom_count = 3 * molecules;
+    let dim = 3 * atom_count;
     let listener = UnixListener::bind(socket).expect("bind socket");
     fs::write(rundir.join("ready"), "ready\n").expect("ready");
     let mut served = Served {
@@ -183,10 +206,9 @@ fn serve(socket: &Path, rundir: &Path, molecules: usize, budget: u64, target: f6
             continue;
         }
         let at = Instant::now();
-        let (energy, gradient) = pot.wrapper().value_and_gradient(ArrayView1::from(&coords));
+        let (energy, mut gradient) = eval(&coords);
         served.inside_ns += at.elapsed().as_nanos();
         served.calls += 1;
-        let mut gradient: Vec<f64> = gradient.iter().copied().collect();
         let finite = energy.is_finite()
             && gradient.len() == dim
             && gradient.iter().all(|value| value.is_finite());
@@ -243,7 +265,7 @@ fn serve(socket: &Path, rundir: &Path, molecules: usize, budget: u64, target: f6
     writeln!(meta, "stop: {}", served.stop_reason.unwrap_or("none")).ok();
     if !served.best_coords.is_empty() {
         let mut xyz = fs::File::create(rundir.join("best.xyz")).expect("best.xyz");
-        writeln!(xyz, "{}", atmnrs.len()).ok();
+        writeln!(xyz, "{atom_count}").ok();
         writeln!(xyz, "objective {:.10} eV", served.best).ok();
         for (index, atom) in served.best_coords.as_chunks::<3>().0.iter().enumerate() {
             let symbol = if index % 3 == 0 { "O" } else { "H" };
@@ -272,11 +294,13 @@ fn call(socket: &Path) -> i32 {
     if status[0] != STATUS_OK {
         return 1;
     }
-    let energy = read_f64s(&mut stream, 1)[0] / AUTOEV;
+    let ha_ev = hartree_ev();
+    let bohr_a = autoaa();
+    let energy = read_f64s(&mut stream, 1)[0] / ha_ev;
     let gradient = read_f64s(&mut stream, coords.len());
     let norm = gradient
         .iter()
-        .map(|value| (value * AUTOAA / AUTOEV).powi(2))
+        .map(|value| (value * bohr_a / ha_ev).powi(2))
         .sum::<f64>()
         .sqrt();
     let mut text = String::new();
@@ -287,18 +311,18 @@ fn call(socket: &Path) -> i32 {
     for (symbol, atom) in symbols.iter().zip(coords.as_chunks::<3>().0) {
         text.push_str(&format!(
             "{:22.14} {:22.14} {:22.14}      {}\n",
-            atom[0] / AUTOAA,
-            atom[1] / AUTOAA,
-            atom[2] / AUTOAA,
+            atom[0] / bohr_a,
+            atom[1] / bohr_a,
+            atom[2] / bohr_a,
             symbol.to_lowercase()
         ));
     }
     for component in gradient.as_chunks::<3>().0 {
         text.push_str(&format!(
             "{:22.13E} {:22.13E} {:22.13E}\n",
-            component[0] * AUTOAA / AUTOEV,
-            component[1] * AUTOAA / AUTOEV,
-            component[2] * AUTOAA / AUTOEV
+            component[0] * bohr_a / ha_ev,
+            component[1] * bohr_a / ha_ev,
+            component[2] * bohr_a / ha_ev
         ));
     }
     text.push_str("$end\n");
@@ -337,5 +361,98 @@ fn main() {
             );
             std::process::exit(2);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::thread;
+    use std::time::Duration;
+
+    fn send_eval(socket: &Path, coords: &[f64]) -> u8 {
+        let mut stream = UnixStream::connect(socket).expect("connect");
+        write_u64(&mut stream, coords.len() as u64);
+        write_f64s(&mut stream, coords);
+        let mut status = [0u8; 1];
+        stream.read_exact(&mut status).expect("status read");
+        if status[0] == STATUS_OK {
+            let _energy = read_f64s(&mut stream, 1);
+            let _gradient = read_f64s(&mut stream, coords.len());
+        }
+        status[0]
+    }
+
+    #[test]
+    fn driver_units_match_codata_2018_rgpot() {
+        assert_eq!(
+            autoaa().to_bits(),
+            (5.291_772_109_03e-11_f64 / 1.0e-10_f64).to_bits()
+        );
+        assert_eq!(
+            hartree_ev().to_bits(),
+            (4.359_744_722_207_1e-18_f64 / 1.602_176_634e-19_f64).to_bits()
+        );
+    }
+
+    #[test]
+    fn driver_refuses_calls_past_the_4000_cap() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket = dir.path().join("s");
+        let rundir = dir.path().join("run");
+        let evals = Arc::new(AtomicU64::new(0));
+        let server_evals = Arc::clone(&evals);
+        let server_socket = socket.clone();
+        let server_rundir = rundir.clone();
+        let handle = thread::spawn(move || {
+            serve_with(&server_socket, &server_rundir, 6, 4000, -1e9, |coords| {
+                server_evals.fetch_add(1, Ordering::SeqCst);
+                (-800.0, vec![0.0; coords.len()])
+            });
+        });
+
+        for _ in 0..200 {
+            if rundir.join("ready").is_file() {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            rundir.join("ready").is_file(),
+            "driver did not become ready"
+        );
+
+        let coords = vec![0.0; 3 * 18];
+        for step in 1..=4000 {
+            assert_eq!(
+                send_eval(&socket, &coords),
+                STATUS_OK,
+                "call {step} within budget must succeed"
+            );
+        }
+        assert_eq!(
+            fs::read_to_string(rundir.join("stop")).expect("stop file"),
+            "budget 4000\n"
+        );
+        for extra in 4001..=4005 {
+            assert_eq!(
+                send_eval(&socket, &coords),
+                STATUS_REFUSED,
+                "call {extra} past the 4000 cap must be refused"
+            );
+        }
+
+        let mut stop_stream = UnixStream::connect(&socket).expect("connect stop");
+        write_u64(&mut stop_stream, STOP_REQUEST);
+        handle.join().expect("server thread");
+
+        assert_eq!(evals.load(Ordering::SeqCst), 4000);
+        let meta = fs::read_to_string(rundir.join("driver.txt")).expect("driver.txt");
+        assert!(meta.contains("budget: 4000\n"), "{meta}");
+        assert!(meta.contains("calls: 4000\n"), "{meta}");
+        assert!(meta.contains("refused: 5\n"), "{meta}");
+        assert!(meta.contains("stop: budget\n"), "{meta}");
     }
 }

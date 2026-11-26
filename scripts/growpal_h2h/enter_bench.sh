@@ -24,6 +24,7 @@ mkdir -p "$WORK/bin" "$WORK/home" "$WORK/tmp" "$WORK/runs" \
   "$ROOT/bench/growpal-h2h/rows"
 cp -a "$HERE/run_campaign.py" "$HERE/growpal_arm.py" \
   "$ROOT/scripts/target_tol.py" "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 chmod +x "$WORK/bin/h2h_gmin_proof"
 
 cat > "$WORK/bin/inside.sh" << EOF

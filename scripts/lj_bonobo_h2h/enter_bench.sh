@@ -51,6 +51,7 @@ cp -a "$BONOBO_SRC/bo.py" "$BONOBO_SRC/lbfgs_opt.py" "$BONOBO_SRC/lj.py" \
 cp -a "$HERE/bonobo_arm.py" "$HERE/run_campaign.py" "$HERE/pyar_tabu_seed.py" \
   "$HERE/faithful_rerun.sh" "$ROOT/scripts/target_tol.py" \
   "$ROOT/scripts/machine_provenance.py" "$WORK/bin/"
+python3 "$ROOT/scripts/stage_python.py" "$WORK/bin/" --from "$HERE" --from "$ROOT/scripts"
 chmod +x "$WORK/bin/faithful_rerun.sh"
 cp -a "$BINARY" "$WORK/bin/lj_lean_relax_budget"
 cat > "$WORK/bin/pyar-tabu" << EOF

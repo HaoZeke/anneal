@@ -26,11 +26,13 @@ cp "$START" "$WORK/start.xyz"
     > crest.out 2> crest.err
   echo $? > crest.exit
 )
-python3 - "$WORK" "$DEST" "$XTB" << 'PY'
+PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 - "$WORK" "$DEST" "$XTB" << 'PY'
 import os, subprocess, sys
 from pathlib import Path
+from codata2018 import HARTREE_EV
+
 work, dest, xtb = map(Path, sys.argv[1:])
-hartree = 27.211386245988
+hartree = HARTREE_EV
 
 def vtight(xyz: Path) -> float:
     folder = xyz.parent / ("score-" + xyz.stem)

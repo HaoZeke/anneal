@@ -37,6 +37,7 @@ for _candidate in (Path(__file__).resolve().parent, Path(__file__).resolve().par
         break
 from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
+    host_label,
     machine_columns,
     read_built_gmin_provenance,
     require_csv_schema,
@@ -372,7 +373,7 @@ def summarise(rows, references, revision, heads):
                     "gmin_revision": revision,
                     "anneal_head": heads[ANNEAL.get(code, ("binary",))[0]],
                     "code_revision": heads[ANNEAL[code][0]] if code in ANNEAL else revision if code in GMIN else heads["binary"],
-                    "host": os.uname().nodename,
+                    "host": host_label(os.uname().nodename),
                     "machine_id": ";".join(
                         sorted({row["machine_id"] for row in group})
                     ),
@@ -465,7 +466,7 @@ def main(argv: list[str]) -> int:
     if len(argv) == 2 and argv[1] == "--self-test":
         self_test()
         return 0
-    if os.uname().nodename != "bench":
+    if host_label(os.uname().nodename) != "bench":
         print("uts hostname is not bench", file=sys.stderr)
         return 2
     parser = argparse.ArgumentParser()
@@ -595,7 +596,7 @@ def main(argv: list[str]) -> int:
         row = normalise(raw)
         row["code_revision"] = expected_rev
         row["gmin_build_key"] = expected_build_key
-        row["host"] = os.uname().nodename
+        row["host"] = host_label(os.uname().nodename)
         row.update(machine)
         write_csv(saved, ROW_FIELDS, [row])
         rows.append(row)

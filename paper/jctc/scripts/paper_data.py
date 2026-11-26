@@ -13,7 +13,7 @@ _FETCHED: set[str] = set()
 
 
 def fetch_paper_data(paths: list[str] | None = None) -> None:
-    """Run scripts/data/fetch_data.py once in this process, for every manifest file or the named ones.
+    """Run scripts/data/fetch_data.py once in this process, for every paper/jctc manifest file or the named ones.
 
     Paths are relative to the repository root, as data/hf-files.csv lists them.
     """
@@ -25,7 +25,7 @@ def fetch_paper_data(paths: list[str] | None = None) -> None:
         return
     repo = Path(__file__).resolve().parents[3]
     script = repo / "scripts" / "data" / "fetch_data.py"
-    subprocess.run([sys.executable, str(script), *(wanted or [])], check=True)
+    subprocess.run([sys.executable, str(script), *(wanted or ["paper/jctc/"])], check=True)
     if wanted is None:
         _DONE = True
     else:

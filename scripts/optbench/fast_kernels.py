@@ -82,7 +82,7 @@ def binary_lennard_jones(species):
 
 
 def chart_to_blocks(x: np.ndarray) -> np.ndarray:
-    """GMIN's 2N chart (centres, then angle-axis vectors) to (N, 6) blocks."""
+    """GMIN's 2N chart (centers, then angle-axis vectors) to (N, 6) blocks."""
     x = np.asarray(x, dtype=np.float64).reshape(2, -1, 3)
     return np.concatenate([x[0], x[1]], axis=1)
 

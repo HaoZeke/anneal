@@ -10,7 +10,7 @@
 //! this walk.
 //!
 //! The fivefold residual uses the built-in assignment on every build
-//! (`81d6bffc`). Linking IRA no longer changes this walk, so the
+//! (`81d6bffc`). Linking IRA does not change this walk, so the
 //! feature build keeps the Hungarian record.
 //!
 //! Removing structure-specific proposals changes the LJ38 pin. LJ98's

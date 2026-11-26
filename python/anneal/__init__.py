@@ -270,6 +270,7 @@ def cluster_search(
     communicating: bool = False,
     *,
     ras: bool = False,
+    branch_on_stall: bool = False,
     start=None,
     length_scale: float | None = None,
     energy_scale: float | None = None,
@@ -286,6 +287,7 @@ def cluster_search(
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
     config: Config | None = None,
+    polish_on_improve: bool | None = None,
 ):
     """Run the measured cluster-search layer.
 
@@ -307,6 +309,7 @@ def cluster_search(
       derived: ``Config.derived(n)``; overrides ``recommended``.
       communicating: ``Config.communicating(n)``; overrides both.
       ras: residual archive search on the recommended preset.
+      branch_on_stall: run fresh-start branches after the main walk stalls.
       start: optional flat start. Cartesian length is ``3n``. A rigid or
         water start is ``6n``. When set, hops use ``search_from`` instead of
         a random compact cluster.
@@ -388,42 +391,85 @@ def cluster_search(
         on for ``recommended=True``, off otherwise.
       config: explicit ``Config`` instance; mutually exclusive with preset
         modifier arguments (mutate ``config`` directly instead).
+      polish_on_improve: polish the incumbent when a hop improves it, at the
+        component gradient tolerance, charging every evaluation. ``None``
+        keeps the preset's, which is off. A ``config`` keeps its own flag
+        when this is ``None``.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
     The best geometry found is kept, and the exception is re-raised here.
+    An opening quench that is never finite raises ``ValueError``, including
+    when ``ras=True``.
 
-    Returns:
-      When ``ras=False`` (default), a dict containing:
-      - ``best``, ``best_energy``: lowest minimum found (flat coordinates in
-        the active layout and its energy).
-      - ``final``, ``final_energy``: final chain state (``numpy.ndarray`` or
-        ``None``) and energy.
-      - ``spent``, ``hops``, ``accepted``, ``basins``, ``screened_out``,
-        ``restarts``: evaluation ledger spend and basin-hopping counters.
-      - ``visit_counts``, ``escape_scale``, ``escape_threshold``,
-        ``merge_radius``, ``mean_step``, ``arms``, ``improvements``,
-        ``stop``, ``quenched``, ``energy_trace``, ``nve_unavailable``:
-        outcome diagnostics, improvement events ``(hop, charged, basin,
-        energy)``, optional stop code, and per-hop traces when enabled on
-        ``Config``.
-      - ``local_step``, ``quench_seconds``, ``converged``, ``capped``,
-        ``screens``, ``screen_charged``, ``full_charged``, ``check_charged``,
-        ``overlap_rejected``, ``refused``, ``screen_steps_taken``: quench and
-        screening statistics. ``quench_seconds`` is ``None`` unless
-        ``local_step="auto"`` timed a potential call and a TRIC step.
-      - ``search_seconds``, ``polish_seconds``, ``polish_calls``: wall-clock
-        phase timings in seconds and final polish call count.
-      - ``rigid_path``: present on rigid searches (``rigid=True``,
-        ``water_sites``, or a rigid ``config``), a dict with ``shell``,
-        ``archive``, ``recorded``, ``withhold_nonfinite``,
-        ``withhold_insane``, ``withhold_overlap``, and ``withhold_gradient``
-        counts (absent for atomic and molecular searches).
+    The result also carries ``ledger``, a dict of counts that says where the
+    search's budget went. One charge is one oracle evaluation. An energy
+    and a gradient returned together are one charge. A separate energy
+    call and a separate gradient call are two. ``spent`` equals ``screen``
+    + ``full`` + ``check`` + ``closure`` + ``quench`` + ``settle`` +
+    ``lattice`` + ``reoccupy`` + ``probe``.
 
-      When ``ras=True``, a dict from the residual archive search containing
-      ``best``, ``best_energy``, ``hops``, ``charged``, ``screens``,
-      ``same_floor``, ``artn``, ``best_at``, ``floors``, ``returned``,
-      ``events``, and ``nve_unavailable``.
+    - ``spent``: the evaluations charged in all.
+    - ``screen``, ``full``, ``check``: screening passes, full relaxations
+      and confirming convergence.
+    - ``closure``: an energy and gradient returned together outside those
+      three counters.
+    - ``quench``, ``settle``, ``lattice``, ``reoccupy``, ``probe``: the
+      other named charges.
+    - ``callbacks``: raw Python callbacks. ``split_extras``: evaluations
+      that returned energy and gradient together. ``probe_unbacked``:
+      probe charges that had no callback. It is two when the gradient
+      probe returns after its first callback. Each is counted on its
+      own. ``callbacks`` plus the internal charges plus
+      ``probe_unbacked`` equals ``spent`` plus ``split_extras``.
+    - ``quenches``: relaxations run, equal to ``converged`` plus ``capped``,
+      the ones that reached a small gradient and the ones that stopped at their
+      step cap.
+    - ``screened_out``: trials the screening pass dropped before a full
+      relaxation. ``returned``: trials abandoned because their partial
+      relaxation was going home, back to the basin the hop left.
+    - ``branch_draws``: fresh-start branches actually run by the conformer
+      miss path. ``branch_spent``: charged evaluations spent in those branches.
+    - ``overlap_rejected``: line-search geometries within a relaxation that
+      were closer than the overlap rule. Each was refused before the potential
+      was called and is not counted in ``spent``.
+    - ``basins``: distinct basins registered.
+
+    Returns a dict with ``best`` (flat coordinates in the state layout),
+    ``best_energy``, ``hops``, ``accepted``, ``nve_unavailable``,
+    ``branch_on_stall``, ``ledger``, ``local_step`` and ``quench_seconds``.
+    ``branch_on_stall`` is the resolved configuration flag. ``accepted``
+    counts the hops the acceptance rule took. ``nve_unavailable`` is true
+    when a constant-energy (NVE) escape was requested and that escape is not
+    compiled; the
+    ``python`` feature compiles it. ``quench_seconds`` is ``None`` unless
+    ``local_step="auto"`` timed a potential call and a TRIC step, in seconds.
+
+    When ``ras=False`` (default), the dict also contains:
+    - ``final``, ``final_energy``: final chain state (``numpy.ndarray`` or
+      ``None``) and energy.
+    - ``spent``, ``basins``, ``screened_out``, ``restarts``: evaluation
+      ledger spend and basin-hopping counters.
+    - ``visit_counts``, ``escape_scale``, ``escape_threshold``,
+      ``merge_radius``, ``mean_step``, ``arms``, ``improvements``,
+      ``stop``, ``quenched``, ``energy_trace``: outcome diagnostics,
+      improvement events ``(hop, charged, basin, energy)``, optional stop
+      code, and per-hop traces when enabled on ``Config``.
+    - ``converged``, ``capped``, ``screens``, ``screen_charged``,
+      ``full_charged``, ``check_charged``, ``overlap_rejected``, ``refused``,
+      ``screen_steps_taken``: quench and screening statistics.
+    - ``search_seconds``, ``polish_seconds``, ``polish_calls``: wall-clock
+      phase timings in seconds and final polish call count.
+    - ``rigid_path``: present on rigid searches (``rigid=True``,
+      ``water_sites``, or a rigid ``config``), a dict with ``shell``,
+      ``archive``, ``recorded``, ``withhold_nonfinite``,
+      ``withhold_insane``, ``withhold_overlap``, and ``withhold_gradient``
+      counts (absent for atomic and molecular searches).
+
+    When ``ras=True``, the dict is the residual archive search:
+    ``best``, ``best_energy``, ``hops``, ``charged``, ``screens``,
+    ``same_floor``, ``artn``, ``best_at``, ``floors``, ``returned``,
+    ``events``, ``nve_unavailable``, ``branch_on_stall``, and ``ledger``.
     """
     start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
     args = (
@@ -436,7 +482,12 @@ def cluster_search(
         bool(derived),
         bool(communicating),
     )
-    kwargs = {"ras": bool(ras), "rigid": bool(rigid), "layout": str(layout)}
+    kwargs = {
+        "ras": bool(ras),
+        "branch_on_stall": bool(branch_on_stall),
+        "rigid": bool(rigid),
+        "layout": str(layout),
+    }
     if start_arr is not None:
         kwargs["start"] = start_arr
     if length_scale is not None:
@@ -465,6 +516,8 @@ def cluster_search(
         kwargs["measured_energy_scale"] = bool(measured_energy_scale)
     if config is not None:
         kwargs["config"] = config
+    if polish_on_improve is not None:
+        kwargs["polish_on_improve"] = bool(polish_on_improve)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
     if out.get("final") is not None:

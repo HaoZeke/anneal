@@ -80,7 +80,7 @@ timed() {
     cd "$dir"
     set +e
     sudo -n unshare --uts sh -c \
-      'hostname bench; . "$1"; cd "$2"; hostname > hostname.txt; shift 2; exec taskset -c 0 "$@" > stdout.txt 2> stderr.txt' \
+      'hostname bench; . "$1"; cd "$2"; python3 '"$ROOT"'/scripts/machine_provenance.py host-label > hostname.txt; shift 2; exec taskset -c 0 "$@" > stdout.txt 2> stderr.txt' \
       timed-sh "$WORK/bench-env.sh" "$dir" "$@"
     echo $? > exit.code
   )
@@ -225,7 +225,7 @@ PY
     status=ran
     if [[ -s $geom ]]; then
       if eh=$(score_eh "$geom" "$base/$arm/score"); then
-        energy=$(python3 -c 'import sys; print("{:.6f}".format(float(sys.argv[1])*27.211386245988))' "$eh")
+        energy=$(PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'import sys; from codata2018 import HARTREE_EV; print("{:.6f}".format(float(sys.argv[1]) * HARTREE_EV))' "$eh")
         hit=$(PYTHONPATH="$ROOT/scripts${PYTHONPATH:+:$PYTHONPATH}" python3 -c 'import sys; from target_tol import energy_hits; e,r,w=map(float, sys.argv[1:]); print("yes" if energy_hits(e, r, w) else "no")' "$energy" "$REFERENCE" 0.01)
       else
         status=score_failed

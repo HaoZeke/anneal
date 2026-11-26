@@ -10,7 +10,7 @@ Two questions, in order.
 
 2. The one a search meets. Quench random starts to Lennard-Jones minima and
    ask how far apart the closest pair of distinct minima is, in units of the
-   descriptor's own response to a 0.02 displacement plus a relabelling and a
+   descriptor's own response to a 0.02 displacement plus a relabeling and a
    rotation. A merge radius must sit above that response and below the closest
    pair, so the worst-case ratio is the width of the band the radius has to
    find, and a ratio below 1 means there is no band.

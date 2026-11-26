@@ -3,7 +3,7 @@
 # Values-only communicating replicas: cargo test box_hopping on terra.
 set -euo pipefail
 if [[ -z ${SLURM_JOB_ID:-} ]]; then
-  echo "terra_values_replicas.sh: run under srun/sbatch, not on $(hostname)" >&2
+  echo "terra_values_replicas.sh: run under srun/sbatch, not directly" >&2
   exit 1
 fi
 ROOT=${ANNEAL_ROOT:-$HOME/build/anneal-values/src}
@@ -11,7 +11,7 @@ export PATH="${HOME}/.cargo/bin:/usr/bin:${PATH}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$HOME/build/anneal-values/target}"
 mkdir -p "$CARGO_TARGET_DIR"
 cd "$ROOT"
-echo "host=$(hostname) job=$SLURM_JOB_ID"
+echo "host=$(python3 "$ROOT/scripts/machine_provenance.py" host-label) job=$SLURM_JOB_ID"
 echo "rustc=$(rustc --version)"
 if [[ -d .git ]]; then
   echo "source=$(git rev-parse HEAD)"

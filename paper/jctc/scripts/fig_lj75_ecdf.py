@@ -6,7 +6,7 @@ Reads the runs through lj75_gmin_table.load, which holds the CSVs of data/lj75_g
 their digests and to the sealed verdict of the audit that reran them, so the figure
 draws only runs that audit confirmed. Each arm is a step ECDF over its 200 runs of the
 force calls to the first hit, a miss never stepping; a dotted line marks each arm's call
-PAR-2, and the lower right, clear of the lines, prints it in the arm's colour as tbl:lj75
+PAR-2, and the lower right, clear of the lines, prints it in the arm's color as tbl:lj75
 does. Wall times are not drawn: the per-run walls of the
 CSVs are of another run than the audit's.
 

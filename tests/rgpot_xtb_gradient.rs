@@ -1,11 +1,12 @@
 //! The objective gradient behind the GFN2 examples against the engine energy.
 //!
 //! The engine tests load the rgpot `libxtb_engine.so` named by
-//! `RGPOT_XTB_ENGINE` and compare against a central difference of that
-//! engine's own energy. Without it they return early. Two deterministic tests
-//! check the identical `XtbWorker` / `xtb_callback` / `rgpot-core` adapter path
-//! in-process on an analytic pair PES without `RGPOT_XTB_ENGINE`, and the
-//! stub test also checks the `dlopen` path via a compiled C library.
+//! `RGPOT_XTB_ENGINE` and compare H2 at 0.74 A and one water molecule with a
+//! central difference of that engine's own energy. Without it they return
+//! early. Two deterministic tests check the identical `XtbWorker` /
+//! `xtb_callback` / `rgpot-core` adapter path in-process on an analytic pair
+//! PES without `RGPOT_XTB_ENGINE`, and the stub test also checks the `dlopen`
+//! path via a compiled C library.
 #![cfg(unix)]
 
 #[path = "../examples/common/rgpot_eindir.rs"]
@@ -22,8 +23,12 @@ use std::process::Command;
 
 const BOX: [f64; 9] = [60.0, 0.0, 0.0, 0.0, 60.0, 0.0, 0.0, 0.0, 60.0];
 const STEP_A: f64 = 1e-3;
+/// Central-difference step for the engine checks, in angstrom.
+const FD_STEP_A: f64 = 1e-4;
 /// eV/Å. A sign error is twice the gradient, several eV/Å on these geometries.
 const TOLERANCE: f64 = 2e-3;
+/// eV/A. H2 at 0.74 A and water agree with this step well inside 1e-4.
+const FD_TOLERANCE: f64 = 1e-4;
 
 /// A water dimer with the donor hydrogen pulled 0.12 Å along its bond and
 /// the acceptor rotated off its minimum.
@@ -60,15 +65,38 @@ fn trimer() -> (Vec<i32>, Vec<f64>) {
 }
 
 fn central_difference(energy: &mut dyn FnMut(&[f64]) -> f64, x: &[f64]) -> Vec<f64> {
+    central_difference_step(energy, x, STEP_A)
+}
+
+fn central_difference_step(
+    energy: &mut dyn FnMut(&[f64]) -> f64,
+    x: &[f64],
+    step: f64,
+) -> Vec<f64> {
     (0..x.len())
         .map(|i| {
             let mut plus = x.to_vec();
             let mut minus = x.to_vec();
-            plus[i] += STEP_A;
-            minus[i] -= STEP_A;
-            (energy(&plus) - energy(&minus)) / (2.0 * STEP_A)
+            plus[i] += step;
+            minus[i] -= step;
+            (energy(&plus) - energy(&minus)) / (2.0 * step)
         })
         .collect()
+}
+
+/// H2 at 0.74 A. The bond is inside the default overlap wall.
+fn h2() -> (Vec<i32>, Vec<f64>) {
+    (vec![1, 1], vec![0.0, 0.0, 0.0, 0.74, 0.0, 0.0])
+}
+
+/// One water molecule. Both O-H bonds sit outside the overlap wall.
+fn water() -> (Vec<i32>, Vec<f64>) {
+    (
+        vec![8, 1, 1],
+        vec![
+            0.0, 0.0, 0.1173, 0.0, 0.7572, -0.4692, 0.0, -0.7572, -0.4692,
+        ],
+    )
 }
 
 fn max_residual(a: &[f64], b: &[f64]) -> f64 {
@@ -148,16 +176,10 @@ struct XtbConfig {
     uhf: i32,
 }
 
-/// `rgpot_xtb_force` writes the force, -dE/dx in eV/Å, into its buffer.
-#[test]
-fn the_rgpot_xtb_engine_writes_minus_the_energy_slope() {
-    let Some(path) = engine_path() else {
-        eprintln!("RGPOT_XTB_ENGINE is unset; the engine sign is not checked");
-        return;
-    };
-    let (z, x) = displaced_dimer();
+/// `rgpot_xtb_force` writes the force, -dE/dx in eV/A, into its buffer.
+fn assert_engine_force_is_minus_the_slope(path: &Path, z: &[i32], x: &[f64]) {
     let n = z.len();
-    let lib = unsafe { Library::new(&path) }.expect("dlopen RGPOT_XTB_ENGINE");
+    let lib = unsafe { Library::new(path) }.expect("dlopen RGPOT_XTB_ENGINE");
     let create: Symbol<XtbCreate> = unsafe { lib.get(b"rgpot_xtb_create\0") }.unwrap();
     let destroy: Symbol<XtbDestroy> = unsafe { lib.get(b"rgpot_xtb_destroy\0") }.unwrap();
     let force: Symbol<XtbForce> = unsafe { lib.get(b"rgpot_xtb_force\0") }.unwrap();
@@ -191,8 +213,12 @@ fn the_rgpot_xtb_engine_writes_minus_the_energy_slope() {
         energy
     };
     let mut buffer = vec![0.0; 3 * n];
-    call(&x, &mut buffer);
-    let fd = central_difference(&mut |y: &[f64]| call(y, &mut vec![0.0; 3 * n]), &x);
+    call(x, &mut buffer);
+    let fd = central_difference_step(
+        &mut |y: &[f64]| call(y, &mut vec![0.0; 3 * n]),
+        x,
+        FD_STEP_A,
+    );
     unsafe { destroy(pot) };
     let minus_fd: Vec<f64> = fd.iter().map(|v| -v).collect();
     let residual = max_residual(&buffer, &minus_fd);
@@ -201,13 +227,39 @@ fn the_rgpot_xtb_engine_writes_minus_the_energy_slope() {
         max_residual(&buffer, &fd)
     );
     assert!(
-        residual < TOLERANCE,
-        "rgpot_xtb_force buffer is not -dE/dx (max|buffer + fd| {residual:.3e} eV/A)"
+        residual < FD_TOLERANCE,
+        "max|buffer + fd| {residual:.3e} eV/A"
     );
 }
 
+fn assert_gfn2_objective_matches_central_difference(
+    label: &str,
+    z: &[i32],
+    x: &[f64],
+    overlap_limit_a: f64,
+) {
+    let pot = RgpotObjective::xtb_with_overlap_limit(z, BOX, overlap_limit_a);
+    let objective = pot.wrapper();
+    let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(x));
+    assert!(energy.is_finite(), "{label}: energy {energy} is not finite");
+    let gradient = gradient.to_vec();
+    let fd = central_difference_step(
+        &mut |y: &[f64]| objective.eval(ArrayView1::from(y)),
+        x,
+        FD_STEP_A,
+    );
+    let residual = max_residual(&gradient, &fd);
+    eprintln!("{label}: E {energy:.8} eV max|g - fd| {residual:.3e} eV/A",);
+    assert!(
+        residual < FD_TOLERANCE,
+        "{label}: max|g - fd| {residual:.3e} eV/A"
+    );
+}
+
+/// H2 at 0.74 A. The engine force is minus the energy slope, and the
+/// objective gradient is that slope. Skipped without `RGPOT_XTB_ENGINE`.
 #[test]
-fn gfn2_objective_gradient_is_the_energy_slope_on_a_displaced_water_dimer() {
+fn gfn2_h2_gradient_matches_central_difference() {
     let Some(path) = engine_path() else {
         eprintln!("RGPOT_XTB_ENGINE is unset; the GFN2 gradient is not checked");
         return;
@@ -217,28 +269,31 @@ fn gfn2_objective_gradient_is_the_energy_slope_on_a_displaced_water_dimer() {
         "RGPOT_XTB_ENGINE {} is missing",
         path.display()
     );
-    let (z, x) = displaced_dimer();
-    assert_objective_is_the_energy_slope("water dimer", &RgpotObjective::xtb(&z, BOX), &x);
-    assert_objective_is_the_energy_slope(
-        "water dimer, fresh SCC",
-        &RgpotObjective::xtb_fresh(&z, BOX),
+    let (z, x) = h2();
+    assert_engine_force_is_minus_the_slope(&path, &z, &x);
+    assert_gfn2_objective_matches_central_difference("H2", &z, &x, 0.5);
+}
+
+/// One water molecule, same comparison as H2. Skipped without the engine.
+#[test]
+fn gfn2_water_gradient_matches_central_difference() {
+    let Some(path) = engine_path() else {
+        eprintln!("RGPOT_XTB_ENGINE is unset; the GFN2 gradient is not checked");
+        return;
+    };
+    assert!(
+        path.exists(),
+        "RGPOT_XTB_ENGINE {} is missing",
+        path.display()
+    );
+    let (z, x) = water();
+    assert_engine_force_is_minus_the_slope(&path, &z, &x);
+    assert_gfn2_objective_matches_central_difference(
+        "water",
+        &z,
         &x,
+        rgpot_eindir::OVERLAP_CALL_LIMIT_A,
     );
-}
-
-#[test]
-fn gfn2_objective_gradient_is_the_energy_slope_on_a_water_trimer() {
-    let Some(path) = engine_path() else {
-        eprintln!("RGPOT_XTB_ENGINE is unset; the GFN2 gradient is not checked");
-        return;
-    };
-    assert!(
-        path.exists(),
-        "RGPOT_XTB_ENGINE {} is missing",
-        path.display()
-    );
-    let (z, x) = trimer();
-    assert_objective_is_the_energy_slope("water trimer", &RgpotObjective::xtb(&z, BOX), &x);
 }
 
 /// A harmonic pair energy behind the rgpot xtb engine ABI. Like
@@ -298,8 +353,8 @@ fn the_callback_passes_an_engine_force_through_to_an_energy_slope_gradient() {
     let dir = tempfile::tempdir().unwrap();
     let library = build_stub_engine(dir.path());
     for name in [
-        "gfn2_objective_gradient_is_the_energy_slope_on_a_displaced_water_dimer",
-        "gfn2_objective_gradient_is_the_energy_slope_on_a_water_trimer",
+        "gfn2_h2_gradient_matches_central_difference",
+        "gfn2_water_gradient_matches_central_difference",
     ] {
         let output = Command::new(std::env::current_exe().unwrap())
             .args([name, "--exact", "--nocapture", "--test-threads=1"])
@@ -406,6 +461,7 @@ fn in_process_adapter_matches_finite_difference_without_engine_env() {
             analytic_force_engine,
             analytic_stub_reset,
             analytic_stub_destroy,
+            None,
         );
         assert_objective_is_the_energy_slope(label, &pot, &x);
 
@@ -439,6 +495,7 @@ fn in_process_adapter_detects_flipped_engine_sign() {
         analytic_flipped_engine,
         analytic_stub_reset,
         analytic_stub_destroy,
+        None,
     );
     let objective = pot.wrapper();
     let (energy, gradient) = objective.value_and_gradient(ArrayView1::from(&x));

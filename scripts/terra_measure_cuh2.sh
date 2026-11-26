@@ -50,7 +50,7 @@ unset TWO_PHASE_KAPPA TWO_PHASE_MU TWO_PHASE_BETA || true
 
 mkdir -p "$OUT"
 {
-  printf 'host=%s\n' "$(hostname)"
+  printf 'host=%s\n' "$(python3 "$ROOT/scripts/machine_provenance.py" host-label)"
   printf 'job=%s\n' "$SLURM_JOB_ID"
   printf 'con=%s\n' "$CON"
   printf 'budget=%s\n' "$SLAB_BUDGET"

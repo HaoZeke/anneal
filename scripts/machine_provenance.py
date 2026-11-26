@@ -9,6 +9,7 @@ import hashlib
 import io
 import os
 import re
+import socket
 import subprocess
 import sys
 from collections.abc import Iterable, Mapping, Sequence
@@ -19,6 +20,10 @@ MACHINE_ID_PATH = Path("/etc/machine-id")
 PRODUCT_UUID_PATH = Path("/sys/class/dmi/id/product_uuid")
 CPUINFO_PATH = Path("/proc/cpuinfo")
 MACHINE_FIELDS = ("machine_id", "cpu_model")
+HOST_LABEL_SALT = b"anneal-bench-host-label-v1\0"
+SANDBOX_HOSTNAME = "bench"
+BOOT_LABEL_SALT = b"anneal-bench-boot-label-v1\0"
+BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 GMIN_BUILD_KEY_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -60,12 +65,30 @@ def _darwin_cpu_model() -> str:
     return ""
 
 
+def macos_machine_id() -> str:
+    """IOPlatformUUID, the hardware UUID macOS has in place of /etc/machine-id."""
+    return _darwin_machine_id() if sys.platform == "darwin" else ""
+
+
+def macos_cpu_model() -> str:
+    """The brand string macOS reports where there is no /proc/cpuinfo."""
+    return _darwin_cpu_model() if sys.platform == "darwin" else ""
+
+
 def machine_provenance(
     machine_id_path: Path = MACHINE_ID_PATH,
     product_uuid_path: Path = PRODUCT_UUID_PATH,
     cpuinfo_path: Path = CPUINFO_PATH,
 ) -> tuple[str, str]:
-    """Return a salted machine digest and the normalized CPU model."""
+    """Return a salted machine digest and the normalized CPU model.
+
+    Linux reads /etc/machine-id, then the DMI product_uuid, and
+    /proc/cpuinfo. macOS has none of them and reads the hardware UUID and the
+    CPU brand string from ioreg and sysctl instead, and only for the default
+    paths: an explicit path that names nothing still raises. A machine that
+    offers no identifier or no model raises: a row never records an invented
+    one.
+    """
     identifier = ""
     for path in (machine_id_path, product_uuid_path):
         if path.is_file():
@@ -78,10 +101,10 @@ def machine_provenance(
         and machine_id_path == MACHINE_ID_PATH
         and product_uuid_path == PRODUCT_UUID_PATH
     ):
-        identifier = _darwin_machine_id()
+        identifier = macos_machine_id()
     if not identifier:
         raise RuntimeError(
-            "neither /etc/machine-id nor the DMI product_uuid is available"
+            "neither /etc/machine-id, the DMI product_uuid nor the macOS hardware UUID is available"
         )
 
     cpu_model = ""
@@ -96,18 +119,87 @@ def machine_provenance(
                 cpu_model = fields[key]
                 break
     if not cpu_model and sys.platform == "darwin" and cpuinfo_path == CPUINFO_PATH:
-        cpu_model = _darwin_cpu_model()
+        cpu_model = macos_cpu_model()
     if not cpu_model:
-        raise RuntimeError("/proc/cpuinfo has no CPU model string")
+        raise RuntimeError("neither /proc/cpuinfo nor sysctl has a CPU model string")
 
     digest = hashlib.sha256(MACHINE_ID_SALT + identifier.encode()).hexdigest()
     return digest, cpu_model
 
 
 def machine_columns() -> dict[str, str]:
-    """Return the machine columns for one row."""
-    machine_id, cpu_model = machine_provenance()
+    """Return the machine columns for one row.
+
+    A campaign may hand its identity to the processes it starts through
+    ``ANNEAL_MACHINE_ID`` and ``ANNEAL_CPU_MODEL``. Both must be set, the
+    identity must be a salted SHA-256 digest as ``machine_provenance`` returns
+    it, and a variable that is empty counts as unset. Without either variable
+    the columns describe this machine.
+    """
+    machine_id = os.environ.get("ANNEAL_MACHINE_ID", "")
+    cpu_model = " ".join(os.environ.get("ANNEAL_CPU_MODEL", "").split())
+    if bool(machine_id) != bool(cpu_model):
+        raise RuntimeError("incomplete ANNEAL_MACHINE_ID/ANNEAL_CPU_MODEL hand-off")
+    if not machine_id:
+        machine_id, cpu_model = machine_provenance()
+    elif not re.fullmatch(r"[0-9a-f]{64}", machine_id):
+        raise RuntimeError("ANNEAL_MACHINE_ID is not a salted sha256 digest")
     return {"machine_id": machine_id, "cpu_model": cpu_model}
+
+
+def host_label(hostname: str | None = None) -> str:
+    """The host column of a row or report: ``bench`` as is, any other hostname as a salted digest.
+
+    The benchmark sandbox names itself ``bench``, which says nothing about the
+    machine. Any other name is host identity and is recorded as
+    ``host-`` and the first sixteen digits of its salted SHA-256, never raw.
+    The default reads this machine's name; a caller that reads the name
+    itself passes it in, so the raw name never leaves this function.
+    """
+    name = socket.gethostname() if hostname is None else hostname
+    if name == SANDBOX_HOSTNAME:
+        return name
+    if not name:
+        raise RuntimeError("the hostname is empty")
+    return "host-" + hashlib.sha256(HOST_LABEL_SALT + name.encode()).hexdigest()[:16]
+
+
+def endpoint_label(endpoint: str) -> str:
+    """A ``host:port`` endpoint with its host as a host label; the port and any scheme stay.
+
+    A job dials the real address. Anything written down, a log line or a row,
+    shows this form instead. An endpoint with no host raises ``ValueError``
+    rather than being echoed.
+    """
+    scheme, sep, rest = endpoint.partition("://")
+    if not sep:
+        scheme, rest = "", endpoint
+    rest, slash, tail = rest.partition("/")
+    host, colon, port = rest.rpartition(":")
+    if not colon or not port.isdigit():
+        host, port = rest, ""
+    host = host.strip("[]")
+    if not host:
+        raise ValueError("the endpoint has no host")
+    label = host_label(host)
+    return (f"{scheme}://" if sep else "") + label + (f":{port}" if port else "") + slash + tail
+
+
+def boot_label(boot_id: str | None = None) -> str:
+    """The boot column of a row or report: a salted digest of the kernel boot id.
+
+    The boot id is a random identifier of one boot of one machine. A row keeps
+    it only to show that two measurements share a boot, which equal digests
+    still show, so it is recorded as ``boot-`` and the first sixteen digits of
+    its salted SHA-256, never raw. The default reads this machine's boot id;
+    a caller that has read it passes it in. A machine without one raises
+    ``OSError``, and an empty one ``RuntimeError``.
+    """
+    text = BOOT_ID_PATH.read_text() if boot_id is None else boot_id
+    name = text.strip()
+    if not name:
+        raise RuntimeError("the boot id is empty")
+    return "boot-" + hashlib.sha256(BOOT_LABEL_SALT + name.encode()).hexdigest()[:16]
 
 
 def with_machine_provenance(row: Mapping[str, object]) -> dict[str, object]:
@@ -148,17 +240,6 @@ def csv_fields(values: Iterable[object]) -> str:
     stream = io.StringIO()
     csv.writer(stream, lineterminator="").writerow(values)
     return stream.getvalue()
-
-
-def environment() -> dict[str, str]:
-    """Read an inherited identity, falling back to this machine."""
-    machine_id = os.environ.get("ANNEAL_MACHINE_ID", "")
-    cpu_model = os.environ.get("ANNEAL_CPU_MODEL", "")
-    if bool(machine_id) != bool(cpu_model):
-        raise RuntimeError("incomplete ANNEAL_MACHINE_ID/ANNEAL_CPU_MODEL hand-off")
-    if not machine_id:
-        machine_id, cpu_model = machine_provenance()
-    return {"machine_id": machine_id, "cpu_model": cpu_model}
 
 
 def require_csv_schema(path: Path, fieldnames: Iterable[str]) -> None:
@@ -403,3 +484,27 @@ def validate_gmin_group_provenance(
             raise ValueError(
                 f"{prefix}{build_key_field} mismatch: got {actual!r}, expected {wanted!r}"
             )
+
+
+def main(argv: list[str]) -> int:
+    """``host-label [NAME]``, ``boot-label`` and ``endpoint-label ENDPOINT`` print what shell scripts report."""
+    if argv == ["host-label"]:
+        print(host_label())
+    elif len(argv) == 2 and argv[0] == "host-label":
+        print(host_label(argv[1]))
+    elif argv == ["boot-label"]:
+        print(boot_label())
+    elif len(argv) == 2 and argv[0] == "endpoint-label":
+        try:
+            print(endpoint_label(argv[1]))
+        except ValueError as error:
+            print(f"machine_provenance.py: {error}", file=sys.stderr)
+            return 2
+    else:
+        print("usage: machine_provenance.py host-label [NAME] | boot-label | endpoint-label ENDPOINT", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

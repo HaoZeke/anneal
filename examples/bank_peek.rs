@@ -1,6 +1,11 @@
 //! Print live CSA bank size, Dcut, member energies, and SOAP well heights.
 //!
 //! Usage: bank_peek [host:port]
+//!
+//! The output shows the host as a host label, never the address dialed.
+
+#[path = "common/host_label.rs"]
+mod host_label;
 
 fn main() {
     anneal_core::install_rgpot_kernels!();
@@ -8,9 +13,9 @@ fn main() {
         .nth(1)
         .unwrap_or_else(|| "127.0.0.1:7426".into());
     let mut c = anneal_core::bank_rpc::BankClient::connect(&addr)
-        .unwrap_or_else(|e| panic!("connect {addr}: {e}"));
+        .unwrap_or_else(|e| panic!("connect {}: {e}", host_label::endpoint_label(&addr)));
     let s = c.snapshot().unwrap_or_else(|e| panic!("snapshot: {e}"));
-    println!("bank {addr}");
+    println!("bank {}", host_label::endpoint_label(&addr));
     println!(
         "  members {}  dcut {:.6}  wells {}",
         s.size,
