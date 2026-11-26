@@ -1,0 +1,191 @@
+diff --git a/src/methods/cluster_hopping.rs b/src/methods/cluster_hopping.rs
+index 846e93c9c..b6bd6437e 100644
+--- a/src/methods/cluster_hopping.rs
++++ b/src/methods/cluster_hopping.rs
+@@ -819,6 +819,10 @@ pub struct Ledger {
+     /// The iteration cap cannot identify this phase when a caller chooses
+     /// `relax_steps <= screen_steps`.
+     screening_relax: bool,
++    /// Hops since the chain last lowered its best, read by the surface walk.
++    surface_quiet: usize,
++    /// Longest quiet hop stretch this chain has already survived.
++    surface_longest_quiet: usize,
+     /// Counter the next charge is recorded under.
+     charge_name: ChargeName,
+     /// Split of [`Ledger::spent`].
+@@ -894,6 +898,8 @@ impl Ledger {
+             chain_is_separate: true,
+             gradient_reuse_only: false,
+             screening_relax: false,
++            surface_quiet: 0,
++            surface_longest_quiet: 0,
+             charge_name: ChargeName::Unnamed,
+             charges: ChargeSplit::default(),
+             quench_boundaries: Vec::new(),
+@@ -1035,6 +1041,8 @@ impl Ledger {
+     pub fn slice(&self, budget: usize) -> Self {
+         let mut child = Self::new(budget);
+         child.stop = self.stop.clone();
++        child.surface_quiet = self.surface_quiet;
++        child.surface_longest_quiet = self.surface_longest_quiet;
+         child
+     }
+ 
+@@ -1274,6 +1282,16 @@ impl Ledger {
+         self.screening_relax
+     }
+ 
++    /// Quiet hop counts the surface walk reads when it decides its length.
++    pub(crate) fn set_surface_quiet(&mut self, quiet: usize, longest_quiet: usize) {
++        self.surface_quiet = quiet;
++        self.surface_longest_quiet = longest_quiet;
++    }
++
++    pub(crate) fn surface_quiet(&self) -> (usize, usize) {
++        (self.surface_quiet, self.surface_longest_quiet)
++    }
++
+     fn record_published(&mut self, value: f64, state: ArrayView1<f64>) {
+         if value.is_finite() && value < self.best {
+             self.best = value;
+@@ -6826,6 +6844,7 @@ where
+         if ledger.target_reached() {
+             break HopStop::of_closed(ledger);
+         }
++        ledger.set_surface_quiet(quiet, longest_quiet);
+         // A rigid quench creeps by far less than an isomer gap. Treating
+         // that creep as a new lowest restarts the stall clock forever, so
+         // the chain never edits the cage.
+@@ -10724,6 +10743,7 @@ where
+         } else {
+             quiet += 1;
+         }
++        ledger.set_surface_quiet(quiet, longest_quiet);
+         let stuck = stalled(cfg, quiet, longest_quiet);
+         // Basin hopping with occasional jumping (Iwamatsu and Okabe, Chem.
+         // Phys. Lett. 399, 396 (2004)): after `jump_patience` hops without
+diff --git a/src/methods/cluster_search.rs b/src/methods/cluster_search.rs
+index 871a6b678..db5b47f3d 100644
+--- a/src/methods/cluster_search.rs
++++ b/src/methods/cluster_search.rs
+@@ -985,7 +985,11 @@ where
+                 // that minimum to the plain relaxation below. Both phases charge.
+                 let compacted;
+                 let surface = match surfaces.as_mut() {
+-                    Some(portfolio) => portfolio.begin(screening),
++                    Some(portfolio) => {
++                        let (quiet, longest_quiet) = led.surface_quiet();
++                        portfolio.note_quiet(quiet, longest_quiet);
++                        portfolio.begin(screening)
++                    }
+                     None => cfg.two_phase.filter(|two| two.is_active()),
+                 };
+                 // The last physical point the descent paid for, kept so the
+diff --git a/src/methods/two_phase.rs b/src/methods/two_phase.rs
+index c7aae5f05..a05306972 100644
+--- a/src/methods/two_phase.rs
++++ b/src/methods/two_phase.rs
+@@ -590,6 +590,10 @@ pub struct SurfacePortfolio {
+     held: Option<usize>,
+     block: usize,
+     hops_in_block: usize,
++    /// Hops the chain has gone without a lower best.
++    quiet: usize,
++    /// Longest quiet stretch the chain has already survived.
++    longest_quiet: usize,
+     block_start_best: f64,
+     latest_best: f64,
+     /// Lowest plain energy any full relaxation of the block reached.
+@@ -650,6 +654,8 @@ impl SurfacePortfolio {
+             held: None,
+             block,
+             hops_in_block: 0,
++            quiet: 0,
++            longest_quiet: 0,
+             block_start_best: f64::INFINITY,
+             latest_best: f64::INFINITY,
+             block_lowest: f64::INFINITY,
+@@ -781,14 +787,39 @@ impl SurfacePortfolio {
+         Ok(())
+     }
+ 
++    /// Quiet counts from the chain, in hops. A zero pair does not wipe a
++    /// record already noted: a side ledger starts at zero and must not
++    /// shorten the walk the main chain is on.
++    pub fn note_quiet(&mut self, quiet: usize, longest_quiet: usize) {
++        if quiet == 0 && longest_quiet == 0 && (self.quiet > 0 || self.longest_quiet > 0) {
++            return;
++        }
++        self.quiet = quiet;
++        self.longest_quiet = longest_quiet;
++    }
++
++    /// The walk stays at least one block. Once the chain has survived a
++    /// longer quiet stretch, the next walk runs that long, and it ends
++    /// sooner only when the current quiet has passed that record.
++    fn walk_spent(&self) -> bool {
++        if self.hops_in_block < self.block {
++            return false;
++        }
++        let survived = self.longest_quiet;
++        if survived > self.block && self.quiet > survived {
++            return true;
++        }
++        self.hops_in_block >= self.block.max(survived)
++    }
++
+     /// The surface for the relaxation about to start.
+     ///
+     /// A screening relaxation opens a hop; the block's arm is redrawn once
+-    /// the block is spent, with the finished block's improvement credited
+-    /// to the arm that walked it.
++    /// the walk is spent, with the finished block's depth credited to the
++    /// arm that walked it.
+     pub fn begin(&mut self, screening: bool) -> Option<TwoPhase> {
+         if screening {
+-            if self.hops_in_block >= self.block {
++            if self.walk_spent() {
+                 self.settle_block();
+             }
+             self.hops_in_block += 1;
+@@ -1023,6 +1054,40 @@ mod tests {
+         assert!(means[1] > means[0] && means[1] > means[2], "{means:?}");
+     }
+ 
++    #[test]
++    fn a_quiet_record_longer_than_the_block_extends_the_walk() {
++        let arm = TwoPhase::relative(0.7, 1.0);
++        let mut open = SurfacePortfolio::with_block(&[arm], 3, 4);
++        open.note_quiet(0, 0);
++        for _ in 0..4 {
++            open.begin(true);
++        }
++        assert_eq!(open.hops_in_block, 4);
++        open.begin(true);
++        assert_eq!(open.hops_in_block, 1);
++
++        let mut extended = SurfacePortfolio::with_block(&[arm], 3, 4);
++        extended.note_quiet(0, 9);
++        extended.note_quiet(0, 0);
++        assert_eq!(extended.longest_quiet, 9);
++        for _ in 0..9 {
++            extended.begin(true);
++        }
++        assert_eq!(extended.hops_in_block, 9);
++        extended.begin(true);
++        assert_eq!(extended.hops_in_block, 1);
++
++        let mut stalled = SurfacePortfolio::with_block(&[arm], 3, 4);
++        stalled.note_quiet(0, 9);
++        for _ in 0..4 {
++            stalled.begin(true);
++        }
++        assert_eq!(stalled.hops_in_block, 4);
++        stalled.note_quiet(10, 9);
++        stalled.begin(true);
++        assert_eq!(stalled.hops_in_block, 1);
++    }
++
+     #[test]
+     fn chains_sharing_a_posterior_learn_from_each_other_s_blocks() {
+         let deep = TwoPhase::diameter(2.0, 1.0);
