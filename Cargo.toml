@@ -163,6 +163,9 @@ tokio-util = { version = "0.7", features = ["compat"] }
 # Do not enable rgpot-core/rpc: that needs a host capnp compiler.
 rgpot-core = { version = "=3.5.1" }
 libloading = "0.8"
+# Integration tests cannot see a normal dependency. The symmetry pins
+# call this crate directly so a host libm cannot move the fixtures.
+libm = { version = "0.2.16", default-features = false }
 # The workflow contract tests parse .github/workflows/release.yml and ci.yml.
 serde_yaml_ng = "0.10"
 
