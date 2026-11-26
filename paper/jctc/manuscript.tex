@@ -72,7 +72,7 @@ up to 110 atoms \cite{wales1997}.
 Some of those minima are hard to reach for a reason the quench does not
 remove.
 A funnel is a set of minima that drain, through ever lower barriers, to one
-low minimum \cite{wales2003}.
+low minimum \cite{wales2003,walesScheraga1999}.
 LJ\(_{38}\) is the standard case: its global minimum, a face-centered cubic
 truncated octahedron, sits at the bottom of a narrow funnel, while most low
 minima are icosahedral and drain to a second, wider funnel
@@ -88,6 +88,10 @@ Earlier remedies change the surface the walk sees, by compressing the cluster
 \cite{locatelli2002}, propose symmetric structures directly
 \cite{oakley2013}, or fill the vacant sites of a lattice read from the
 cluster \cite{shaoChengCai2004}.
+Other cluster searches are genetic and evolutionary algorithms
+\cite{deaven1995,shayeghiPoolbcgaParallelisedGenerationfree2015,johnstonEvolving2003,dieterich2010,hartkeGlobal2011},
+minima hopping \cite{goedecker2004}, and structure search
+\cite{christiansenAgox2022}.
 
 A useful search must both propose routes between funnels and avoid spending
 its budget in basins already explored.
@@ -124,6 +128,7 @@ Section~\ref{sec:knockouts} reports all three: the structure templates
 (Section~\siref{sec:priors}), at two revisions in the history of the submitted
 revision, and the length unit and the choice among the moves, on the search
 source of the submitted revision.
+See Figure~\ref{fig:algorithm} and Figure~\ref{fig:moves}.
 
 \begin{figure}
 \centering
@@ -135,6 +140,7 @@ The depth in equation~\ref{eq:depth} updates the arm that played.
 The lower band separates the rgpot Lennard-Jones, Morse, Gupta, and binary
 Lennard-Jones kernels from the native TIP4P and Sutton--Chen implementations;
 offline reference relaxations are not part of the search stack.}
+\label{fig:algorithm}
 \end{figure}
 
 \begin{figure}
@@ -144,6 +150,7 @@ offline reference relaxations are not part of the search stack.}
 equation~\ref{eq:burst}.
 Whichever move is drawn, its proposal is quenched once and meets
 equation~\ref{eq:metropolis}.}
+\label{fig:moves}
 \end{figure}
 
 \subsection{Moves}
