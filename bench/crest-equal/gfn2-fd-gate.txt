@@ -1,0 +1,43 @@
+system h2o6
+geometry reference prism, atom 1 x shifted by +0.05 angstrom
+max_covalent_OH_A 0.999870
+wall_onset_A 1.15
+step_A 1.0e-03
+step_source tests/rgpot_xtb_gradient.rs STEP_A
+abs_tol_eV_per_A 2.0e-03
+cosine_min 0.999
+anneal_path ForceObjective value_and_gradient, restart once, then central differences
+crest_path negate_gradient_script gradient file read by xtb --driver
+anneal_energy_eV -8.298229e+02
+anneal_audit_energy_eV -8.298229e+02
+anneal_cold_energy_eV -8.298229e+02
+anneal_audit_delta_eV 1.637090e-11
+anneal_norm_eV_per_A 2.229763e+00
+anneal_fd_norm_eV_per_A 2.229795e+00
+anneal_max_abs_eV_per_A 5.605261e-05
+anneal_max_rel 3.882556e-02
+anneal_max_rel_large 3.755810e-03
+anneal_cosine 1.000000e+00
+anneal_flipped_max_abs_eV_per_A 2.359695e+00
+anneal_downhill_delta_eV -1.699211e-02
+anneal_pass true
+crest_energy_eV -8.298229e+02
+crest_norm_eV_per_A 2.229763e+00
+crest_fd_norm_eV_per_A 2.229795e+00
+crest_max_abs_eV_per_A 2.359695e+00
+crest_max_rel 1.999999e+00
+crest_max_rel_large 1.999999e+00
+crest_cosine -1.000000e+00
+crest_flipped_max_abs_eV_per_A 5.607415e-05
+crest_downhill_delta_eV 2.799620e-02
+crest_pass false
+hartree_eV 2.7211386245988034e+01
+bohr_A 5.2917721090299996e-01
+xtb_version 6.7.1 (edcfbbe)
+crest_version 3.0.2 (6914a25)
+engine_sha256 dc0f466d010eb93413311b98437d74474a1535e13aa762630ff1eaa7e619995e
+anneal_sha256 537147e8316106862645e2f98f00b8a5a87efca001ae6c6923a3d03624e7994a
+driver_sha256 db570b6e4b52fa7ccbca7114123849a0b6acf483244de9a919242a6f451160fa
+probe_sha256 c9c27b772785d51cda978f89dfc7e7d71fe6c82a195db9420b939ca5cf4c04a2
+revision ecf00b33d22bcbe927d83f83ddec73a733965c08
+gate fail
