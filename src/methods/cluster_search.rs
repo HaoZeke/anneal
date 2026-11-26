@@ -278,8 +278,9 @@ where
         if led.stopped() && energy.is_finite() && energy < led.best {
             led.record(energy, x);
         }
-        (gradient.len() == x.len() && gradient.iter().all(|value| value.is_finite()))
-            .then_some(gradient)
+        // A failed evaluation leaves a zero buffer when its status is
+        // dropped. That buffer is finite, and it is not a converged force.
+        finite_pair(x.len(), energy, &gradient).then_some(gradient)
     }
 }
 
@@ -345,13 +346,16 @@ where
     failed_step(point, anchor.as_ref()).map(|(energy, gradient)| (energy, gradient, false))
 }
 
+/// Gradient of one evaluation, or nothing when the energy is not finite.
+///
+/// `grad` alone can return the zero buffer a dropped status leaves behind.
+/// The energy of the same call is what says the evaluation converged.
 fn finite_gradient<O>(objective: &O, x: ArrayView1<f64>) -> Option<Array1<f64>>
 where
     O: DifferentiableObjective<f64> + ?Sized,
 {
-    let gradient = objective.grad(x);
-    (gradient.len() == x.len() && gradient.iter().all(|value| value.is_finite()))
-        .then_some(gradient)
+    let (energy, gradient) = objective.value_and_gradient(x);
+    finite_pair(x.len(), energy, &gradient).then_some(gradient)
 }
 
 /// Uphill stand-in for a geometry the overlap rule refuses.
@@ -3146,6 +3150,47 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    /// A dropped status leaves a zero force. That force is not a converged
+    /// evaluation of a non-finite energy.
+    #[test]
+    fn a_nonfinite_energy_is_not_a_zero_force() {
+        struct Refused {
+            bounds: eindir_core::Bounds<f64>,
+        }
+        impl eindir_core::Objective<f64> for Refused {
+            fn dim(&self) -> usize {
+                2
+            }
+            fn bounds(&self) -> &eindir_core::Bounds<f64> {
+                &self.bounds
+            }
+            fn eval(&self, _: ndarray::ArrayView1<f64>) -> f64 {
+                f64::NAN
+            }
+        }
+        impl eindir_core::gradient::Gradient<f64> for Refused {
+            fn grad(&self, x: ndarray::ArrayView1<f64>) -> Array1<f64> {
+                Array1::zeros(x.len())
+            }
+            fn dim(&self) -> usize {
+                2
+            }
+        }
+        impl eindir_core::gradient::DifferentiableObjective<f64> for Refused {
+            fn value_and_gradient(&self, x: ndarray::ArrayView1<f64>) -> (f64, Array1<f64>) {
+                (f64::NAN, Array1::zeros(x.len()))
+            }
+        }
+        let objective = Refused {
+            bounds: eindir_core::Bounds::new(
+                Array1::from_elem(2, -1.0),
+                Array1::from_elem(2, 1.0),
+                0.0,
+            ),
+        };
+        assert!(finite_gradient(&objective, Array1::zeros(2).view()).is_none());
+    }
 
     /// Preset hashes and one recommended Lennard-Jones trace, measured on
     /// develop ade36267 with the option off.
