@@ -2777,6 +2777,16 @@ impl PyClusterConfig {
     }
 
     #[getter]
+    fn detected_symmetry(&self) -> bool {
+        self.inner.detected_symmetry
+    }
+
+    #[setter]
+    fn set_detected_symmetry(&mut self, value: bool) {
+        self.inner.detected_symmetry = value;
+    }
+
+    #[getter]
     fn symmetry_tolerance(&self) -> f64 {
         self.inner.symmetry_tolerance
     }
