@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 1 ]; then
-    echo "usage: build.sh STAGE_DIRECTORY" >&2
+if [ "$#" -lt 1 ]; then
+    echo "usage: build.sh STAGE_DIRECTORY [arm...]" >&2
     exit 2
 fi
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$script_dir/../../.." && pwd)"
 stage="$(mkdir -p "$1" && cd "$1" && pwd)"
+shift
 
 a_rev=7e1cdb925588d4ab8a92e420f6ac7cf70357b1ec
 a_tree=e5ebda63f9f0117226d50c13abf33243ccf452cc
 m_rev=8824564b2479f0917c1e4927cd5ac938a86c2ac0
 m_tree=991d5afc6d7b7f7e6c392cb68aa351af1fc50179
+o_rev=c96807c54e8cc602322255c75be61425c7bf722a
+o_tree=7f2625597a167d3c7841b2266eec844997e53266
 
 examples=(
     --example ase_panel
@@ -49,9 +52,28 @@ restore_arm() {
 }
 
 restore_all() {
-    restore_arm a
-    restore_arm a2
-    restore_arm m
+    local name
+    for name in "${wanted[@]}"; do
+        restore_arm "$name"
+    done
+}
+
+revision_of() {
+    case "$1" in
+        a|a2) printf '%s\n' "$a_rev" ;;
+        m) printf '%s\n' "$m_rev" ;;
+        o) printf '%s\n' "$o_rev" ;;
+        *) echo "unknown arm $1" >&2; exit 2 ;;
+    esac
+}
+
+tree_of() {
+    case "$1" in
+        a|a2) printf '%s\n' "$a_tree" ;;
+        m) printf '%s\n' "$m_tree" ;;
+        o) printf '%s\n' "$o_tree" ;;
+        *) echo "unknown arm $1" >&2; exit 2 ;;
+    esac
 }
 
 build_arm() {
@@ -80,25 +102,29 @@ build_arm() {
     fi
 }
 
-make_tree a "$a_rev"
-make_tree a2 "$a_rev"
-make_tree m "$m_rev"
+wanted=("$@")
+if [ "${#wanted[@]}" -eq 0 ]; then
+    wanted=(a a2 m o)
+fi
+for name in "${wanted[@]}"; do
+    make_tree "$name" "$(revision_of "$name")"
+done
 trap restore_all EXIT
 restore_all
-verify_tree a "$a_rev" "$a_tree"
-verify_tree a2 "$a_rev" "$a_tree"
-verify_tree m "$m_rev" "$m_tree"
-build_arm a "$a_rev" "$a_tree"
-build_arm a2 "$a_rev" "$a_tree"
-build_arm m "$m_rev" "$m_tree"
+for name in "${wanted[@]}"; do
+    verify_tree "$name" "$(revision_of "$name")" "$(tree_of "$name")"
+    build_arm "$name" "$(revision_of "$name")" "$(tree_of "$name")"
+done
 trap - EXIT
 
 sum_file="$stage/binary-sha256.txt"
 : > "$sum_file.tmp"
-for arm in a a2 m; do
+for arm in a a2 m o; do
     for binary in ase_panel h2h_metal h2h_morse h2h_seed; do
-        sha256sum "$stage/$arm-target/release/examples/$binary" \
-            >> "$sum_file.tmp"
+        path="$stage/$arm-target/release/examples/$binary"
+        if [ -f "$path" ]; then
+            sha256sum "$path" >> "$sum_file.tmp"
+        fi
     done
 done
 mv "$sum_file.tmp" "$sum_file"

@@ -21,8 +21,14 @@ A_REV = "7e1cdb925588d4ab8a92e420f6ac7cf70357b1ec"
 A_TREE = "e5ebda63f9f0117226d50c13abf33243ccf452cc"
 M_REV = "8824564b2479f0917c1e4927cd5ac938a86c2ac0"
 M_TREE = "991d5afc6d7b7f7e6c392cb68aa351af1fc50179"
+O_REV = "c96807c54e8cc602322255c75be61425c7bf722a"
+O_TREE = "7f2625597a167d3c7841b2266eec844997e53266"
+O_PAYLOAD = "fd5449766b4f1f693de2245933afa609a93a5c6b"
+O_PAYLOAD_TREE = "491819895e46a8fccbfc2449c18868780d1a090b"
 N12 = tuple(range(2000, 2012))
 LJ75 = tuple(range(2000, 2108))
+OOS_N12 = tuple(range(2012, 2024))
+OOS_LJ75 = tuple(range(2012, 2120))
 BOOTSTRAP_SEED = 20261123
 BOOTSTRAP_DRAWS = 10_000
 ENERGY_AGREEMENT = 1.0e-7
@@ -35,6 +41,24 @@ ARM_ORDER = (
     ("A2", "A", "M"),
     ("M", "A", "A2"),
 )
+OOS_ORDER = (
+    ("A", "M", "O"),
+    ("O", "M", "A"),
+    ("M", "A", "O"),
+    ("O", "A", "M"),
+    ("M", "O", "A"),
+    ("A", "O", "M"),
+)
+OOS_CELLS = (
+    "lj75-seed",
+    "ase-lj98",
+    "ase-lj104",
+    "au55-seed",
+    "lj38",
+    "m38r6",
+    "m55r14",
+)
+OOS_PAIRS = (("O", "M"), ("O", "A"), ("M", "A"))
 THREAD_ENV = {
     "OMP_NUM_THREADS": "1",
     "MKL_NUM_THREADS": "1",
@@ -345,8 +369,11 @@ def arms_from(args: argparse.Namespace) -> dict[str, Arm]:
     }
 
 
-def run_cell(args: argparse.Namespace, cell: Cell, deadline: float) -> int:
-    built = arms_from(args)
+def run_cell(args: argparse.Namespace, cell: Cell, deadline: float, built=None, cycle=None) -> int:
+    if built is None:
+        built = arms_from(args)
+    if cycle is None:
+        cycle = ARM_ORDER
     rows_path = Path(args.rows)
     sessions_path = Path(args.sessions)
     logs = Path(args.logs)
@@ -363,11 +390,11 @@ def run_cell(args: argparse.Namespace, cell: Cell, deadline: float) -> int:
             raise RuntimeError("source identity differs from the earlier row")
     env = child_env()
     for round_index, seed in enumerate(cell.seeds):
-        if any((cell.name, arm_name, str(seed)) not in done for arm_name in ARM_ORDER[round_index % 6]):
+        if any((cell.name, arm_name, str(seed)) not in done for arm_name in cycle[round_index % len(cycle)]):
             if time.time() >= deadline:
                 print(f"{cell.name} stopped before seed {seed}: deadline", flush=True)
                 return 0
-        order = ARM_ORDER[round_index % len(ARM_ORDER)]
+        order = cycle[round_index % len(cycle)]
         for slot, arm_name in enumerate(order, start=1):
             key = (cell.name, arm_name, str(seed))
             if key in done:
@@ -829,6 +856,255 @@ def analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def wilson(hits: int, n: int) -> tuple[float, float]:
+    if n <= 0:
+        raise RuntimeError("wilson interval needs rounds")
+    z = 1.959963984540054
+    proportion = hits / n
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    center = (proportion + z2 / (2.0 * n)) / denom
+    margin = z * math.sqrt(proportion * (1.0 - proportion) / n + z2 / (4.0 * n * n)) / denom
+    return max(0.0, center - margin), min(1.0, center + margin)
+
+
+def oos_cell(name: str) -> Cell:
+    cell = CELLS[name]
+    seeds = OOS_LJ75 if name == "lj75-seed" else OOS_N12
+    return Cell(
+        cell.name,
+        cell.binary,
+        cell.kind,
+        cell.budget,
+        cell.reference,
+        seeds,
+        system=cell.system,
+        n=cell.n,
+        rho=cell.rho,
+    )
+
+
+def oos_arms(args: argparse.Namespace) -> dict[str, Arm]:
+    return {
+        "A": Arm("A", Path(args.source_a), Path(args.bin_a), A_REV, A_TREE),
+        "M": Arm("M", Path(args.source_m), Path(args.bin_m), M_REV, M_TREE),
+        "O": Arm("O", Path(args.source_o), Path(args.bin_o), O_REV, O_TREE),
+    }
+
+
+def pair_scores(picked: dict[str, list[dict[str, str]]], challenger: str, reference: str) -> dict[str, object]:
+    left = picked[challenger]
+    right = picked[reference]
+    n = len(left)
+    hits_left = sum(int(row["hit"]) for row in left)
+    hits_right = sum(int(row["hit"]) for row in right)
+    calls_left = [float(row["calls_to_hit"]) for row in left]
+    calls_right = [float(row["calls_to_hit"]) for row in right]
+    wall_left = [float(row["outside_s"]) for row in left]
+    wall_right = [float(row["outside_s"]) for row in right]
+    rss_left = [float(row["peak_rss_anon_kb"]) for row in left]
+    rss_right = [float(row["peak_rss_anon_kb"]) for row in right]
+    _u_calls, calls_p = mann_whitney_worse(calls_left, calls_right)
+    _u_wall, wall_p = mann_whitney_worse(wall_left, wall_right)
+    _u_rss, rss_p = mann_whitney_worse(rss_left, rss_right)
+    calls_ratio = ratio_of_medians(calls_left, calls_right)
+    wall_ratio = ratio_of_medians(wall_left, wall_right)
+    rss_ratio = ratio_of_medians(rss_left, rss_right)
+    hit_loss = hits_left < hits_right
+    calls_loss = statistics.median(calls_left) > statistics.median(calls_right)
+    wall_miss = wall_ratio[2] > 1.10
+    rss_miss = rss_ratio[2] > 1.10
+    return {
+        "n": n,
+        "fisher": fisher_less(hits_left, n, hits_right, n),
+        "calls_p": calls_p,
+        "wall_p": wall_p,
+        "rss_p": rss_p,
+        "calls_ratio": calls_ratio,
+        "wall_ratio": wall_ratio,
+        "rss_ratio": rss_ratio,
+        "hit_loss": hit_loss,
+        "calls_loss": calls_loss,
+        "calls_real": calls_loss and calls_ratio[1] > 1,
+        "wall_miss": wall_miss,
+        "rss_miss": rss_miss,
+        "wall_real": wall_miss and wall_ratio[1] > 1,
+        "rss_real": rss_miss and rss_ratio[1] > 1,
+    }
+
+
+def analyze_oos(args: argparse.Namespace) -> int:
+    rows = load_rows(Path(args.rows))
+    for row in rows:
+        if int(row["seed"]) < 2012 or row["arm"] not in ("A", "M", "O"):
+            raise RuntimeError("out-of-sample file contains an in-sample row")
+    lines = [
+        "# PR 168 walklen3 gate, shard B, out of sample",
+        "",
+        f"Measured base `{A_REV}`, tree `{A_TREE}`.",
+        f"M is scratch merge `{M_REV}`, tree `{M_TREE}`.",
+        f"`git merge-tree --write-tree` of the base and payload `{O_PAYLOAD}`",
+        f"(tree `{O_PAYLOAD_TREE}`) exited 0 and wrote `{O_TREE}`.",
+        f"O is scratch merge `{O_REV}` of that tree. Neither scratch merge is in the result history.",
+        "",
+        "Seeds 2000-2011 stay in the in-sample A-versus-M record and are not inputs here.",
+        "This file uses seeds 2012-2119 for lj75-seed and seeds 2012-2023 for the other cells.",
+        "lj75-seed runs first. The arm order repeats AMO, OMA, MAO, OAM, MOA, AOM.",
+        "",
+        "Bootstrap: 10000 paired resamples, seed 20261123, type-7 percentiles.",
+        "A fresh generator is used for each interval. A miss counts as budget plus one.",
+        "The ratio is the median of the first arm divided by the median of the second.",
+        "The bar is no hit loss, no calls-to-hit loss, and an upper interval at most 1.10",
+        "on outside time and on RSS. A hit loss is real when the one-sided Fisher",
+        "probability is below 0.05. A calls, outside, or RSS loss is real only when",
+        "its lower interval is above 1. This round has no second build of the base.",
+        "",
+        "| cell | arm | hits | Wilson 95% | median calls | median outside | median RSS |",
+        "| --- | --- | ---: | --- | ---: | ---: | ---: |",
+    ]
+    details: list[str] = []
+    pair_lines = [
+        "",
+        "| cell | pair | Fisher p | MWU calls | MWU outside | MWU RSS | calls ratio | outside ratio | RSS ratio | verdict |",
+        "| --- | --- | ---: | ---: | ---: | ---: | --- | --- | --- | --- |",
+    ]
+    overall = "PASS"
+    rank = {"PASS": 0, "UNRESOLVED": 1, "FIX": 2}
+    for name in OOS_CELLS:
+        cell = oos_cell(name)
+        groups = {arm: grouped(rows, cell.name, arm) for arm in ("A", "M", "O")}
+        target = len(cell.seeds)
+        complete = all(len(groups[arm]) == target for arm in groups) and all(
+            int(row["peak_rss_anon_kb"]) > 0 for group in groups.values() for row in group
+        )
+        aligned = []
+        for seed in (str(seed) for seed in cell.seeds):
+            if all(any(row["seed"] == seed for row in groups[arm]) for arm in groups):
+                aligned.append(seed)
+            else:
+                break
+        if not aligned:
+            for arm in ("A", "M", "O"):
+                lines.append(f"| {cell.name} | {arm} | 0/{target} |  |  |  |  |")
+            for challenger, reference in OOS_PAIRS:
+                pair_lines.append(
+                    f"| {cell.name} | {challenger}/{reference} |  |  |  |  |  |  |  | UNRESOLVED |"
+                )
+            details.extend(
+                [
+                    "",
+                    f"## {cell.name}",
+                    "",
+                    "Verdict A: reference.",
+                    "Verdict M versus A: UNRESOLVED.",
+                    "Verdict O versus A: UNRESOLVED.",
+                    "Verdict O versus M: UNRESOLVED.",
+                    "",
+                    f"Rounds reached: 0 of {target}.",
+                    "",
+                ]
+            )
+            if rank["UNRESOLVED"] > rank[overall]:
+                overall = "UNRESOLVED"
+            continue
+        picked = {
+            arm: [next(row for row in groups[arm] if row["seed"] == seed) for seed in aligned]
+            for arm in groups
+        }
+        n = len(aligned)
+        for arm in ("A", "M", "O"):
+            hits = sum(int(row["hit"]) for row in picked[arm])
+            low, high = wilson(hits, n)
+            calls = statistics.median(float(row["calls_to_hit"]) for row in picked[arm])
+            wall = statistics.median(float(row["outside_s"]) for row in picked[arm])
+            rss = statistics.median(float(row["peak_rss_anon_kb"]) for row in picked[arm])
+            lines.append(
+                f"| {cell.name} | {arm} | {hits}/{n} | [{low:.4f}, {high:.4f}] | "
+                f"{calls:.1f} | {wall:.6f} | {rss:.1f} |"
+            )
+        full = complete and n == target
+        scored = {}
+        for challenger, reference in OOS_PAIRS:
+            scored[(challenger, reference)] = pair_scores(picked, challenger, reference)
+            item = scored[(challenger, reference)]
+            verdict = judge(
+                full,
+                bool(item["hit_loss"]),
+                float(item["fisher"]),
+                bool(item["calls_loss"]),
+                bool(item["calls_real"]),
+                bool(item["wall_real"]),
+                bool(item["rss_real"]),
+                bool(item["wall_miss"]),
+                bool(item["rss_miss"]),
+            )
+            item["verdict"] = verdict
+            if rank[verdict] > rank[overall]:
+                overall = verdict
+            pair_lines.append(
+                f"| {cell.name} | {challenger}/{reference} | {float(item['fisher']):.4g} | "
+                f"{float(item['calls_p']):.4g} | {float(item['wall_p']):.4g} | {float(item['rss_p']):.4g} | "
+                f"{ci_text(item['calls_ratio'])} | {ci_text(item['wall_ratio'])} | "
+                f"{ci_text(item['rss_ratio'])} | {verdict} |"
+            )
+        details.extend(["", f"## {cell.name}", ""])
+        for label, key in (
+            ("M versus A", ("M", "A")),
+            ("O versus A", ("O", "A")),
+            ("O versus M", ("O", "M")),
+        ):
+            item = scored[key]
+            reasons = []
+            if not full:
+                reasons.append(f"rounds {n} of {target}")
+            if item["hit_loss"]:
+                reasons.append("hit loss" + (" real" if float(item["fisher"]) < 0.05 else " not real"))
+            if item["calls_loss"]:
+                reasons.append("calls-to-hit loss" + (" real" if item["calls_real"] else " not real"))
+            if item["wall_miss"]:
+                reasons.append("outside upper above 1.10" + (" real" if item["wall_real"] else " not real"))
+            if item["rss_miss"]:
+                reasons.append("RSS upper above 1.10" + (" real" if item["rss_real"] else " not real"))
+            details.append(f"Verdict {label}: {item['verdict']}.")
+            details.append("Notes: " + ("; ".join(reasons) if reasons else "every bar holds") + ".")
+        details.append("")
+        details.append(
+            "Binary sha256 "
+            + " ".join(f"{arm} {picked[arm][0]['binary_sha256']}" for arm in ("A", "M", "O"))
+            + "."
+        )
+        details.append(
+            "Revision " + " ".join(f"{arm} {picked[arm][0]['arm_revision']}" for arm in ("A", "M", "O")) + "."
+        )
+        if cell.kind == "seed":
+            for challenger in ("M", "O"):
+                identical = 0
+                differ = []
+                for base, other in zip(picked["A"], picked[challenger], strict=True):
+                    if base["trace_sha256"] and other["trace_sha256"]:
+                        if base["trace_sha256"] == other["trace_sha256"]:
+                            identical += 1
+                        else:
+                            differ.append(base["seed"])
+                details.append(f"{challenger} traces bit-identical to A: {identical} of {n}.")
+                if differ:
+                    details.append("Seeds whose trace differs: " + ", ".join(differ) + ".")
+        else:
+            same = 0
+            for base, other_m, other_o in zip(picked["A"], picked["M"], picked["O"], strict=True):
+                if base["best_energy"] == other_m["best_energy"] == other_o["best_energy"]:
+                    same += 1
+            details.append("This driver does not write a call trajectory.")
+            details.append(f"Printed best-energy strings match on {same} of {n} seeds.")
+        details.append("")
+    lines.extend(pair_lines)
+    lines.extend(["", f"Overall: **{overall}**.", ""])
+    lines.extend(details)
+    durable_text(Path(args.report), "\n".join(lines) + "\n")
+    print(overall)
+    return 0
+
+
 def self_test() -> int:
     assert stop_energy("-397.492331") == "-397.491331"
     assert stop_energy("-173.928427") == "-173.927427"
@@ -845,6 +1121,22 @@ def self_test() -> int:
     assert judge(True, True, 0.01, False, False, False, False, False, False) == "FIX"
     assert judge(True, False, 1, False, False, False, False, True, False) == "UNRESOLVED"
     assert judge(True, False, 1, False, False, True, False, True, False) == "FIX"
+    low, high = wilson(5, 10)
+    assert abs(low - 0.236593) < 1e-4
+    assert abs(high - 0.763407) < 1e-4
+    assert wilson(0, 12)[0] < 1e-12
+    assert OOS_ORDER[0] == ("A", "M", "O")
+    assert OOS_ORDER[1] == ("O", "M", "A")
+    assert len({perm for perm in OOS_ORDER}) == 6
+    assert OOS_CELLS[0] == "lj75-seed"
+    assert OOS_LJ75[0] == 2012 and OOS_LJ75[-1] == 2119 and len(OOS_LJ75) == 108
+    assert OOS_N12[0] == 2012 and OOS_N12[-1] == 2023 and len(OOS_N12) == 12
+    slots = {0: [], 1: [], 2: []}
+    for perm in OOS_ORDER:
+        for index, arm in enumerate(perm):
+            slots[index].append(arm)
+    for slot in slots.values():
+        assert slot.count("A") == slot.count("M") == slot.count("O") == 2
     geo = ratio_geomean([2, 8], [1, 2])
     assert abs(geo[0] - 2.0 ** 1.5) < 1e-9
     print("ok")
@@ -869,6 +1161,21 @@ def parser() -> argparse.ArgumentParser:
     report = sub.add_parser("analyze")
     report.add_argument("--rows", required=True)
     report.add_argument("--report", required=True)
+    oos = sub.add_parser("run-oos")
+    oos.add_argument("--source-a", required=True)
+    oos.add_argument("--source-m", required=True)
+    oos.add_argument("--source-o", required=True)
+    oos.add_argument("--bin-a", required=True)
+    oos.add_argument("--bin-m", required=True)
+    oos.add_argument("--bin-o", required=True)
+    oos.add_argument("--rows", required=True)
+    oos.add_argument("--sessions", required=True)
+    oos.add_argument("--logs", required=True)
+    oos.add_argument("--scratch", required=True)
+    oos.add_argument("--hours", type=float, default=12.0)
+    oos_report = sub.add_parser("analyze-oos")
+    oos_report.add_argument("--rows", required=True)
+    oos_report.add_argument("--report", required=True)
     sub.add_parser("self-test")
     return top
 
@@ -879,6 +1186,16 @@ def main() -> int:
         return self_test()
     if args.action == "analyze":
         return analyze(args)
+    if args.action == "analyze-oos":
+        return analyze_oos(args)
+    if args.action == "run-oos":
+        if Path(args.rows).name == "rows.csv":
+            raise RuntimeError("out-of-sample rows go in their own file")
+        built = oos_arms(args)
+        deadline = time.time() + args.hours * 3600
+        for name in OOS_CELLS:
+            run_cell(args, oos_cell(name), deadline, built, OOS_ORDER)
+        return 0
     deadline = time.time() + args.hours * 3600
     for name in ORDER:
         run_cell(args, CELLS[name], deadline)
