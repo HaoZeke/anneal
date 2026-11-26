@@ -1444,6 +1444,14 @@ pub type GradFn<'g> = dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<Array1<f
 pub type EnergyGradFn<'g> =
     dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + Send + 'g;
 
+/// Polishes the incumbent after a hop improves it.
+///
+/// The closure charges every evaluation on the ledger it is given. `None`
+/// means the ledger closed before a finite point. The hop records the point
+/// only when it is lower than the incumbent.
+pub(crate) type ImprovePolish<'a> =
+    dyn FnMut(&mut Ledger, ArrayView1<f64>) -> Option<(f64, Array1<f64>)> + 'a;
+
 /// A borrow of one, for a caller that has a gradient to lend.
 ///
 /// The two lifetimes are separate on purpose. Tying the trait object's lifetime
@@ -2795,6 +2803,34 @@ pub fn run<R: Rng + ?Sized>(
     run_with_gradient(cfg, start, ledger, relax, None, rng)
 }
 
+/// As [`run`], polishing the incumbent when [`Config::polish_on_improve`] is set.
+#[cfg(test)]
+pub(crate) fn run_polished<'p, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    improve: Option<&mut ImprovePolish<'p>>,
+    rng: &mut R,
+) -> Result<Outcome, SearchError> {
+    let mut checkpoint = continue_without_checkpoint;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        &mut checkpoint,
+        rng,
+        improve,
+    )
+}
+
 /// As [`run`], with a gradient for the soft-mode escape.
 ///
 /// Without one, [`Config::minima_hopping`] falls back to scaling the ordinary
@@ -2823,6 +2859,7 @@ pub fn run_with_gradient_settle<'g, R: Rng + ?Sized>(
         None,
         &mut checkpoint,
         rng,
+        None,
     )
 }
 
@@ -2849,6 +2886,7 @@ pub fn run_with_gradient<'g, R: Rng + ?Sized>(
         None,
         &mut checkpoint,
         rng,
+        None,
     )
 }
 
@@ -2877,6 +2915,36 @@ pub fn run_with_energy_gradient<'g, R: Rng + ?Sized>(
         None,
         &mut checkpoint,
         rng,
+        None,
+    )
+}
+
+/// As [`run_with_energy_gradient`], with a polish of each new incumbent.
+pub(crate) fn run_with_energy_gradient_polished<'g, 'p, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    improve: Option<&mut ImprovePolish<'p>>,
+    rng: &mut R,
+) -> Result<Outcome, SearchError> {
+    let mut checkpoint = continue_without_checkpoint;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        None,
+        None,
+        None,
+        None,
+        &mut checkpoint,
+        rng,
+        improve,
     )
 }
 
@@ -2916,6 +2984,45 @@ where
         Some(checkpoint_interval),
         checkpoint,
         rng,
+        None,
+    )
+}
+
+/// As [`run_with_energy_gradient_at_checkpoints`], polishing each new incumbent.
+pub(crate) fn run_with_energy_gradient_at_checkpoints_polished<'g, 'p, R, H>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    improve: Option<&mut ImprovePolish<'p>>,
+    rng: &mut R,
+    checkpoint_interval: usize,
+    checkpoint: &mut H,
+) -> Result<Outcome, SearchError>
+where
+    R: Rng + ?Sized,
+    H: for<'a> FnMut(ChainCheckpoint<'a>) -> CheckpointAction,
+{
+    assert!(
+        checkpoint_interval > 0,
+        "checkpoint interval must be positive"
+    );
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        None,
+        None,
+        None,
+        Some(checkpoint_interval),
+        checkpoint,
+        rng,
+        improve,
     )
 }
 
@@ -2960,6 +3067,7 @@ pub fn run_with_bias<'g, R: Rng + ?Sized>(
         None,
         &mut checkpoint,
         rng,
+        None,
     )
 }
 
@@ -3002,6 +3110,7 @@ where
         Some(checkpoint_interval),
         checkpoint,
         rng,
+        None,
     )
 }
 
@@ -3033,6 +3142,36 @@ pub fn run_with_history<'g, R: Rng + ?Sized>(
         None,
         &mut checkpoint,
         rng,
+        None,
+    )
+}
+
+/// As [`run_with_history`], polishing each new incumbent.
+pub(crate) fn run_with_history_polished<'g, 'p, R: Rng + ?Sized>(
+    cfg: &Config,
+    start: ArrayView1<f64>,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    history: Option<&mut dyn HistoryHook>,
+    improve: Option<&mut ImprovePolish<'p>>,
+    rng: &mut R,
+) -> Result<Outcome, SearchError> {
+    let mut checkpoint = continue_without_checkpoint;
+    run_full(
+        cfg,
+        start,
+        ledger,
+        relax,
+        grad,
+        None,
+        None,
+        None,
+        history,
+        None,
+        &mut checkpoint,
+        rng,
+        improve,
     )
 }
 
@@ -3078,6 +3217,7 @@ where
         Some(checkpoint_interval),
         checkpoint,
         rng,
+        None,
     )
 }
 
@@ -5373,6 +5513,43 @@ fn rigid_archive_due(book: &RigidStallBook, archive_patience: usize, spent: usiz
     spent.saturating_sub(book.charged_at_archive_best) >= archive_patience
 }
 
+/// Polishes the ledger's incumbent after it improved.
+///
+/// An off preset returns before any charge, so its call sequence is the
+/// one the hop would have made without this option. The closure's point
+/// replaces the incumbent only when it is lower. Recording a point at the
+/// stop target makes the caller stop with [`HopStop::Target`].
+fn polish_improved_incumbent(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    improve: &mut Option<&mut ImprovePolish<'_>>,
+    improvements: &mut Vec<(usize, usize, usize, f64)>,
+    hops: usize,
+    basins: usize,
+) {
+    if !cfg.polish_on_improve {
+        return;
+    }
+    let Some(polish) = improve.as_mut() else {
+        return;
+    };
+    if ledger.target_reached() || ledger.stopped() || ledger.remaining() == 0 {
+        return;
+    }
+    let Some(state) = ledger.best_state.clone() else {
+        return;
+    };
+    let Some((energy, point)) = polish(ledger, state.view()) else {
+        return;
+    };
+    if energy < ledger.best && quench_is_sane(cfg, energy, point.view()) {
+        ledger.record(energy, point.view());
+        if improvements.len() < 512 {
+            improvements.push((hops, ledger.spent(), basins, energy));
+        }
+    }
+}
+
 fn run_full<'g, R, H>(
     cfg: &Config,
     start: ArrayView1<f64>,
@@ -5386,6 +5563,7 @@ fn run_full<'g, R, H>(
     checkpoint_interval: Option<usize>,
     checkpoint: &mut H,
     rng: &mut R,
+    improve: Option<&mut ImprovePolish<'_>>,
 ) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
@@ -5407,6 +5585,7 @@ where
             checkpoint_interval,
             checkpoint,
             rng,
+            improve,
         )
     } else {
         run_search::<R, H, false>(
@@ -5422,6 +5601,7 @@ where
             checkpoint_interval,
             checkpoint,
             rng,
+            improve,
         )
     }
 }
@@ -5439,6 +5619,7 @@ fn run_search<'g, R, H, const RIGID: bool>(
     checkpoint_interval: Option<usize>,
     checkpoint: &mut H,
     rng: &mut R,
+    mut improve: Option<&mut ImprovePolish<'_>>,
 ) -> Result<Outcome, SearchError>
 where
     R: Rng + ?Sized,
@@ -6319,6 +6500,16 @@ where
     let mut held_cv: Option<Array1<f64>> = None;
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
+    if cfg.polish_on_improve {
+        polish_improved_incumbent(
+            cfg,
+            ledger,
+            &mut improve,
+            &mut improvements,
+            0,
+            bias.n_basins(),
+        );
+    }
     let stop = loop {
         // A finished checkpoint interval is delivered before the budget
         // exit. The loop otherwise returns here with nothing left to
@@ -10907,6 +11098,16 @@ where
         // about a fifth of the budget on a chain that hops basins every
         // slice.
         let improved_record = ledger.best < best_before_iteration - STRICT_IMPROVEMENT;
+        if improved_record && cfg.polish_on_improve {
+            polish_improved_incumbent(
+                cfg,
+                ledger,
+                &mut improve,
+                &mut improvements,
+                hops,
+                bias.n_basins(),
+            );
+        }
         let visit_due = moved_basin
             && ledger.spent().saturating_sub(last_polish_spent)
                 >= cfg.polish_records.saturating_mul(4);
@@ -11738,6 +11939,30 @@ pub fn optimize_with_energy_gradient<'g>(
         relax,
         grad,
         energy_grad,
+        &mut rng,
+    )
+}
+
+/// As [`optimize_with_energy_gradient`], polishing each new incumbent.
+pub(crate) fn optimize_with_energy_gradient_polished<'g, 'p>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: Relax<'_>,
+    grad: Option<&mut GradFn<'g>>,
+    energy_grad: Option<&mut EnergyGradFn<'g>>,
+    improve: Option<&mut ImprovePolish<'p>>,
+    seed: u64,
+) -> Result<Outcome, SearchError> {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    run_with_energy_gradient_polished(
+        cfg,
+        start.view(),
+        ledger,
+        relax,
+        grad,
+        energy_grad,
+        improve,
         &mut rng,
     )
 }
@@ -13059,6 +13284,116 @@ mod tests {
             outcome.swaps_tried, 0,
             "replica swaps ran after target was reached"
         );
+    }
+
+    fn armed_post_hop_config() -> Config {
+        let mut cfg = quiet_basis_search(4);
+        cfg.escape_on_stall = false;
+        cfg.restart_on_stall = true;
+        cfg.stall_patience = 1;
+        cfg.polish_records = 7;
+        cfg.superbasin_escape = true;
+        cfg.superbasin_period = 1;
+        cfg.replicas = 2;
+        cfg.swap_period = 1;
+        cfg.ladder_pilot = 1;
+        cfg.path_on_stall = true;
+        cfg.max_hops = Some(2);
+        cfg
+    }
+
+    /// The option is off on this configuration, and the charged sequence is
+    /// the one measured on develop ade36267.
+    #[test]
+    fn polish_off_keeps_the_develop_charged_sequence() {
+        let mut cfg = armed_post_hop_config();
+        cfg.polish_on_improve = false;
+        let mut ledger = Ledger::new(400);
+        ledger.stop_below(-10.0);
+        let tetra = regular_tetrahedron();
+        let mut calls = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            calls += 1;
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            let energy = if calls >= 4 { -5.0 } else { 0.0 };
+            (energy, tetra.clone())
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run(&cfg, tetra.view(), &mut ledger, &mut relax, &mut rng).expect("search");
+        assert_eq!(ledger.spent(), 29);
+        assert_eq!(outcome.stop, Some(HopStop::MaxHops));
+        assert_eq!(outcome.best, -5.0);
+        assert_eq!(ledger.encounters(), &[(4, 0.0), (17, -5.0)]);
+        assert_eq!(calls, 8);
+        assert_eq!(outcome.swaps_tried, 2);
+    }
+
+    /// The first polish charge that crosses the target is the encounter, the
+    /// stop is Target, and the stages that follow a hop do not run.
+    #[test]
+    fn a_polish_on_improvement_target_hit_is_the_encounter() {
+        let mut cfg = armed_post_hop_config();
+        cfg.polish_on_improve = true;
+        let mut ledger = Ledger::new(400);
+        ledger.stop_below(-10.0);
+        let tetra = regular_tetrahedron();
+        let mut calls = 0usize;
+        let mut polish_calls = 0usize;
+        let mut post_target_calls = 0usize;
+        let mut relax = |led: &mut Ledger, _x: ArrayView1<f64>, steps: usize| {
+            if led.target_reached() {
+                post_target_calls += 1;
+            }
+            if steps == cfg.polish_records {
+                polish_calls += 1;
+            }
+            calls += 1;
+            for _ in 0..steps {
+                if !led.charge() {
+                    break;
+                }
+            }
+            (0.0, tetra.clone())
+        };
+        let mut polish_charges = Vec::new();
+        let mut polish = |led: &mut Ledger, state: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            polish_charges.push(led.spent());
+            Some((-20.0, state.to_owned()))
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_polished(
+            &cfg,
+            tetra.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut polish),
+            &mut rng,
+        )
+        .expect("search");
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(outcome.best, -20.0);
+        assert_eq!(polish_calls, 0, "polish_records ran after target hit");
+        assert_eq!(post_target_calls, 0, "relax ran after target was reached");
+        assert_eq!(
+            outcome.swaps_tried, 0,
+            "replica swaps ran after target was reached"
+        );
+        let hit = *ledger
+            .encounters()
+            .last()
+            .expect("the polished point is an encounter");
+        assert_eq!(hit.1, -20.0);
+        assert_eq!(polish_charges, vec![hit.0]);
+        assert_eq!(ledger.spent(), hit.0, "a charge landed after the crossing");
+        assert!(calls >= 1);
+        assert!(ledger.encounters()[0].1 > -10.0);
     }
 
     #[test]

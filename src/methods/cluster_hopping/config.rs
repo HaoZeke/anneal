@@ -1361,6 +1361,15 @@ pub struct Config {
     /// 1000 steps, and the calls are charged to the ledger.
     /// Zero disables the polish and leaves the solo behaviour untouched.
     pub polish_records: usize,
+    /// Polish the incumbent when a hop improves it.
+    ///
+    /// Each evaluation is charged on the hop's own ledger, at the component
+    /// gradient tolerance, with nothing held back and nothing granted. A
+    /// polished point at or below the ledger's stop target ends the search
+    /// on that evaluation. The point replaces the incumbent only when it is
+    /// lower. Off on every preset, so a resolved preset is unchanged.
+    #[serde(skip_serializing_if = "is_false")]
+    pub polish_on_improve: bool,
     /// Predictive spread, in units of the temperature, above which the first
     /// stage abstains rather than deciding.
     ///
@@ -1909,6 +1918,7 @@ impl Config {
     /// ```
     pub fn recommended_with_scales(n_points: usize, length_scale: f64, energy_scale: f64) -> Self {
         let mut cfg = Self::screened_with_scales(n_points, length_scale, energy_scale);
+        cfg.polish_on_improve = false;
         cfg.move_library = MoveLibrary::LeanBurst;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
@@ -2339,6 +2349,7 @@ impl Config {
             long_ranged: false,
             plateau_heat: false,
             polish_records: 0,
+            polish_on_improve: false,
             surrogate_tolerance: 0.5,
             delayed_acceptance: false,
             construct_width: 4,
@@ -2557,6 +2568,7 @@ impl Config {
     /// ```
     pub fn recommended_tip4p(n_molecules: usize) -> Self {
         let mut cfg = Self::for_tip4p(n_molecules);
+        cfg.polish_on_improve = false;
         // Depth reward, stall tabu and the return screen are the atomic
         // Lennard-Jones controls. On rigid TIP4P they pin the walk in a
         // cage about 5 kJ/mol above the Wales-Hodges minimum, and further
@@ -2626,6 +2638,7 @@ impl Config {
         energy_scale: f64,
     ) -> Self {
         let mut cfg = Self::for_molecular(species, groups, energy_scale);
+        cfg.polish_on_improve = false;
         cfg.allocate_moves = true;
         cfg.depth_reward = true;
         cfg.tabu_on_stall = true;
