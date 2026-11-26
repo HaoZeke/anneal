@@ -255,6 +255,10 @@ fn cmd_run(args: &[String]) -> i32 {
     for (name, draws, accepts, best) in &outcome.arms {
         println!("arm {name} draws {draws} accepts {accepts} best {best:.6}");
     }
+    println!(
+        "safe6_nearest_index={}",
+        anneal_core::symmetrise::safe6_nearest_index_calls()
+    );
     0
 }
 

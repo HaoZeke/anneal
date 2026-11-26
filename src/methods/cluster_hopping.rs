@@ -7862,6 +7862,7 @@ where
                             step: cfg.escape_amplitude.max(0.15),
                             max_steps: cfg.escape_max_climb.max(48),
                             overshoot: cfg.escape_overshoot.max(1.0),
+                            detected_symmetry: cfg.detected_symmetry,
                             ..crate::methods::activation::Activation::default()
                         };
                         crate::methods::activation::activate_from_origin(
@@ -7919,6 +7920,7 @@ where
                             step: cfg.escape_amplitude.max(0.15),
                             max_steps: cfg.escape_max_climb.max(16),
                             overshoot: cfg.escape_overshoot.max(1.0),
+                            detected_symmetry: cfg.detected_symmetry,
                             ..crate::methods::activation::Activation::default()
                         };
                         crate::methods::activation::activate(
@@ -8222,7 +8224,7 @@ where
                         None
                     } else {
                         new_incumbent = false;
-                        crate::csm::propose(x.view(), classes)
+                        crate::csm::propose_for(cfg.detected_symmetry, x.view(), classes)
                             .map(|projected| projected.coordinates)
                     }
                 }
@@ -10557,7 +10559,8 @@ where
             && !ledger.target_reached()
             && !ledger.stopped()
             && (moved_basin || cfg.point_symmetrise_every_accept)
-            && let Some(y) = crate::symmetrise::symmetrise_core(
+            && let Some(y) = crate::symmetrise::symmetrise_core_for(
+                cfg.detected_symmetry,
                 x.view(),
                 n,
                 cfg.symmetry_tolerance,
@@ -10618,7 +10621,8 @@ where
                 .zip(history.as_deref_mut())
                 .is_none_or(|(m, h)| h.claim_completion(m))
         {
-            let candidates = crate::packing::orbit_candidates(
+            let candidates = crate::packing::orbit_candidates_for(
+                cfg.detected_symmetry,
                 x.view(),
                 n,
                 cfg.orbit_core,
@@ -10867,42 +10871,90 @@ where
                 // tetrahedral. Detecting several axes and closing them into a group
                 // is what makes this the published scheme rather than an axial
                 // constraint wearing its name.
-                let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
-                for order in [2usize, 3, 4, 5, 6] {
-                    if let Some(c) =
-                        crate::symmetrise::detect(x.view(), n, &[order], cfg.symmetry_tolerance)
-                    {
-                        cands.push(c);
-                    }
+                if n < 2 {
+                    continue;
                 }
-                let group = crate::symmetrise::generate_group(&cands, 60);
-                let symmetrised_state = if group.len() > 1 {
-                    Some(match cfg.species.as_deref() {
-                        Some(species) if species.len() == n => {
-                            crate::symmetrise::symmetrise_group_within(
+                let symmetrised_state = if cfg.detected_symmetry {
+                    let orders = crate::symmetrise::orders_held(n);
+                    let cands = crate::symmetrise::detect_orders(
+                        x.view(),
+                        n,
+                        &orders,
+                        cfg.symmetry_tolerance,
+                    );
+                    let detected_orders: Vec<usize> =
+                        cands.iter().map(|candidate| candidate.order).collect();
+                    match crate::symmetrise::generate_closed_group(&cands, 120) {
+                        Some(group) if group.len() > 1 => Some(match cfg.species.as_deref() {
+                            Some(species) if species.len() == n => {
+                                crate::symmetrise::symmetrise_group_within(
+                                    x.view(),
+                                    n,
+                                    &group,
+                                    cfg.symmetry_merge_radius,
+                                    species,
+                                )
+                            }
+                            _ => crate::symmetrise::symmetrise_group(
                                 x.view(),
                                 n,
                                 &group,
                                 cfg.symmetry_merge_radius,
-                                species,
-                            )
-                        }
-                        _ => crate::symmetrise::symmetrise_group(
+                            ),
+                        }),
+                        Some(_) => crate::symmetrise::symmetrise_detected(
                             x.view(),
                             n,
-                            &group,
+                            &detected_orders,
+                            cfg.symmetry_tolerance,
                             cfg.symmetry_merge_radius,
-                        ),
-                    })
+                        )
+                        .map(|(y, _)| y),
+                        None => None,
+                    }
                 } else {
-                    crate::symmetrise::symmetrise_detected(
-                        x.view(),
-                        n,
-                        &[2, 3, 4, 5, 6],
-                        cfg.symmetry_tolerance,
-                        cfg.symmetry_merge_radius,
-                    )
-                    .map(|(y, _)| y)
+                    let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
+                    for order in [2usize, 3, 4, 5, 6] {
+                        if let Some(c) = crate::symmetrise::detect_crystallographic(
+                            x.view(),
+                            n,
+                            &[order],
+                            cfg.symmetry_tolerance,
+                        ) {
+                            cands.push(c);
+                        }
+                    }
+                    if let Some(group) =
+                        crate::symmetrise::generate_group_for(cfg.detected_symmetry, &cands, 60)
+                        && group.len() > 1
+                    {
+                        Some(match cfg.species.as_deref() {
+                            Some(species) if species.len() == n => {
+                                crate::symmetrise::symmetrise_group_within(
+                                    x.view(),
+                                    n,
+                                    &group,
+                                    cfg.symmetry_merge_radius,
+                                    species,
+                                )
+                            }
+                            _ => crate::symmetrise::symmetrise_group(
+                                x.view(),
+                                n,
+                                &group,
+                                cfg.symmetry_merge_radius,
+                            ),
+                        })
+                    } else {
+                        crate::symmetrise::symmetrise_detected_crystallographic(
+                            x.view(),
+                            n,
+                            &[2, 3, 4, 5, 6],
+                            cfg.symmetry_tolerance,
+                            cfg.symmetry_merge_radius,
+                        )
+                        .map(|(y, _)| y)
+                    }
                 };
                 if let Some(y) = symmetrised_state {
                     let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
@@ -11293,6 +11345,7 @@ where
                     max_steps: cfg.escape_max_climb,
                     lanczos_steps: cfg.escape_lanczos_steps,
                     epsilon: cfg.escape_epsilon,
+                    detected_symmetry: cfg.detected_symmetry,
                     ..Activation::default()
                 };
                 let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
@@ -12672,6 +12725,38 @@ mod tests {
         assert!(ledger.below_target(-5.0));
         assert!(!ledger.below_target((-1.0_f64).next_up()));
         assert!(!ledger.below_target(f64::NAN));
+    }
+
+    /// An identity-only detection is not a symmetry, so the search does
+    /// not relax a copy of the coordinates.
+    #[test]
+    fn an_asymmetric_cloud_adds_no_relaxation() {
+        let start = Array1::from_vec(vec![
+            0.2, -0.5, 0.1, 1.1, 0.3, -0.4, -0.6, 0.8, 0.7, 0.4, -0.2, 1.3,
+        ]);
+        let mut plain = Config::for_cluster(4);
+        plain.max_hops = Some(2);
+        plain.replicas = 1;
+        plain.continuous_symmetry = ContinuousSymmetry::Off;
+        let mut measured = plain.clone();
+        measured.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
+        measured.detected_symmetry = true;
+        let count = |cfg: &Config| {
+            let mut calls = 0usize;
+            let mut ledger = Ledger::new(12);
+            let mut rng = StdRng::seed_from_u64(11);
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _: usize| {
+                calls += 1;
+                let _ = led.charge();
+                (x.iter().sum::<f64>(), x.to_owned())
+            };
+            run(cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("run");
+            calls
+        };
+        let without = count(&plain);
+        let with = count(&measured);
+        assert!(without > 0, "the walk never relaxed");
+        assert_eq!(with, without, "the identity projection was relaxed");
     }
 
     #[test]
@@ -16338,6 +16423,30 @@ mod tests {
     }
 
     #[test]
+    fn detected_symmetry_reaches_point_group_arms() {
+        let mut cfg = Config::for_cluster(7);
+        cfg.orbit_complete_on_new = false;
+        cfg.orbit_arm = true;
+        cfg.point_symmetrise = true;
+        cfg.detected_symmetry = true;
+        let kernels = search_kernels(&cfg);
+        assert!(kernels.iter().any(|kernel| matches!(
+            kernel,
+            ClusterMove::OrbitComplete {
+                detected_symmetry: true,
+                ..
+            }
+        )));
+        assert!(kernels.iter().any(|kernel| matches!(
+            kernel,
+            ClusterMove::PointSymmetrise {
+                detected_symmetry: true,
+                ..
+            }
+        )));
+    }
+
+    #[test]
     fn the_orbit_arm_steps_one_point_when_no_group_moves_anyone() {
         let cfg = Config::for_cluster(3);
         let kernel = ClusterMove::OrbitComplete {
@@ -16347,6 +16456,7 @@ mod tests {
             core_fraction: cfg.symmetrise_core_fraction,
             min_separation: cfg.min_separation,
             fallback_step: 0.1,
+            detected_symmetry: false,
         };
         let x = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0]);
         let mut rng = StdRng::seed_from_u64(7);

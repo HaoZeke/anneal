@@ -180,9 +180,10 @@ pub enum ContinuousSymmetry {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
     },
-    /// Project onto `C_i`, `C_5`, and `D_5h` and quench the lowest continuous
-    /// symmetry measure. GMIN's `NSYMINTERVAL` default is the same ten
-    /// quenches (`keywords.f90`).
+    /// Project onto `C_i`, `C_5`, and `D_5h`, or onto the operations detected
+    /// on the incumbent when [`Config::detected_symmetry`] is on, and quench
+    /// the lowest continuous symmetry measure. GMIN's `NSYMINTERVAL` default
+    /// is the same ten quenches (`keywords.f90`).
     Measure {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
@@ -786,8 +787,17 @@ pub struct Config {
     /// each group image and quenches the averaged geometry on a fixed
     /// schedule. `C_i` has no orientation search. [`ContinuousSymmetry::Measure`]
     /// is the Oakley, Johnston and Wales continuous symmetry measure over
-    /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia tensor.
+    /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia
+    /// tensor. With [`Config::detected_symmetry`] on, it is the measure over
+    /// the operations detected on the incumbent that keep every atom within
+    /// its equivalence class, projected in the input frame
+    /// ([`crate::csm::propose_for`]).
     pub continuous_symmetry: ContinuousSymmetry,
+    /// Project onto detected symmetry operations rather than the fixed
+    /// fivefold/inversion template library, and scan all orders the point
+    /// count can hold rather than `[2, 3, 4, 5, 6]`.
+    #[serde(skip_serializing_if = "is_false")]
+    pub detected_symmetry: bool,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
     /// Coordinate-space radius used to merge points after symmetrisation.
@@ -2187,6 +2197,13 @@ impl Config {
         self
     }
 
+    /// Opts into template-free symmetry detection across all orders the point
+    /// count can hold.
+    pub fn with_detected_symmetry(mut self) -> Self {
+        self.detected_symmetry = true;
+        self
+    }
+
     /// Lennard-Jones preset expressed against declared physical scales.
     ///
     /// ```
@@ -2288,6 +2305,7 @@ impl Config {
             symmetrise_core_fraction: 0.6,
             point_symmetrise_every_accept: false,
             continuous_symmetry: ContinuousSymmetry::Off,
+            detected_symmetry: false,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
             symmetrise_patience: 2_000,

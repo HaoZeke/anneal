@@ -109,6 +109,9 @@ pub struct Activation {
     /// see the ridge after that, because the first one usually returns to
     /// the same well.
     pub later_ridges: bool,
+    /// Use force-residual and dominant-axis-order openings rather than the
+    /// fixed fivefold openings.
+    pub detected_symmetry: bool,
 }
 
 impl Default for Activation {
@@ -125,6 +128,7 @@ impl Default for Activation {
             overshoot: 1.5,
             min_rise: 0.0,
             later_ridges: false,
+            detected_symmetry: false,
         }
     }
 }
@@ -228,13 +232,12 @@ where
     quench(start.view())
 }
 
-/// Covering displacement, fivefold openings of the same shell, a
+/// Covering displacement, force-residual openings of the same shell, a
 /// minimum-mode climb, then a quench. The lowest minimum is kept.
 ///
 /// The hypersphere cover picks a direction. On a shell that still has
-/// pentagonal axes, those axes are further covering directions: they
-/// are read off the coordinates, not off a target minimum. No target
-/// energy is supplied.
+/// local force residuals, those directions are further covering directions.
+/// No target energy is supplied.
 pub fn cover_climb_quench_min<G, Q, E>(
     origin: ArrayView1<f64>,
     rmsd: f64,
@@ -261,17 +264,35 @@ where
             best = quenched;
         }
     };
-    // Several amplitudes of the pentagonal opening, quenched on their own.
+    // Several amplitudes of the opening, quenched on their own.
+    let origin_mode = if cfg.detected_symmetry {
+        residual_mode(origin, &mut grad)
+    } else {
+        None
+    };
     for amp in [0.35_f64, 0.55, 0.75, 1.0, 1.25] {
         for which in 0..4 {
-            keep(quench(fivefold_opening(origin, amp, which).view()));
+            let opened = if cfg.detected_symmetry {
+                step_along_residual(origin, amp, which, origin_mode.as_ref())
+            } else {
+                fivefold_opening(origin, amp, which)
+            };
+            keep(quench(opened.view()));
         }
     }
     // The same opening stacked, then one quench, so the shell can
     // reconstruct before it is relaxed.
     let mut chain = origin.to_owned();
     for which in 0..8 {
-        chain = fivefold_opening(chain.view(), 0.75, which);
+        chain = if cfg.detected_symmetry {
+            if which == 0 {
+                step_along_residual(chain.view(), 0.75, which, origin_mode.as_ref())
+            } else {
+                residual_opening(chain.view(), 0.75, which, &mut grad)
+            }
+        } else {
+            fivefold_opening(chain.view(), 0.75, which)
+        };
     }
     keep(quench(chain.view()));
     let mut here = origin.to_owned();
@@ -280,12 +301,16 @@ where
     let n_cover = crate::hypersphere::default_cover_size();
     let temperature = 8.0_f64;
     // One kick stays in the icosahedral funnel or lands above it.
-    // Keep walking: a covering displacement, sometimes a pentagonal
-    // opening, a minimum-mode climb when the ridge is real, then a
+    // Keep walking: a covering displacement, sometimes an opening,
+    // a minimum-mode climb when the ridge is real, then a
     // quench. Uphill quenches are accepted so the walk can leave.
     for hop in 0..16 {
         let point = if hop % 6 == 0 {
-            fivefold_opening(here.view(), rmsd, hop)
+            if cfg.detected_symmetry {
+                residual_opening(here.view(), rmsd, hop, &mut grad)
+            } else {
+                fivefold_opening(here.view(), rmsd, hop)
+            }
         } else {
             let direction =
                 crate::hypersphere::cover_direction(n_cover, here.len(), hop + cover_index);
@@ -1460,11 +1485,12 @@ fn climb_relaxed_cover<E, Q>(
     }
 }
 
-fn regularize_pentagons(
+fn regularize_layers(
     x: ArrayView1<f64>,
     axis: [f64; 3],
     extra: f64,
     contact: f64,
+    detected_symmetry: bool,
 ) -> Array1<f64> {
     let n_atoms = x.len() / 3;
     let mut y = x.to_owned();
@@ -1539,9 +1565,14 @@ fn regularize_pentagons(
             .partial_cmp(&z_right)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    let turn = 2.0 * std::f64::consts::PI / 5.0;
+    let order = if detected_symmetry {
+        dominant_axis_order(x, axis)
+    } else {
+        5
+    };
+    let turn = 2.0 * std::f64::consts::PI / order as f64;
     for (layer, ring) in rings.iter().enumerate() {
-        if ring.len() != 5 {
+        if ring.len() != order {
             continue;
         }
         if ring.iter().any(|&atom| rows[atom].1 <= contact * 0.2) {
@@ -1570,21 +1601,27 @@ fn regularize_pentagons(
     y
 }
 
-fn quench_regular_pentagons<E, Q>(
+fn quench_regular_layers<E, Q>(
     start: ArrayView1<f64>,
     contact: f64,
     evaluate: &mut E,
     quench: &mut Q,
+    cfg: &Activation,
     best_energy: &mut f64,
     best: &mut Array1<f64>,
 ) where
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
-    let stagger = std::f64::consts::PI / 5.0;
     for axis in outer_axes(start, contact) {
-        for extra in [0.0_f64, stagger] {
-            let turned = regularize_pentagons(start, axis, extra, contact);
+        let order = if cfg.detected_symmetry {
+            dominant_axis_order(start, axis)
+        } else {
+            5
+        };
+        let sector = std::f64::consts::PI / order as f64;
+        for extra in [0.0_f64, sector] {
+            let turned = regularize_layers(start, axis, extra, contact, cfg.detected_symmetry);
             let held = relax_held_phi(turned.view(), axis, evaluate);
             let quenched = quench(held.view());
             let _ = note_exit(evaluate, &quenched, 0, best_energy, best);
@@ -1936,12 +1973,13 @@ pub(crate) fn climb_outer_axes<E, Q>(
     E: FnMut(ArrayView1<f64>) -> (f64, Array1<f64>),
     Q: FnMut(ArrayView1<f64>) -> Array1<f64>,
 {
-    // Half a pentagon sector. The axis is an outermost atom of this
-    // geometry, so the angle is the symmetry of that axis.
-    // A pentagon sector is 2π/5. Half of that puts one ring in the gaps of
-    // the next; a quarter sector is the other symmetry fraction.
-    let sector = 2.0 * std::f64::consts::PI / 5.0;
     for (index, axis) in outer_axes(start, contact).into_iter().enumerate() {
+        let order = if cfg.detected_symmetry {
+            dominant_axis_order(start, axis)
+        } else {
+            5
+        };
+        let sector = 2.0 * std::f64::consts::PI / order as f64;
         for fraction in [0.5_f64, 0.25] {
             let staggered = stagger_layers(start, axis, fraction * sector, contact);
             let held = relax_held_phi(staggered.view(), axis, evaluate);
@@ -2579,11 +2617,12 @@ where
     }
     let mut shelf: Option<(f64, Array1<f64>)> = None;
     if contact > 0.95 && n_atoms >= 2 {
-        quench_regular_pentagons(
+        quench_regular_layers(
             origin.view(),
             contact,
             &mut evaluate,
             &mut quench,
+            cfg,
             &mut best_e,
             &mut best,
         );
@@ -2787,11 +2826,12 @@ where
             if !distinct || !compact {
                 continue;
             }
-            quench_regular_pentagons(
+            quench_regular_layers(
                 quenched.view(),
                 contact,
                 &mut evaluate,
                 &mut quench,
+                cfg,
                 &mut best_e,
                 &mut best,
             );
@@ -2912,6 +2952,61 @@ fn fivefold_opening(origin: ArrayView1<f64>, rmsd: f64, which: usize) -> Array1<
         .copied()
         .unwrap_or(good[0]);
     crate::soap::step_away_fivefold_about(origin, rmsd.max(0.75), axis)
+}
+
+fn residual_mode<G>(origin: ArrayView1<f64>, grad: &mut G) -> Option<Array1<f64>>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+{
+    let mut mode = grad(origin)?;
+    renormalize_mode(&mut mode, origin).then_some(mode)
+}
+
+fn step_along_residual(
+    origin: ArrayView1<f64>,
+    rmsd: f64,
+    which: usize,
+    base_mode: Option<&Array1<f64>>,
+) -> Array1<f64> {
+    let Some(mode) = base_mode else {
+        return origin.to_owned();
+    };
+    let n_cover = crate::hypersphere::default_cover_size();
+    let direction = crate::hypersphere::cover_direction(n_cover, origin.len(), which);
+    let align: f64 = mode
+        .iter()
+        .zip(direction.iter())
+        .map(|(left, right)| left * right)
+        .sum();
+    let sign = if align < 0.0 { -1.0 } else { 1.0 };
+    let step = rmsd.max(1e-3) * sign;
+    let mut opened = origin.to_owned();
+    for (value, component) in opened.iter_mut().zip(mode.iter()) {
+        *value += step * *component;
+    }
+    opened
+}
+
+fn residual_opening<G>(
+    origin: ArrayView1<f64>,
+    rmsd: f64,
+    which: usize,
+    grad: &mut G,
+) -> Array1<f64>
+where
+    G: FnMut(ArrayView1<f64>) -> Option<Array1<f64>>,
+{
+    let mode = residual_mode(origin, grad);
+    step_along_residual(origin, rmsd, which, mode.as_ref())
+}
+
+fn dominant_axis_order(x: ArrayView1<f64>, axis: [f64; 3]) -> usize {
+    let n = x.len() / 3;
+    if n < 2 {
+        return 2;
+    }
+    let orders: Vec<usize> = (2..=n).collect();
+    crate::symmetrise::best_order_about(x, n, axis, &orders).unwrap_or(2)
 }
 
 /// Climb along `direction` first, then track the minimum mode.
@@ -3786,6 +3881,48 @@ mod tests {
         assert!(
             after < wide,
             "harmonic probe {after:.3} is not softer than the long probe {wide:.3}"
+        );
+    }
+
+    #[test]
+    fn residual_opening_reuses_origin_gradient() {
+        let lj = crate::potentials::PairPotential::lennard_jones(4);
+        let origin = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 1.15, 0.0, 0.0, 0.5, 0.98, 0.0, 0.5, 0.3, 0.92,
+        ]);
+        let mut origin_grad_calls = 0usize;
+        let origin_bits: Vec<u64> = origin.iter().map(|v: &f64| v.to_bits()).collect();
+        let mut grad = |pt: ArrayView1<f64>| {
+            if pt
+                .iter()
+                .map(|v| v.to_bits())
+                .eq(origin_bits.iter().copied())
+            {
+                origin_grad_calls += 1;
+            }
+            Some(lj.value_and_gradient(pt).1)
+        };
+        let mut quench = |pt: ArrayView1<f64>| pt.to_owned();
+        let mut energy = |pt: ArrayView1<f64>| lj.value_and_gradient(pt).0;
+        let cfg = Activation {
+            detected_symmetry: true,
+            max_steps: 1,
+            ..Activation::default()
+        };
+        let _ = cover_climb_quench_min(
+            origin.view(),
+            0.5,
+            0,
+            &mut grad,
+            &mut quench,
+            &mut energy,
+            &cfg,
+        );
+        // Twenty amplitude/direction openings at `origin` plus step 0 of the
+        // stacked chain share one gradient call at `origin` instead of 21.
+        assert!(
+            origin_grad_calls <= 2,
+            "expected origin gradient to be reused across openings, got {origin_grad_calls} calls"
         );
     }
 }

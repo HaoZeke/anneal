@@ -1148,7 +1148,8 @@ impl MoveKernel<f64> for ShellRotate {
 pub struct Symmetrise {
     /// Points in the state.
     pub n_points: usize,
-    /// Rotation orders to draw from, for example `[2, 3, 4, 5, 6]`.
+    /// Rotation orders to draw from. A library passes every order the
+    /// point count can hold.
     pub orders: Vec<usize>,
     /// Largest separation at which a point and an image are considered partners.
     pub pair_cutoff: f64,
