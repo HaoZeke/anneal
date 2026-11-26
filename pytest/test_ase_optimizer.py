@@ -131,6 +131,39 @@ def test_attach_fires():
     assert any(n >= 1 for n in calls)
 
 
+def test_restart_is_rejected_instead_of_ignored(tmp_path):
+    atoms = DummyAtoms(1.4)
+    with pytest.raises(NotImplementedError, match="restart files are not supported"):
+        Anneal(atoms, logfile=None, restart=tmp_path / "anneal.json")
+
+
+def test_master_false_suppresses_trajectory_writes():
+    atoms = DummyAtoms(1.4)
+    writes = []
+
+    class Trajectory:
+        def write(self, written_atoms):
+            writes.append(written_atoms.get_positions())
+
+    opt = Anneal(atoms, logfile=None, trajectory=Trajectory(), master=False)
+    opt.run(fmax=0.05, steps=2)
+    assert writes == []
+
+
+def test_nonpositive_observer_intervals_are_one_shot():
+    atoms = DummyAtoms(1.4)
+    opt = Anneal(atoms, logfile=None)
+    calls = []
+    opt.attach(lambda label: calls.append((label, opt.nsteps)), 0, "zero")
+    opt.attach(lambda label: calls.append((label, opt.nsteps)), -2, "negative")
+
+    for nsteps in range(4):
+        opt.nsteps = nsteps
+        opt._call_observers()
+
+    assert calls == [("zero", 0), ("negative", 2)]
+
+
 def test_already_converged_does_not_search(monkeypatch):
     atoms = DummyAtoms(0.74)
     hops = []

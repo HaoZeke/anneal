@@ -1,0 +1,5 @@
+# Copyright (c) anneal developers
+# Reason: PotentialCalculator subclasses ASE's Calculator (metaclass
+# abc.ABCMeta and inherited Calculator helpers) when optional `ase` is
+# installed, and plain `object` when `ase` is absent.
+anneal\.ase\.PotentialCalculator

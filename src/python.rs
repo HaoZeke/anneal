@@ -20,7 +20,7 @@
 
 use ndarray::{Array1, ArrayView1};
 use numpy::{PyArray1, PyReadonlyArray1};
-use pyo3::exceptions::{PyTypeError, PyValueError};
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyFloat};
 use rand::SeedableRng;
@@ -31,9 +31,13 @@ use eindir_core::{Bounds, Objective};
 use crate::history::History;
 use crate::variant::{boltzmann_in_box, fast_in_box, gsa_in_box};
 
+mod cluster_config;
 mod device;
 mod landfold;
 mod portfolio_peers;
+mod potentials;
+
+use cluster_config::PyClusterConfig;
 
 /// Drop the GIL before native search that may call back into Python.
 ///
@@ -271,9 +275,15 @@ impl PyBasinBias {
                 "n_points must be at least 2",
             ));
         }
-        if !(gamma > 1.0) || !(w0 > 0.0) || !(merge_radius > 0.0) {
+        if !gamma.is_finite()
+            || !(gamma > 1.0)
+            || !w0.is_finite()
+            || !(w0 >= 0.0)
+            || !merge_radius.is_finite()
+            || !(merge_radius > 0.0)
+        {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "require gamma > 1, w0 > 0, merge_radius > 0",
+                "require finite gamma > 1, w0 >= 0, merge_radius > 0",
             ));
         }
         Ok(Self {
@@ -332,6 +342,78 @@ impl PyBasinBias {
     #[getter]
     fn missing_mass(&self) -> f64 {
         self.inner.missing_mass()
+    }
+
+    /// Euclidean merge radius for basin assignment.
+    #[getter]
+    fn merge_radius(&self) -> f64 {
+        self.inner.merge_radius()
+    }
+
+    #[setter]
+    fn set_merge_radius(&mut self, radius: f64) -> PyResult<()> {
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(PyValueError::new_err(
+                "merge_radius must be finite and positive",
+            ));
+        }
+        self.inner.set_merge_radius(radius);
+        Ok(())
+    }
+
+    /// Base hill height deposited on each basin visit.
+    #[getter]
+    fn height(&self) -> f64 {
+        self.inner.height()
+    }
+
+    #[setter]
+    fn set_height(&mut self, w0: f64) -> PyResult<()> {
+        if !w0.is_finite() || w0 < 0.0 {
+            return Err(PyValueError::new_err(
+                "height must be finite and non-negative",
+            ));
+        }
+        self.inner.set_height(w0);
+        Ok(())
+    }
+
+    /// Accumulated bias depth at basin index `i`.
+    fn well_depth(&self, i: usize) -> PyResult<f64> {
+        if i >= self.inner.n_basins() {
+            return Err(pyo3::exceptions::PyIndexError::new_err(format!(
+                "basin index {i} out of range for n_basins = {}",
+                self.inner.n_basins()
+            )));
+        }
+        Ok(self.inner.well_depth(i))
+    }
+
+    /// Recorded basins as `(center, depth)` pairs in creation order.
+    fn wells<'py>(&self, py: Python<'py>) -> Vec<(Bound<'py, PyArray1<f64>>, f64)> {
+        self.inner
+            .wells()
+            .into_iter()
+            .map(|(c, d)| (PyArray1::from_vec(py, c.to_vec()), d))
+            .collect()
+    }
+
+    /// Up to `count` basins ordered by descending accumulated depth.
+    fn deepest_wells<'py>(
+        &self,
+        py: Python<'py>,
+        count: usize,
+    ) -> Vec<(Bound<'py, PyArray1<f64>>, f64)> {
+        self.inner
+            .deepest_wells(count)
+            .into_iter()
+            .map(|(c, d)| (PyArray1::from_vec(py, c.to_vec()), d))
+            .collect()
+    }
+
+    /// Retains at most `cap` basins, keeping the deepest wells.
+    fn cap_basins(&mut self, cap: usize) {
+        self.inner.cap_basins(cap);
     }
 
     fn __repr__(&self) -> String {
@@ -893,6 +975,10 @@ fn run_hmc(
 }
 
 /// Refines a supplied starting point with bounded L-BFGS polish.
+///
+/// Returns a dict with `best_pos`, `best_val`, `n_evals`, `n_grads`,
+/// `projected_grad_norm`, `projected_stationary`, and `best_grad` (gradient at
+/// `best_pos`, or `None` when no gradient was evaluated there).
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, x0, max_fevals = 200, step0 = 1.0, grad_tol = 1e-8))]
 fn polish(
@@ -946,6 +1032,10 @@ fn polish(
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("projected_grad_norm", result.projected_grad_norm)?;
     out.set_item("projected_stationary", result.projected_stationary)?;
+    out.set_item(
+        "best_grad",
+        result.best_grad.map(|g| PyArray1::from_vec(py, g.to_vec())),
+    )?;
     errors.finish(py)?;
     Ok(out.into())
 }
@@ -1618,7 +1708,10 @@ fn gle_langevin_result_to_dict(
 
 /// GLE-thermostatted Langevin annealing: gradient-driven BAB dynamics with a
 /// colored-noise (generalized Langevin) thermostat that flattens the sampling
-/// efficiency across the curvature band. Returns `{best_pos, best_val, n_evals}`.
+/// efficiency across the curvature band.
+///
+/// Returns a dict with `best_pos`, `best_val`, `n_evals`, `omega0`, `dt`,
+/// `preconditioner_diag`, and `n_preconditioner_grads`.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
                     omega0=None, dt=0.2, n_epochs=40, x0=None))]
@@ -1661,6 +1754,9 @@ fn gle_langevin(
 }
 
 /// GLE-Langevin annealing with a diagonal adaptive coordinate preconditioner.
+///
+/// Returns a dict with `best_pos`, `best_val`, `n_evals`, `omega0`, `dt`,
+/// `preconditioner_diag`, and `n_preconditioner_grads`.
 #[pyfunction]
 #[pyo3(signature = (obj_fn, grad_fn, low, high, max_fevals, seed=0,
                     omega0=None, dt=0.2, n_epochs=40, x0=None,
@@ -1714,6 +1810,9 @@ fn gle_langevin_preconditioned(
 }
 
 /// GLE-Langevin annealing using an `eindir` native objective/gradient handle.
+///
+/// Returns a dict with `best_pos`, `best_val`, `n_evals`, `omega0`, `dt`,
+/// `preconditioner_diag`, and `n_preconditioner_grads`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2,
                     n_epochs=40, x0=None))]
@@ -1756,6 +1855,9 @@ fn gle_langevin_objective(
 }
 
 /// Preconditioned GLE-Langevin annealing using a native objective/gradient handle.
+///
+/// Returns a dict with `best_pos`, `best_val`, `n_evals`, `omega0`, `dt`,
+/// `preconditioner_diag`, and `n_preconditioner_grads`.
 #[pyfunction]
 #[pyo3(signature = (objective, max_fevals, seed=0, omega0=None, dt=0.2,
                     n_epochs=40, x0=None, preconditioner_probes=None))]
@@ -1820,18 +1922,50 @@ fn portfolio_result_to_dict(
     }
     out.set_item("arm_pulls", pulls)?;
     out.set_item("arm_successes", successes)?;
+    out.set_item(
+        "hop_state",
+        result
+            .hop_state
+            .map(|pair| (PyArray1::from_vec(py, pair.pos.to_vec()), pair.val)),
+    )?;
     Ok(out.into())
 }
+
+/// Recommend a target walker count from the evaluation budget and dimension.
+#[pyfunction]
+fn recommend_target_n(budget: usize, dim: usize) -> usize {
+    crate::methods::dmc_population::recommend_target_n(budget, dim)
+}
+
+const _: () = assert!(crate::methods::dmc_population::DEFAULT_STEPS_PER_CONTROL == 2);
+const _: () = assert!(crate::methods::dmc_population::DEFAULT_BETA0.to_bits() == 1.0_f64.to_bits());
 
 /// Classical population-controlled diffusion search (DMC-inspired arm).
 ///
 /// Walkers, diffusion proposals, weight-based branch/kill, and population
-/// control to a target size. Not quantum DMC.
-///
+/// control to a target size (`target_n`, defaulting to
+/// `recommend_target_n(budget, dim)` when `None`) every `steps_per_control`
+/// diffusion steps starting from inverse temperature `beta0`. Not quantum DMC.
+/// When `grad_fn` is provided, proposals include gradient drift and polish.
 /// When `x0` is provided, walker 0 is seeded at that point (clipped into the
 /// box), matching the protocol anchor used by classical SA and dual annealing.
+///
+/// Returns a dict with `best_val`, `best_pos`, `n_evals`, `n_grads`,
+/// `final_population`, and `controls`.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, target_n = 16, steps_per_control = 4, x0 = None))]
+#[pyo3(signature = (
+    obj_fn,
+    low,
+    high,
+    budget,
+    seed = 0,
+    grad_fn = None,
+    target_n = None,
+    steps_per_control = 2,
+    x0 = None,
+    *,
+    beta0 = 1.0,
+))]
 fn dmc_population_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -1840,12 +1974,28 @@ fn dmc_population_optimize(
     budget: usize,
     seed: u64,
     grad_fn: Option<Py<PyAny>>,
-    target_n: usize,
+    target_n: Option<usize>,
     steps_per_control: usize,
     x0: Option<PyReadonlyArray1<'_, f64>>,
+    beta0: f64,
 ) -> PyResult<Py<PyDict>> {
     require_positive_budget(budget)?;
+    if let Some(n) = target_n
+        && n < 2
+    {
+        return Err(PyValueError::new_err("target_n must be at least 2"));
+    }
+    if steps_per_control < 1 {
+        return Err(PyValueError::new_err(
+            "steps_per_control must be at least 1",
+        ));
+    }
+    if !beta0.is_finite() || beta0 <= 0.0 {
+        return Err(PyValueError::new_err("beta0 must be finite and positive"));
+    }
     let (bounds, dim, seed_arr) = parse_box(low, high, x0)?;
+    let resolved_target_n =
+        target_n.unwrap_or_else(|| crate::methods::dmc_population::recommend_target_n(budget, dim));
     let seed_view = seed_arr.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, bounds);
     let errors = obj.errors();
@@ -1859,9 +2009,9 @@ fn dmc_population_optimize(
                 Some(&grad),
                 budget,
                 seed,
-                target_n,
+                resolved_target_n,
                 steps_per_control,
-                crate::methods::dmc_population::DEFAULT_BETA0,
+                beta0,
                 seed_view,
                 &mut rng,
             )
@@ -1872,9 +2022,9 @@ fn dmc_population_optimize(
                 None,
                 budget,
                 seed,
-                target_n,
+                resolved_target_n,
                 steps_per_control,
-                crate::methods::dmc_population::DEFAULT_BETA0,
+                beta0,
                 seed_view,
                 &mut rng,
             )
@@ -2003,16 +2153,273 @@ fn coverage_decisions_dict<'py>(
     Ok(out)
 }
 
-/// Communicating box hops: Gaussian kick, quench, shared Euclidean history.
+fn coverage_neighbor_count_opt(value: &Bound<'_, PyAny>) -> PyResult<Option<usize>> {
+    if value.is_none() {
+        return Ok(None);
+    }
+    if value.is_instance_of::<PyFloat>() {
+        return Err(PyTypeError::new_err(
+            "coverage_neighbors must be an integer",
+        ));
+    }
+    Ok(Some(value.extract()?))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_box_hop_configs(
+    replicas: usize,
+    budget: usize,
+    history: crate::methods::ensemble::HistoryMode,
+    membership: crate::methods::minima_hopping::HistoryMembership,
+    has_grad: bool,
+    identity_tol: Option<f64>,
+    shared_deposits: Option<usize>,
+    shared_visit_policy: Option<&str>,
+    escape: Option<&str>,
+    langevin_steps: Option<usize>,
+    langevin_omega0: Option<f64>,
+    langevin_dt: Option<f64>,
+    langevin_noise: Option<&str>,
+    langevin_friction: Option<f64>,
+    coverage_shared: Option<bool>,
+    coverage_radius: Option<f64>,
+    coverage_neighbors: Option<usize>,
+    coverage_height: Option<f64>,
+    coverage_well_tempering: Option<f64>,
+    coverage_peer_weight: Option<f64>,
+) -> PyResult<(
+    crate::methods::box_hopping::BoxEnsembleConfig,
+    Option<crate::methods::box_hopping::BoxCoverageConfig>,
+    bool,
+)> {
+    use crate::methods::box_hopping::{
+        BoxCoverageConfig, BoxEnsembleConfig, BoxEscape, GleEscapeConfig, IDENTITY_TOL,
+    };
+    use crate::methods::gle_langevin::GleNoise;
+    use crate::methods::minima_hopping::SharedVisitPolicy;
+
+    let any_hop_override = identity_tol.is_some()
+        || shared_deposits.is_some()
+        || shared_visit_policy.is_some()
+        || escape.is_some()
+        || langevin_steps.is_some()
+        || langevin_omega0.is_some()
+        || langevin_dt.is_some()
+        || langevin_noise.is_some()
+        || langevin_friction.is_some();
+    let any_coverage_override = coverage_shared.is_some()
+        || coverage_radius.is_some()
+        || coverage_neighbors.is_some()
+        || coverage_height.is_some()
+        || coverage_well_tempering.is_some()
+        || coverage_peer_weight.is_some();
+
+    let id_tol = identity_tol.unwrap_or(IDENTITY_TOL);
+    if !id_tol.is_finite() || id_tol <= 0.0 {
+        return Err(PyValueError::new_err(
+            "identity_tol must be finite and positive",
+        ));
+    }
+    let deposits = shared_deposits.unwrap_or(8);
+    let visit_policy = match shared_visit_policy {
+        None | Some("tabu") => SharedVisitPolicy::Tabu,
+        Some("recognition") => SharedVisitPolicy::Recognition,
+        Some(other) => {
+            return Err(PyValueError::new_err(format!(
+                "shared_visit_policy must be \"tabu\" or \"recognition\", got {other:?}"
+            )));
+        }
+    };
+    let has_langevin_param = langevin_steps.is_some()
+        || langevin_omega0.is_some()
+        || langevin_dt.is_some()
+        || langevin_noise.is_some()
+        || langevin_friction.is_some();
+    let escape_mode = match escape {
+        None if !has_langevin_param => BoxEscape::Gaussian,
+        Some("gaussian") => {
+            if has_langevin_param {
+                return Err(PyValueError::new_err(
+                    "langevin_* parameters require escape=\"langevin\"",
+                ));
+            }
+            BoxEscape::Gaussian
+        }
+        Some("langevin") | None => {
+            if !has_grad {
+                return Err(PyValueError::new_err(
+                    "escape=\"langevin\" requires grad_fn",
+                ));
+            }
+            let defaults = GleEscapeConfig::default();
+            let steps = langevin_steps.unwrap_or(defaults.steps);
+            if steps == 0 {
+                return Err(PyValueError::new_err("langevin_steps must be positive"));
+            }
+            let omega0 = langevin_omega0.unwrap_or(defaults.omega0);
+            if !omega0.is_finite() || omega0 <= 0.0 {
+                return Err(PyValueError::new_err(
+                    "langevin_omega0 must be finite and positive",
+                ));
+            }
+            let dt = langevin_dt.unwrap_or(defaults.dt);
+            if !dt.is_finite() || dt <= 0.0 {
+                return Err(PyValueError::new_err(
+                    "langevin_dt must be finite and positive",
+                ));
+            }
+            let noise = match langevin_noise {
+                None | Some("colored") => {
+                    if langevin_friction.is_some() {
+                        return Err(PyValueError::new_err(
+                            "langevin_friction requires langevin_noise=\"white\"",
+                        ));
+                    }
+                    GleNoise::Colored
+                }
+                Some("white") => {
+                    let friction = langevin_friction.unwrap_or(1.0);
+                    if !friction.is_finite() || friction <= 0.0 {
+                        return Err(PyValueError::new_err(
+                            "langevin_friction must be finite and positive",
+                        ));
+                    }
+                    GleNoise::White { friction }
+                }
+                Some(other) => {
+                    return Err(PyValueError::new_err(format!(
+                        "langevin_noise must be \"colored\" or \"white\", got {other:?}"
+                    )));
+                }
+            };
+            BoxEscape::Langevin(GleEscapeConfig {
+                steps,
+                omega0,
+                dt,
+                noise,
+            })
+        }
+        Some(other) => {
+            return Err(PyValueError::new_err(format!(
+                "escape must be \"gaussian\" or \"langevin\", got {other:?}"
+            )));
+        }
+    };
+
+    let config = BoxEnsembleConfig {
+        replicas,
+        budget,
+        history,
+        membership,
+        identity_tol: id_tol,
+        shared_deposits: deposits,
+        shared_visit_policy: visit_policy,
+        escape: escape_mode,
+    };
+
+    let coverage = if any_coverage_override || any_hop_override {
+        let defaults = BoxCoverageConfig::default();
+        let radius = coverage_radius.unwrap_or(defaults.radius);
+        if !radius.is_finite() || radius <= 0.0 {
+            return Err(PyValueError::new_err(
+                "coverage radius must be finite and positive",
+            ));
+        }
+        let height = coverage_height.unwrap_or(defaults.height);
+        if !height.is_finite() || height < 0.0 {
+            return Err(PyValueError::new_err(
+                "coverage_height must be finite and non-negative",
+            ));
+        }
+        let well_tempering = coverage_well_tempering.unwrap_or(defaults.well_tempering);
+        if !well_tempering.is_finite() || well_tempering <= 1.0 {
+            return Err(PyValueError::new_err(
+                "coverage_well_tempering must be finite and greater than 1",
+            ));
+        }
+        let peer_weight = coverage_peer_weight.unwrap_or(defaults.peer_weight);
+        if !peer_weight.is_finite() || peer_weight < 0.0 {
+            return Err(PyValueError::new_err(
+                "coverage_peer_weight must be finite and non-negative",
+            ));
+        }
+        let default_shared =
+            matches!(history, crate::methods::ensemble::HistoryMode::Shared) && deposits > 0;
+        Some(BoxCoverageConfig {
+            shared: coverage_shared.unwrap_or(default_shared),
+            radius,
+            neighbors: coverage_neighbors.unwrap_or(defaults.neighbors),
+            height,
+            well_tempering,
+            peer_weight,
+        })
+    } else {
+        None
+    };
+
+    Ok((config, coverage, any_coverage_override))
+}
+
+/// Communicating box hops: escape, L-BFGS quench, and Euclidean minimum history.
 ///
-/// Four (or `replicas`) algebraic hops divide one work-unit budget. They
-/// share a Euclidean minimum history and Goedecker escape feedback. This is
-/// not cluster hopping: the move is a reflected Gaussian on the box. A
-/// callback raising `BaseException` that is not an `Exception` stops the
-/// ensemble at once and is re-raised. The best point found is kept.
+/// Four (or `replicas`) algebraic hop chains divide one work-unit `budget`
+/// over `[low, high]`, optionally seeded from `x0`, using `grad_fn` for
+/// quenches and optional Langevin escapes. They maintain a `"shared"`,
+/// `"private"`, or `"none"` Euclidean minimum `history` (`membership`
+/// `"accepted"` or `"all"`, tolerance `identity_tol`, visit policy
+/// `shared_visit_policy`, and bias count `shared_deposits`) with Goedecker
+/// escape feedback. By default (`escape=None` or `"gaussian"`) the escape move
+/// is a reflected Gaussian kick on the box; `escape="langevin"` runs a bounded
+/// GLE-Langevin escape controlled by `langevin_steps`, `langevin_omega0`,
+/// `langevin_dt`, `langevin_noise`, and `langevin_friction`. Evaluated-region
+/// peer separation is configured by `coverage_shared`, `coverage_radius`,
+/// `coverage_neighbors`, `coverage_height`, `coverage_well_tempering`, and
+/// `coverage_peer_weight`. This is not cluster hopping. A callback raising
+/// `BaseException` that is not an `Exception` stops the ensemble at once and
+/// is re-raised; the best point found is kept.
+///
+/// Returns a dict with `best_val`, `best_pos`, `charged`, `n_evals`,
+/// `n_grads`, `hops`, `history_observations`, `history_minima`,
+/// `history_attempts`, `history_refusals`, `history_seconds`,
+/// `shared_deposits`, `coverage_observations`, `coverage_published`,
+/// `coverage_applied_foreign`, `coverage_capped_foreign`,
+/// `coverage_regions_per_chain`, `coverage_recrossings`,
+/// `coverage_peer_recrossings`, `coverage_peer_only_recrossings`,
+/// `coverage_escape_updates`, `coverage_novel_arrivals`,
+/// `coverage_novelty_updates`, `coverage_published_samples`,
+/// `coverage_applied_foreign_samples`, `coverage_sample_peer_checks`,
+/// `coverage_sample_anchor_overlaps`, `coverage_sample_anchor_only_overlaps`,
+/// `coverage_sample_overlaps`, `coverage_repelled_proposals`,
+/// `coverage_constrained_repulsions`, and `coverage_decisions`.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
-                    replicas = 4, history = "shared", membership = "accepted"))]
+#[pyo3(signature = (
+    obj_fn,
+    low,
+    high,
+    budget,
+    seed = 0,
+    grad_fn = None,
+    x0 = None,
+    replicas = 4,
+    history = "shared",
+    membership = "accepted",
+    *,
+    identity_tol = None,
+    shared_deposits = None,
+    shared_visit_policy = None,
+    escape = None,
+    langevin_steps = None,
+    langevin_omega0 = None,
+    langevin_dt = None,
+    langevin_noise = None,
+    langevin_friction = None,
+    coverage_shared = None,
+    coverage_radius = None,
+    coverage_neighbors = None,
+    coverage_height = None,
+    coverage_well_tempering = None,
+    coverage_peer_weight = None,
+))]
 #[allow(clippy::too_many_arguments)]
 fn box_ensemble_optimize(
     py: Python<'_>,
@@ -2026,40 +2433,77 @@ fn box_ensemble_optimize(
     replicas: usize,
     history: &str,
     membership: &str,
+    identity_tol: Option<f64>,
+    shared_deposits: Option<usize>,
+    shared_visit_policy: Option<&str>,
+    escape: Option<&str>,
+    langevin_steps: Option<usize>,
+    langevin_omega0: Option<f64>,
+    langevin_dt: Option<f64>,
+    langevin_noise: Option<&str>,
+    langevin_friction: Option<f64>,
+    coverage_shared: Option<bool>,
+    coverage_radius: Option<f64>,
+    #[pyo3(from_py_with = coverage_neighbor_count_opt)] coverage_neighbors: Option<usize>,
+    coverage_height: Option<f64>,
+    coverage_well_tempering: Option<f64>,
+    coverage_peer_weight: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
-    let seed_view = parsed.x0.as_ref().map(|a| a.view());
-    let config = crate::methods::box_hopping::BoxEnsembleConfig {
-        replicas,
-        budget,
-        history: parsed.history,
-        membership: parsed.membership,
-        identity_tol: crate::methods::box_hopping::IDENTITY_TOL,
-        shared_deposits: 8,
-        shared_visit_policy: crate::methods::minima_hopping::SharedVisitPolicy::Tabu,
-        ..crate::methods::box_hopping::BoxEnsembleConfig::default()
-    };
     let Some(grad_fn) = grad_fn else {
         return Err(PyValueError::new_err(
             "box_ensemble_optimize requires grad_fn; use ensemble_optimize without a gradient",
         ));
     };
+    let (config, coverage, has_coverage_override) = build_box_hop_configs(
+        replicas,
+        budget,
+        parsed.history,
+        parsed.membership,
+        true,
+        identity_tol,
+        shared_deposits,
+        shared_visit_policy,
+        escape,
+        langevin_steps,
+        langevin_omega0,
+        langevin_dt,
+        langevin_noise,
+        langevin_friction,
+        coverage_shared,
+        coverage_radius,
+        coverage_neighbors,
+        coverage_height,
+        coverage_well_tempering,
+        coverage_peer_weight,
+    )?;
+    let seed_view = parsed.x0.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, parsed.bounds);
     let errors = obj.errors();
     let _caller_stop = crate::caller_stop::Bind::new(errors.abort_flag());
     let dim = parsed.dim;
     let grad = CallablePyGradient::new(grad_fn, dim, &errors);
     let result = with_replica_threads(py, || {
-        crate::methods::box_hopping::box_ensemble_optimize(&obj, &grad, seed, seed_view, &config)
+        if has_coverage_override && let Some(ref cov) = coverage {
+            crate::methods::box_hopping::box_ensemble_optimize_with_coverage(
+                &obj, &grad, seed, seed_view, &config, cov,
+            )
+        } else {
+            crate::methods::box_hopping::box_ensemble_optimize(
+                &obj, &grad, seed, seed_view, &config,
+            )
+        }
     });
     let out = PyDict::new(py);
     out.set_item("best_val", result.best_val)?;
     out.set_item("best_pos", py_view1(py, result.best_pos.view()))?;
+    out.set_item("charged", result.n_evals.saturating_add(result.n_grads))?;
     out.set_item("n_evals", result.n_evals)?;
     out.set_item("n_grads", result.n_grads)?;
     out.set_item("hops", result.hops)?;
     out.set_item("history_observations", result.history_observations)?;
     out.set_item("history_minima", result.history_minima)?;
+    out.set_item("history_attempts", result.history_cost.0)?;
     out.set_item("history_refusals", result.history_cost.1)?;
     out.set_item("history_seconds", result.history_cost.2)?;
     out.set_item("shared_deposits", result.shared_deposits)?;
@@ -2126,14 +2570,62 @@ fn box_ensemble_optimize(
     Ok(out.into())
 }
 
-/// Box search split on gradient: hop-and-quench, or the values-only portfolio.
+/// Box search split on gradient: hop-and-quench, values-only hop chains, or
+/// the values-only portfolio.
 ///
-/// A callback raising `BaseException` that is not an `Exception` stops the
-/// search at once and is re-raised. The best point found is kept.
+/// Accepts the same box, `budget`, `seed`, `grad_fn`, `x0`, `replicas`,
+/// `history`, `membership`, `identity_tol`, `shared_deposits`,
+/// `shared_visit_policy`, `escape` (`"gaussian"` or `"langevin"` with
+/// `langevin_steps`, `langevin_omega0`, `langevin_dt`, `langevin_noise`,
+/// `langevin_friction`), and `coverage_*` (`coverage_shared`,
+/// `coverage_radius`, `coverage_neighbors`, `coverage_height`,
+/// `coverage_well_tempering`, `coverage_peer_weight`) parameters as
+/// `box_ensemble_optimize`, while allowing `grad_fn=None`. A callback raising
+/// `BaseException` that is not an `Exception` stops the search at once and is
+/// re-raised; the best point found is kept.
+///
+/// Returns a dict with `best_val`, `best_pos`, `charged`, `n_evals`,
+/// `n_grads`, `hops`, `history_observations`, `history_minima`,
+/// `history_attempts`, `history_refusals`, `history_seconds`,
+/// `coverage_observations`, `coverage_published`, `coverage_applied_foreign`,
+/// `coverage_capped_foreign`, `coverage_regions_per_chain`,
+/// `coverage_recrossings`, `coverage_peer_recrossings`,
+/// `coverage_peer_only_recrossings`, `coverage_escape_updates`,
+/// `coverage_novel_arrivals`, `coverage_novelty_updates`,
+/// `coverage_published_samples`, `coverage_applied_foreign_samples`,
+/// `coverage_sample_peer_checks`, `coverage_sample_anchor_overlaps`,
+/// `coverage_sample_anchor_only_overlaps`, `coverage_sample_overlaps`,
+/// `coverage_repelled_proposals`, `coverage_constrained_repulsions`, and
+/// `coverage_decisions`.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, x0 = None,
-                    replicas = 4, history = "shared", membership = "accepted", *,
-                    coverage_shared = None, coverage_radius = None, coverage_neighbors = None))]
+#[pyo3(signature = (
+    obj_fn,
+    low,
+    high,
+    budget,
+    seed = 0,
+    grad_fn = None,
+    x0 = None,
+    replicas = 4,
+    history = "shared",
+    membership = "accepted",
+    *,
+    identity_tol = None,
+    shared_deposits = None,
+    shared_visit_policy = None,
+    escape = None,
+    langevin_steps = None,
+    langevin_omega0 = None,
+    langevin_dt = None,
+    langevin_noise = None,
+    langevin_friction = None,
+    coverage_shared = None,
+    coverage_radius = None,
+    coverage_neighbors = None,
+    coverage_height = None,
+    coverage_well_tempering = None,
+    coverage_peer_weight = None,
+))]
 #[allow(clippy::too_many_arguments)]
 fn ensemble_optimize(
     py: Python<'_>,
@@ -2147,16 +2639,45 @@ fn ensemble_optimize(
     replicas: usize,
     history: &str,
     membership: &str,
+    identity_tol: Option<f64>,
+    shared_deposits: Option<usize>,
+    shared_visit_policy: Option<&str>,
+    escape: Option<&str>,
+    langevin_steps: Option<usize>,
+    langevin_omega0: Option<f64>,
+    langevin_dt: Option<f64>,
+    langevin_noise: Option<&str>,
+    langevin_friction: Option<f64>,
     coverage_shared: Option<bool>,
     coverage_radius: Option<f64>,
-    coverage_neighbors: Option<usize>,
+    #[pyo3(from_py_with = coverage_neighbor_count_opt)] coverage_neighbors: Option<usize>,
+    coverage_height: Option<f64>,
+    coverage_well_tempering: Option<f64>,
+    coverage_peer_weight: Option<f64>,
 ) -> PyResult<Py<PyDict>> {
     let parsed = parse_box_search(low, high, budget, replicas, x0, history, membership)?;
-    if coverage_radius.is_some_and(|radius| !radius.is_finite() || radius <= 0.0) {
-        return Err(PyValueError::new_err(
-            "coverage radius must be finite and positive",
-        ));
-    }
+    let (config, coverage, _) = build_box_hop_configs(
+        replicas,
+        budget,
+        parsed.history,
+        parsed.membership,
+        grad_fn.is_some(),
+        identity_tol,
+        shared_deposits,
+        shared_visit_policy,
+        escape,
+        langevin_steps,
+        langevin_omega0,
+        langevin_dt,
+        langevin_noise,
+        langevin_friction,
+        coverage_shared,
+        coverage_radius,
+        coverage_neighbors,
+        coverage_height,
+        coverage_well_tempering,
+        coverage_peer_weight,
+    )?;
     let seed_view = parsed.x0.as_ref().map(|a| a.view());
     let obj = CallableObjective::new(obj_fn, parsed.bounds);
     let errors = obj.errors();
@@ -2164,30 +2685,9 @@ fn ensemble_optimize(
     let dim = parsed.dim;
     let history_mode = parsed.history;
     let membership = parsed.membership;
-    let coverage =
-        (coverage_shared.is_some() || coverage_radius.is_some() || coverage_neighbors.is_some())
-            .then(|| {
-                let defaults = crate::methods::box_hopping::BoxCoverageConfig::default();
-                crate::methods::box_hopping::BoxCoverageConfig {
-                    shared: coverage_shared.unwrap_or(matches!(
-                        history_mode,
-                        crate::methods::ensemble::HistoryMode::Shared
-                    )),
-                    radius: coverage_radius.unwrap_or(defaults.radius),
-                    neighbors: coverage_neighbors.unwrap_or(defaults.neighbors),
-                    ..defaults
-                }
-            });
     let result = with_replica_threads(py, || {
         let grad = grad_fn.map(|fn_| CallablePyGradient::new(fn_, dim, &errors));
         if let Some(coverage) = coverage.as_ref() {
-            let config = crate::methods::box_hopping::BoxEnsembleConfig {
-                replicas,
-                budget,
-                history: history_mode,
-                membership,
-                ..Default::default()
-            };
             crate::methods::box_hopping::ensemble_hop_optimize_with_config(
                 &obj,
                 grad.as_ref(),
@@ -2218,6 +2718,7 @@ fn ensemble_optimize(
     out.set_item("hops", result.hops)?;
     out.set_item("history_observations", result.history_observations)?;
     out.set_item("history_minima", result.history_minima)?;
+    out.set_item("history_attempts", result.history_cost.0)?;
     out.set_item("history_refusals", result.history_cost.1)?;
     out.set_item("history_seconds", result.history_cost.2)?;
     out.set_item("coverage_observations", result.coverage.local_observations)?;
@@ -2376,12 +2877,52 @@ fn coverage_neighbor_count(value: &Bound<'_, PyAny>) -> PyResult<usize> {
 ///   budget: combined objective + gradient evaluation budget.
 ///   seed: RNG seed.
 ///   grad_fn: optional gradient callable; enables the gradient arms
-///            and the final polish.
+///     and the final polish.
+///   noise_sigma: optional stochastic evaluation noise scale for OSA
+///     acceptance; `None` uses exact Metropolis.
+///   policy: `"auto"` (feature-based regime routing) or `"legacy"`.
+///   x0: optional starting point clipped onto `[low, high]`.
+///   replicas: number of portfolio controllers sharing `budget`.
+///   coverage_shared: share global proposal samples across replicas at arm
+///     checkpoints when `replicas > 1`.
+///   coverage_radius: peer-interaction radius in normalized RMS box units.
+///   coverage_neighbors: cyclic peer-ring radius (`0` is all-to-all).
+///   coverage_height: well-tempered coverage deposit height.
+///   coverage_well_tempering: well-tempering factor (`> 1`).
+///   coverage_peer_weight: weight applied to foreign peer samples.
+///
+/// Returns:
+///   A dict with `best_pos`, `best_val`, `n_evals`, `n_grads`, `arm_pulls`,
+///   `arm_successes`, and `hop_state` (`(pos, val)` or `None`). When
+///   `replicas > 1`, also includes `replicas` (per-replica result dicts),
+///   `charged`, `coverage_published_samples`,
+///   `coverage_applied_foreign_samples`, `coverage_sample_peer_checks`,
+///   `coverage_sample_anchor_overlaps`,
+///   `coverage_sample_anchor_only_overlaps`, `coverage_sample_overlaps`,
+///   `coverage_repelled_proposals`, and `coverage_constrained_repulsions`.
 ///
 /// A callback raising `BaseException` that is not an `Exception` stops the
 /// portfolio at once and is re-raised. The best point found is kept.
 #[pyfunction]
-#[pyo3(signature = (obj_fn, low, high, budget, seed = 0, grad_fn = None, noise_sigma = None, policy = "auto", x0 = None, *, replicas = 1, coverage_shared = true, coverage_radius = 0.05, coverage_neighbors = 0))]
+#[pyo3(signature = (
+    obj_fn,
+    low,
+    high,
+    budget,
+    seed = 0,
+    grad_fn = None,
+    noise_sigma = None,
+    policy = "auto",
+    x0 = None,
+    *,
+    replicas = 1,
+    coverage_shared = true,
+    coverage_radius = 0.05,
+    coverage_neighbors = 0,
+    coverage_height = 0.1,
+    coverage_well_tempering = 5.0,
+    coverage_peer_weight = 1.0,
+))]
 fn global_optimize(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
@@ -2397,6 +2938,9 @@ fn global_optimize(
     coverage_shared: bool,
     coverage_radius: f64,
     #[pyo3(from_py_with = coverage_neighbor_count)] coverage_neighbors: usize,
+    coverage_height: f64,
+    coverage_well_tempering: f64,
+    coverage_peer_weight: f64,
 ) -> PyResult<Py<PyDict>> {
     let low_vec = low.as_slice()?.to_vec();
     let high_vec = high.as_slice()?.to_vec();
@@ -2434,6 +2978,21 @@ fn global_optimize(
             "coverage_radius must be positive and finite",
         ));
     }
+    if !coverage_height.is_finite() || coverage_height < 0.0 {
+        return Err(PyValueError::new_err(
+            "coverage_height must be non-negative and finite",
+        ));
+    }
+    if !coverage_well_tempering.is_finite() || coverage_well_tempering <= 1.0 {
+        return Err(PyValueError::new_err(
+            "coverage_well_tempering must be finite and greater than 1",
+        ));
+    }
+    if !coverage_peer_weight.is_finite() || coverage_peer_weight < 0.0 {
+        return Err(PyValueError::new_err(
+            "coverage_peer_weight must be non-negative and finite",
+        ));
+    }
     let x0_view = start.as_ref().map(|x| x.view());
     if replicas > 1 {
         let config = crate::methods::portfolio::PortfolioEnsembleConfig {
@@ -2445,7 +3004,9 @@ fn global_optimize(
                 shared: coverage_shared,
                 radius: coverage_radius,
                 neighbors: coverage_neighbors,
-                ..crate::methods::BoxCoverageConfig::default()
+                height: coverage_height,
+                well_tempering: coverage_well_tempering,
+                peer_weight: coverage_peer_weight,
             },
         };
         let grad = grad_fn.map(|fn_| CallablePyGradient::new(fn_, dim, &errors));
@@ -2480,9 +3041,23 @@ fn global_optimize(
     portfolio_result_to_dict(py, result)
 }
 
-/// Runs the portfolio global optimizer with a native objective handle.
+/// Runs the portfolio global optimizer with a native `Objective` handle.
+///
+/// Accepts `objective`, `budget`, `seed`, `use_gradient`, `noise_sigma`, `x0`,
+/// and keyword-only `policy` (`"auto"` or `"legacy"`). Returns a dict with
+/// `best_pos`, `best_val`, `n_evals`, `n_grads`, `arm_pulls`, `arm_successes`,
+/// and `hop_state`.
 #[pyfunction]
-#[pyo3(signature = (objective, budget, seed = 0, use_gradient = true, noise_sigma = None, x0 = None))]
+#[pyo3(signature = (
+    objective,
+    budget,
+    seed = 0,
+    use_gradient = true,
+    noise_sigma = None,
+    x0 = None,
+    *,
+    policy = "auto",
+))]
 fn global_optimize_objective(
     py: Python<'_>,
     objective: PyRef<'_, PyObjective>,
@@ -2491,6 +3066,7 @@ fn global_optimize_objective(
     use_gradient: bool,
     noise_sigma: Option<f64>,
     x0: Option<PyReadonlyArray1<'_, f64>>,
+    policy: &str,
 ) -> PyResult<Py<PyDict>> {
     if budget == 0 {
         return Err(PyValueError::new_err("budget must be positive"));
@@ -2502,6 +3078,15 @@ fn global_optimize_objective(
             "noise_sigma must be positive and finite",
         ));
     }
+    let pol = match policy {
+        "auto" | "Auto" | "" => crate::PortfolioPolicy::Auto,
+        "legacy" | "Legacy" => crate::PortfolioPolicy::Legacy,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "policy must be 'auto' or 'legacy', got {other:?}"
+            )));
+        }
+    };
     let bounds = <PyObjective as Objective<f64>>::bounds(&objective);
     let start = read_x0(
         x0,
@@ -2509,7 +3094,6 @@ fn global_optimize_objective(
         bounds.high.as_slice().expect("contiguous bounds"),
     )?;
     let x0_view = start.as_ref().map(|x| x.view());
-    let policy = crate::PortfolioPolicy::Auto;
     let result = if use_gradient {
         crate::portfolio_optimize_from(
             &*objective,
@@ -2517,7 +3101,7 @@ fn global_optimize_objective(
             budget,
             seed,
             noise_sigma,
-            policy,
+            pol,
             x0_view,
         )
     } else {
@@ -2527,7 +3111,7 @@ fn global_optimize_objective(
             budget,
             seed,
             noise_sigma,
-            policy,
+            pol,
             x0_view,
         )
     };
@@ -2827,225 +3411,11 @@ fn osa_acceptance_rate(
 // Measured cluster-search layer.
 // ---------------------------------------------------------------------------
 
-/// Driver settings for the cluster-search layer.
-///
-/// Construct with `Config.recommended`, `Config.derived`, or
-/// `Config.for_cluster`. The recommended stack is the measured
-/// default: composed surface relocations, depth-rewarded move
-/// allocation, and tabu on stall.
-#[pyclass(name = "Config")]
-#[derive(Clone)]
-pub struct PyClusterConfig {
-    inner: crate::methods::cluster_hopping::Config,
-    recommended: bool,
-}
-
-#[pymethods]
-impl PyClusterConfig {
-    /// Measured configuration for `n` points.
-    #[staticmethod]
-    fn recommended(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::recommended(n),
-            recommended: true,
-        })
-    }
-
-    /// Communicating paper arm: orbit kernel plus recognition, not recommended.
-    #[staticmethod]
-    fn communicating(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::communicating(n),
-            recommended: false,
-        })
-    }
-
-    /// Recommended flags with the cost-asymmetric screen and budget-window
-    /// temperature. Not the measured configuration.
-    #[staticmethod]
-    fn derived(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::derived(n),
-            recommended: true,
-        })
-    }
-
-    /// Plain Wales-Doye protocol for `n` points (comparison baseline).
-    #[staticmethod]
-    fn for_cluster(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::for_cluster(n),
-            recommended: false,
-        })
-    }
-
-    /// The communicating arm on `n` rigid TIP4P waters.
-    #[staticmethod]
-    fn communicating_tip4p(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::communicating_tip4p(n),
-            recommended: false,
-        })
-    }
-
-    /// The recommended arm on `n` rigid TIP4P waters.
-    #[staticmethod]
-    fn recommended_tip4p(n: usize) -> PyResult<Self> {
-        if n < 2 {
-            return Err(PyValueError::new_err("n must be at least 2"));
-        }
-        Ok(Self {
-            inner: crate::methods::cluster_hopping::Config::recommended_tip4p(n),
-            recommended: true,
-        })
-    }
-
-    /// Points in a state; the state length is `3 * n_points`, or `6 *
-    /// n_points` molecules on a rigid-body configuration.
-    #[getter]
-    fn n_points(&self) -> usize {
-        self.inner.n_points
-    }
-
-    /// Whether the state is rigid bodies: centres, then rotations.
-    #[getter]
-    fn rigid_body(&self) -> bool {
-        self.inner.rigid_body_geometry.is_some()
-    }
-
-    /// How far above the incumbent a screened trial may land.
-    #[getter]
-    fn screen_margin(&self) -> f64 {
-        self.inner.screen_margin
-    }
-
-    /// Whether the energy screen credits the descent its pass left undone.
-    #[getter]
-    fn calibrated_screen(&self) -> bool {
-        self.inner.calibrated_screen
-    }
-
-    /// Whether a full relaxation below the incumbent continues until it
-    /// stops descending.
-    #[getter]
-    fn finish_improving(&self) -> bool {
-        self.inner.finish_improving
-    }
-
-    /// Composed surface-relocation burst arm.
-    #[getter]
-    fn burst_moves(&self) -> bool {
-        matches!(
-            self.inner.move_library,
-            crate::methods::cluster_hopping::MoveLibrary::LeanBurst
-        )
-    }
-
-    /// Discounted Thompson allocation over move arms.
-    #[getter]
-    fn allocate_moves(&self) -> bool {
-        self.inner.allocate_moves
-    }
-
-    /// Reward move arms by the depth they reach.
-    #[getter]
-    fn depth_reward(&self) -> bool {
-        self.inner.depth_reward
-    }
-
-    /// Orbit completion once per newly entered basin.
-    #[getter]
-    fn orbit_complete_on_new(&self) -> bool {
-        self.inner.orbit_complete_on_new
-    }
-
-    /// Shared-history visit policy: `tabu` or `recognition`.
-    #[getter]
-    fn shared_visit_policy(&self) -> &'static str {
-        match self.inner.shared_visit_policy {
-            crate::methods::minima_hopping::SharedVisitPolicy::Tabu => "tabu",
-            crate::methods::minima_hopping::SharedVisitPolicy::Recognition => "recognition",
-        }
-    }
-
-    /// Quarantine the stalled funnel.
-    #[getter]
-    fn tabu_on_stall(&self) -> bool {
-        self.inner.tabu_on_stall
-    }
-
-    /// Polish the incumbent when a hop improves it.
-    #[getter]
-    fn polish_on_improve(&self) -> bool {
-        self.inner.polish_on_improve
-    }
-
-    #[setter]
-    fn set_polish_on_improve(&mut self, on: bool) {
-        self.inner.polish_on_improve = on;
-    }
-
-    /// Cost-asymmetric Bayes-screen threshold, if that screen is on.
-    #[getter]
-    fn bayes_threshold(&self) -> f64 {
-        self.inner.bayes_threshold
-    }
-
-    /// Budget-window temperature rather than fixed \(T=0.8\).
-    #[getter]
-    fn budget_window(&self) -> bool {
-        self.inner.budget_window
-    }
-
-    /// Reject JSON configurations that set removed structure-prior keys.
-    #[staticmethod]
-    fn validate_json(text: &str) -> PyResult<()> {
-        crate::methods::cluster_hopping::Config::validate_json_keys(text)
-            .map_err(|err| PyValueError::new_err(err.to_string()))
-    }
-
-    /// Reject TOML configurations that set removed structure-prior keys.
-    #[staticmethod]
-    fn validate_toml(text: &str) -> PyResult<()> {
-        crate::methods::cluster_hopping::Config::validate_toml_keys(text)
-            .map_err(|err| PyValueError::new_err(err.to_string()))
-    }
-
-    fn __repr__(&self) -> String {
-        if self.inner.bayes_screen && self.inner.budget_window {
-            format!("Config.derived({})", self.inner.n_points)
-        } else if !self.inner.surfaces.is_empty()
-            && self.inner.orbit_complete_on_new
-            && matches!(
-                self.inner.shared_visit_policy,
-                crate::methods::minima_hopping::SharedVisitPolicy::Recognition
-            )
-        {
-            format!("Config.communicating({})", self.inner.n_points)
-        } else if self.recommended {
-            format!("Config.recommended({})", self.inner.n_points)
-        } else {
-            format!("Config.for_cluster({})", self.inner.n_points)
-        }
-    }
-}
-
 /// Work ledger: every objective or gradient evaluation is one charged unit.
+///
+/// Tracks `budget`, `spent`, `remaining`, `best`, `best_state`, optional
+/// `target` (`stop_below`), `target_reached`, `stopped`,
+/// `answer_polish_calls`, `start_redraws`, and recorded basin `encounters`.
 #[pyclass(name = "Ledger")]
 pub struct PyLedger {
     inner: crate::methods::cluster_hopping::Ledger,
@@ -3083,6 +3453,83 @@ impl PyLedger {
     #[getter]
     fn best(&self) -> f64 {
         self.inner.best
+    }
+
+    /// State attaining `best`, or `None` before any finite record.
+    #[getter]
+    fn best_state<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyArray1<f64>>> {
+        self.inner
+            .best_state
+            .as_ref()
+            .map(|state| PyArray1::from_vec(py, state.to_vec()))
+    }
+
+    /// Threshold installed by `stop_below`, if any.
+    #[getter]
+    fn target(&self) -> Option<f64> {
+        self.inner.target()
+    }
+
+    /// Whether the incumbent has reached the installed threshold.
+    #[getter]
+    fn target_reached(&self) -> bool {
+        self.inner.target_reached()
+    }
+
+    /// Whether a caller stop flag is raised on this ledger.
+    #[getter]
+    fn stopped(&self) -> bool {
+        self.inner.stopped()
+    }
+
+    /// Charged calls spent tightening recorded answers after the hop.
+    #[getter]
+    fn answer_polish_calls(&self) -> usize {
+        self.inner.answer_polish_calls()
+    }
+
+    /// Number of initial-quench redraws after a non-finite start.
+    #[getter]
+    fn start_redraws(&self) -> usize {
+        self.inner.start_redraws().len()
+    }
+
+    /// `(spent, energy)` pairs recorded each time the incumbent improved.
+    #[getter]
+    fn encounters(&self) -> Vec<(usize, f64)> {
+        self.inner.encounters().to_vec()
+    }
+
+    /// Stop once a recorded energy is at or below `energy`.
+    fn stop_below(&mut self, energy: f64) {
+        self.inner.stop_below(energy);
+    }
+
+    /// Whether `energy` meets the installed target threshold.
+    fn below_target(&self, energy: f64) -> bool {
+        self.inner.below_target(energy)
+    }
+
+    /// Charge one evaluation, returning `False` once exhausted or stopped.
+    fn charge(&mut self) -> bool {
+        self.inner.charge()
+    }
+
+    /// Charge `n` evaluations at once, returning `False` if short of room.
+    fn charge_many(&mut self, n: usize) -> bool {
+        self.inner.charge_many(n)
+    }
+
+    /// Charge a fractional evaluation, settling whole units as debt crosses 1.
+    fn charge_frac(&mut self, frac: f64) -> bool {
+        self.inner.charge_frac(frac)
+    }
+
+    /// Record `(value, state)` when `value` is finite and improves `best`.
+    fn record(&mut self, value: f64, state: PyReadonlyArray1<'_, f64>) -> PyResult<()> {
+        let slice = state.as_slice()?;
+        self.inner.record(value, ArrayView1::from(slice));
+        Ok(())
     }
 
     fn __repr__(&self) -> String {
@@ -3401,23 +3848,15 @@ fn cluster_bounds(n: usize, dim: usize, length_scale: f64) -> Bounds<f64> {
     )
 }
 
-fn recommended_with_scale(n: usize, length_scale: f64) -> crate::methods::cluster_hopping::Config {
-    let mut cfg = crate::methods::cluster_hopping::Config::with_scales(n, length_scale, 1.0);
-    cfg.allocate_moves = true;
-    cfg.return_screen = true;
-    cfg.orbit_complete_on_new = true;
-    cfg
-}
-
 /// Residual archive search on the measured recommended preset.
 ///
 /// Uses the same warm-started relax and charged gradient as
 /// [`crate::methods::cluster_search::search`]. `archive_search` clones the
 /// config and turns `return_screen` on there; the preset itself is unchanged.
 #[cfg(feature = "graphkey")]
-fn cluster_archive_search(
+fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>>(
     py: Python<'_>,
-    obj: &CallableDiffObjective,
+    obj: &O,
     cfg: &crate::methods::cluster_hopping::Config,
     ledger: &mut crate::methods::cluster_hopping::Ledger,
     calls: &PythonCallCounts,
@@ -3425,13 +3864,13 @@ fn cluster_archive_search(
     probe_unbacked: usize,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::archive_search::{Archive, archive_search};
-    use crate::methods::cluster_hopping::random_cluster_in_radius;
+    use crate::methods::cluster_hopping::search_start;
     use crate::methods::cluster_search::{RelaxStats, warm_relax};
     use eindir_core::gradient::Gradient;
     use rand::SeedableRng;
 
-    let mut stats = RelaxStats::default();
-    let out = {
+    let (out, stats) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut stats = RelaxStats::default();
         let mut relax = warm_relax(obj, cfg, &mut stats, seed);
         let mut grad = |led: &mut crate::methods::cluster_hopping::Ledger,
                         x: ArrayView1<f64>|
@@ -3445,14 +3884,9 @@ fn cluster_archive_search(
             Some(Gradient::grad(obj, x))
         };
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
-        let start = random_cluster_in_radius(
-            cfg.n_points,
-            cfg.start_radius(),
-            cfg.min_separation,
-            &mut rng,
-        );
+        let start = search_start(cfg, &mut rng);
         let mut archive = Archive::new();
-        archive_search(
+        let searched = archive_search(
             cfg,
             start.view(),
             ledger,
@@ -3460,9 +3894,12 @@ fn cluster_archive_search(
             Some(&mut grad),
             &mut archive,
             &mut rng,
-        )
-        .map_err(search_failure)?
-    };
+        );
+        drop(relax);
+        searched.map(|outcome| (outcome, stats))
+    }))
+    .map_err(search_panic_error)?
+    .map_err(search_failure)?;
     let dim = 3 * cfg.n_points;
     let best = out
         .best_state
@@ -3474,6 +3911,10 @@ fn cluster_archive_search(
     dict.set_item("best_energy", out.best)?;
     dict.set_item("hops", out.full)?;
     dict.set_item("charged", charged)?;
+    dict.set_item("screens", out.screens)?;
+    dict.set_item("same_floor", out.same_floor)?;
+    dict.set_item("artn", out.artn)?;
+    dict.set_item("best_at", out.best_at)?;
     dict.set_item("floors", out.floors)?;
     dict.set_item("returned", out.returned)?;
     dict.set_item("events", out.events)?;
@@ -3495,9 +3936,9 @@ fn cluster_archive_search(
 }
 
 #[cfg(not(feature = "graphkey"))]
-fn cluster_archive_search(
+fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>>(
     _py: Python<'_>,
-    _obj: &CallableDiffObjective,
+    _obj: &O,
     _cfg: &crate::methods::cluster_hopping::Config,
     _ledger: &mut crate::methods::cluster_hopping::Ledger,
     _calls: &PythonCallCounts,
@@ -3509,13 +3950,13 @@ fn cluster_archive_search(
     ))
 }
 
-struct InterleavedChart<'a> {
-    inner: &'a CallableDiffObjective,
+struct InterleavedChart<'a, O> {
+    inner: &'a O,
     n_molecules: usize,
     bounds: Bounds<f64>,
 }
 
-impl InterleavedChart<'_> {
+impl<O> InterleavedChart<'_, O> {
     fn to_user(&self, block: ArrayView1<f64>) -> Array1<f64> {
         let slice = block.as_slice().unwrap_or(&[]);
         Array1::from_vec(crate::potentials::interleaved_gmin_from_block(slice))
@@ -3537,7 +3978,7 @@ impl InterleavedChart<'_> {
     }
 }
 
-impl Objective<f64> for InterleavedChart<'_> {
+impl<O: Objective<f64>> Objective<f64> for InterleavedChart<'_, O> {
     fn dim(&self) -> usize {
         6 * self.n_molecules
     }
@@ -3551,7 +3992,9 @@ impl Objective<f64> for InterleavedChart<'_> {
     }
 }
 
-impl eindir_core::gradient::Gradient<f64> for InterleavedChart<'_> {
+impl<O: eindir_core::gradient::Gradient<f64>> eindir_core::gradient::Gradient<f64>
+    for InterleavedChart<'_, O>
+{
     fn grad(&self, x: ArrayView1<f64>) -> Array1<f64> {
         let user = self.inner.grad(self.to_user(x).view());
         self.to_block_gradient(user.view())
@@ -3562,7 +4005,9 @@ impl eindir_core::gradient::Gradient<f64> for InterleavedChart<'_> {
     }
 }
 
-impl eindir_core::gradient::DifferentiableObjective<f64> for InterleavedChart<'_> {
+impl<O: eindir_core::gradient::DifferentiableObjective<f64>>
+    eindir_core::gradient::DifferentiableObjective<f64> for InterleavedChart<'_, O>
+{
     fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let user = self.to_user(x);
         let (energy, gradient) = eindir_core::gradient::DifferentiableObjective::value_and_gradient(
@@ -3571,6 +4016,111 @@ impl eindir_core::gradient::DifferentiableObjective<f64> for InterleavedChart<'_
         );
         (energy, self.to_block_gradient(gradient.view()))
     }
+}
+
+pub(crate) fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_owned()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "internal panic in native cluster kernel".to_owned()
+    }
+}
+
+/// A panic whose text is a caller mistake, not a broken invariant.
+///
+/// The search still `assert`s a few contracts (a symmetry projection on a
+/// frozen set, two rungs with delayed acceptance, shape keying without
+/// that build). Those stay `ValueError`. Anything else is an internal
+/// failure and must not be reported as bad input.
+fn panic_is_bad_input(msg: &str) -> bool {
+    crate::panic_class::panic_is_bad_input(msg)
+}
+
+fn reported_panic(msg: String) -> PyErr {
+    if panic_is_bad_input(&msg) {
+        PyValueError::new_err(msg)
+    } else {
+        PyRuntimeError::new_err(msg)
+    }
+}
+
+fn search_panic_error(payload: Box<dyn std::any::Any + Send>) -> PyErr {
+    reported_panic(panic_payload_message(payload))
+}
+
+fn scaled_cluster_preset(
+    n: usize,
+    recommended: bool,
+    derived: bool,
+    communicating: bool,
+    ras: bool,
+    has_custom_scales: bool,
+    scale: f64,
+    escale: f64,
+) -> crate::methods::cluster_hopping::Config {
+    use crate::methods::cluster_hopping::{Config, ContinuousSymmetry, OrbitCore};
+    use crate::methods::minima_hopping::SharedVisitPolicy;
+    use crate::methods::two_phase::TwoPhase;
+
+    if !has_custom_scales {
+        if ras {
+            Config::recommended(n)
+        } else if communicating {
+            Config::communicating(n)
+        } else if derived {
+            Config::derived(n)
+        } else if recommended {
+            Config::recommended(n)
+        } else {
+            Config::for_cluster(n)
+        }
+    } else if ras {
+        Config::recommended_with_scales(n, scale, escale)
+    } else if communicating {
+        let mut cfg = Config::for_cluster_with_scales(n, scale, escale);
+        cfg.allocate_moves = true;
+        cfg.return_screen = true;
+        cfg.orbit_complete_on_new = true;
+        cfg.orbit_core = OrbitCore::Fraction;
+        cfg.shared_deposits = 0;
+        cfg.shared_visit_policy = SharedVisitPolicy::Recognition;
+        if n < 98 {
+            cfg.surfaces = vec![TwoPhase::relative(0.7, escale / scale.powi(4))];
+        }
+        cfg.continuous_symmetry = ContinuousSymmetry::Measure { interval: 10 };
+        cfg
+    } else if derived {
+        let mut cfg = Config::recommended_with_scales(n, scale, escale);
+        cfg.budget_window = true;
+        cfg.bayes_screen = true;
+        cfg.bayes_threshold =
+            crate::screen::cost_asymmetric_threshold(cfg.screen_steps, cfg.relax_steps);
+        cfg
+    } else if recommended {
+        Config::recommended_with_scales(n, scale, escale)
+    } else {
+        Config::for_cluster_with_scales(n, scale, escale)
+    }
+}
+
+fn scaled_water_geometry(scale: f64) -> PyResult<crate::rigid_body::RigidBodyGeometry> {
+    let base = crate::potentials::gmin_water_geometry();
+    if scale == 1.0 {
+        return Ok(base);
+    }
+    let sites = base
+        .sites()
+        .iter()
+        .map(|s| [s[0] * scale, s[1] * scale, s[2] * scale])
+        .collect();
+    crate::rigid_body::RigidBodyGeometry::new_bonded(
+        sites,
+        base.species().to_vec(),
+        base.bonds().to_vec(),
+    )
+    .map_err(PyValueError::new_err)
 }
 
 fn rigid_probe(
@@ -3608,44 +4158,84 @@ fn rigid_probe(
     }
 }
 
-/// Runs the measured cluster-search layer on a user energy and gradient.
+/// Runs the measured cluster-search layer on a Python callback pair or native
+/// cluster potential.
 ///
-/// `recommended=True` uses `Config.recommended(n)`; otherwise
-/// `Config.for_cluster(n)`. `communicating=True` uses
-/// `Config.communicating(n)` and overrides both. A charged central-difference
-/// probe distinguishes gradients from force-valued callbacks when the budget
-/// can cover it. Every objective or gradient evaluation is charged to a ledger
-/// of `budget` units. Returns `{best, best_energy, hops, nve_unavailable}`.
-/// `nve_unavailable` is set when a constant-energy escape was requested and
-/// the `rgsaddle` feature is off. The `python` feature enables it.
-/// `ras=True` runs residual archive search on `Config.recommended(n)` and
-/// also reports `charged`, `floors`, `returned`, `events`, and
-/// `nve_unavailable`.
+/// Without `config`, `groups`, or `water_sites`, preset selection follows
+/// `ras=True` (residual archive search on the recommended preset), else
+/// `communicating=True` (`Config.communicating(n)`, overriding `derived` and
+/// `recommended`), else `derived=True` (`Config.derived(n)`, overriding
+/// `recommended`), else `Config.recommended(n)` when `recommended=True` or
+/// `Config.for_cluster(n)` when `recommended=False`. When `grad_fn` is a Python
+/// callable and `budget >= 4`, a 3-evaluation central-difference probe orients
+/// gradients versus force-valued callbacks (`-grad E`). Every objective or
+/// gradient evaluation is charged to a `Ledger` of `budget` units.
+/// `nve_unavailable` is set when a constant-energy escape was requested and the
+/// `rgsaddle` feature is off (`python` enables it).
+///
+/// Scaling (`length_scale` and `energy_scale`):
+///   Both are optional positive finite floats that default to `1.0` when unset
+///   (`scale = length_scale or 1.0`, `escale = energy_scale or 1.0`). When
+///   `config`, `groups`, and `water_sites` are all unset and either scale is
+///   supplied:
+///   - `ras=True` or `recommended=True` builds
+///     `Config.recommended_with_scales(n, scale, escale)`.
+///   - `derived=True` starts from
+///     `Config.recommended_with_scales(n, scale, escale)` and sets
+///     `budget_window=True`, `bayes_screen=True`, and the cost-asymmetric
+///     screen threshold.
+///   - `communicating=True` starts from
+///     `Config.for_cluster_with_scales(n, scale, escale)` and sets
+///     `allocate_moves=True`, `return_screen=True`,
+///     `orbit_complete_on_new=True`, `orbit_core="fraction"`,
+///     `shared_deposits=0`, `shared_visit_policy="recognition"`,
+///     `surfaces=[TwoPhase.relative(0.7, escale / scale**4)]` for `n < 98`,
+///     and `continuous_symmetry=("measure", 10)`.
+///   - `recommended=False` (with `derived=False`, `communicating=False`,
+///     `ras=False`) builds `Config.for_cluster_with_scales(n, scale, escale)`.
+///   Stock `species` and `rigid` runs preserve those scales rather than
+///   discarding them: `rigid=True` calls `with_rigid_bodies` with the stock
+///   GMIN water-site offsets multiplied by `scale`, and `species` calls
+///   `with_species(species, sigmas)` on the scaled preset. Non-rigid callable
+///   box bounds also scale with `cfg.length_scale` (rigid callable bounds use
+///   `4 * max(cfg.container, 1.0)`). `groups` rejects `length_scale` and passes
+///   `energy_scale` (default `1.0`) to `Config.recommended_molecular` or
+///   `Config.for_molecular`. Both `water_sites` and `config` reject
+///   `length_scale` and `energy_scale`.
 ///
 /// Args:
-///   obj_fn: Python callable `f(numpy.ndarray) -> float`.
-///   grad_fn: Python gradient or force callable `g(numpy.ndarray) -> numpy.ndarray`.
-///   n: number of points. A Cartesian state is `3n`. `rigid=True` or
-///     `water_sites` is `n` bodies and a `6n` state.
-///   budget: charged evaluations.
+///   obj_fn: Python callable `f(numpy.ndarray) -> float`, or a native cluster
+///     potential (`PairPotential`, `BinaryLennardJones`, `SuttonChen`,
+///     `Gupta`, `Tip4pCluster`, or `GminTip4p`).
+///   grad_fn: Python gradient or force callable
+///     `g(numpy.ndarray) -> numpy.ndarray`, or `None` when `obj_fn` is a
+///     native cluster potential.
+///   n: number of points (`>= 2`). A Cartesian state is `3n`; `rigid=True`,
+///     `water_sites`, or a rigid `config` uses `n` bodies and a `6n` state.
+///   budget: charged objective and gradient evaluations (`>= 1`).
 ///   seed: RNG seed.
 ///   recommended: measured stack when true, Wales-Doye baseline when false.
 ///   derived: cost-asymmetric Bayes screen and budget-window temperature
 ///     on top of the measured flags. Overrides `recommended` when true.
 ///   communicating: orbit plus recognition. Overrides `recommended` and
 ///     `derived` when true. Not `Config.recommended`.
-///   ras: residual archive search on the recommended preset. Keyword-only;
-///     default false. Does not change `Config.recommended`.
+///   ras: residual archive search on the recommended preset (or an explicit
+///     Cartesian single-species `config`). Keyword-only; default false.
+///     Does not change `Config.recommended`.
 ///   branch_on_stall: run fresh-start branches after the main walk stalls.
 ///   start: optional flat start. Cartesian length is `3n`. A rigid or water
 ///     start is `6n`, block Rodrigues unless `layout` is `interleaved`.
-///   length_scale: optional physical length. When set with the recommended
-///     preset, hops use `with_scales` instead of the reduced LJ container.
-///     Ignored once `species` or `rigid` selects a chart: those keep the
-///     stock preset and adapt geometry afterwards. Excluded by `water_sites`.
-///   species: optional label per point. Two or more labels add a swap move.
-///     A wide diameter ratio also tries one downhill unlike-pair exchange
-///     beside the escape.
+///   length_scale: optional positive finite physical length scale (default
+///     `1.0` when `energy_scale` is set). Scaled into the cluster preset and
+///     preserved on stock `species` and `rigid` runs. Excluded by
+///     `water_sites`, `groups`, and `config`.
+///   energy_scale: optional positive finite physical energy scale (default
+///     `1.0` when `length_scale` or `groups` is set). Scaled into cluster and
+///     molecular (`groups`) presets, including stock `species` and `rigid`
+///     runs. Excluded by `water_sites` and `config`.
+///   species: optional label per point (`len == n`). Two or more labels add a
+///     swap move. A wide diameter ratio also tries one downhill unlike-pair
+///     exchange beside the escape.
 ///   sigmas: optional Lennard-Jones diameter per point, same length as
 ///     `species`. Large diameters are swapped out of the inner shell.
 ///   rigid: when true, `n` is the number of rigid bodies and the hop state
@@ -3673,35 +4263,63 @@ fn rigid_probe(
 ///     `Config.communicating_tip4p(n)`, `Config.recommended_tip4p(n)`, or
 ///     `Config.for_tip4p(n)` when both are false, with these sites as the
 ///     rigid geometry. Needs `start`. Excludes `ras`, `derived`,
-///     `length_scale`, `rigid`, `species`, `sigmas`, and a non-block layout.
+///     `length_scale`, `energy_scale`, `rigid`, `species`, `sigmas`, and a
+///     non-block layout.
 ///   bonds: optional pairs of site indices for that custom body. Unset
 ///     bonds are the two O-H contacts, `[[0, 1], [0, 2]]`. A list with no
 ///     site joined to two others is refused. Needs `water_sites`.
 ///   groups: optional atom indices of each rigid group of a molecular
-///     search. The presets become `Config::recommended_molecular` or, with
-///     `recommended=False`, `Config::for_molecular`, at energy scale one.
-///     Needs `species` and `start`. Excludes `ras`, `derived`,
-///     `communicating`, `length_scale`, `rigid`, `sigmas`, `water_sites`
-///     and a non-block layout.
-///   local_step: `lbfgs`, `tric` or `auto`, `Config::local_step` of a
-///     `groups` search. Unset keeps the preset's: `auto` for
-///     `recommended=True`, L-BFGS otherwise. The result's `local_step` is
-///     the quench in force at the end, and `quench_seconds` the measured
-///     seconds per potential call and per TRIC step under `auto`.
-///   ring_moves: `Config::ring_moves` of a `groups` search, ring crankshafts
+///     search. The presets become `Config.recommended_molecular` or, with
+///     `recommended=False`, `Config.for_molecular`, at `energy_scale`
+///     (default `1.0`). Needs `species` and `start`. Excludes `ras`,
+///     `derived`, `communicating`, `length_scale`, `rigid`, `sigmas`,
+///     `water_sites`, `bonds`, and a non-block layout.
+///   local_step: `lbfgs`, `tric` or `auto`, `Config.local_step` of a
+///     `groups` search (`lbfgs` is also accepted without `groups`). Unset
+///     keeps the preset's: `auto` for `recommended=True`, L-BFGS otherwise.
+///     The result's `local_step` is the quench in force at the end, and
+///     `quench_seconds` the measured seconds per potential call and per TRIC
+///     step under `auto`.
+///   ring_moves: `Config.ring_moves` of a `groups` search, ring crankshafts
 ///     beside the torsion move. Unset keeps the preset's: on for
 ///     `recommended=True`, off otherwise.
-///   hold_stereocentres: `Config::hold_stereocentres` of a `groups` search,
+///   hold_stereocentres: `Config.hold_stereocentres` of a `groups` search,
 ///     a quench step that inverts a stereocentre is refused. Unset keeps
 ///     the preset's: on for `recommended=True`, off otherwise.
-///   measured_energy_scale: `Config::measured_energy_scale` of a `groups`
+///   measured_energy_scale: `Config.measured_energy_scale` of a `groups`
 ///     search, the temperature and deposit height are read from the opening
 ///     hops. Unset keeps the preset's: on for `recommended=True`, off
 ///     otherwise.
+///   config: explicit `Config` instance (`config.n_points == n`). Mutually
+///     exclusive with preset-modifier arguments (`derived`, `communicating`,
+///     `length_scale`, `energy_scale`, `species`, `sigmas`, `rigid`,
+///     `water_sites`, `bonds`, `groups`, `local_step`, `ring_moves`,
+///     `hold_stereocentres`, `measured_energy_scale`). Molecular configs
+///     require `start`; `ras=True` requires a Cartesian single-species config.
 ///   polish_on_improve: `Config::polish_on_improve`. When a hop improves
 ///     the incumbent, polish that point at the component gradient
 ///     tolerance and charge every evaluation. Unset keeps the preset's,
-///     which is off.
+///     which is off. A `config` keeps its own flag when this is unset.
+///
+/// Returns:
+///   When `ras=False` (default), a dict with the basin-hopping record
+///   (`best`, `best_energy`, `final`, `final_energy`, `spent`, `hops`,
+///   `accepted`, `basins`, `screened_out`, `restarts`, `visit_counts`,
+///   `escape_scale`, `escape_threshold`, `merge_radius`, `mean_step`,
+///   `arms`, `improvements`, `stop`, `quenched`, `energy_trace`,
+///   `nve_unavailable`, `branch_on_stall`, `ledger`, `local_step`,
+///   `quench_seconds`, `converged`, `capped`, `screens`,
+///   `screen_charged`, `full_charged`, `check_charged`,
+///   `overlap_rejected`, `refused`, `screen_steps_taken`,
+///   `search_seconds`, `polish_seconds`, `polish_calls`) and, on a rigid
+///   search, `rigid_path`. `rigid_path` holds `shell`, `archive`,
+///   `recorded`, `withhold_nonfinite`, `withhold_insane`,
+///   `withhold_overlap`, and `withhold_gradient`.
+///
+///   When `ras=True`, a dict with `best`, `best_energy`, `hops`,
+///   `charged`, `screens`, `same_floor`, `artn`, `best_at`, `floors`,
+///   `returned`, `events`, `nve_unavailable`, `branch_on_stall`, and
+///   `ledger`.
 ///
 /// A callback raising `BaseException` that is not an `Exception`, such as
 /// `KeyboardInterrupt`, stops the search at once. The best state found is
@@ -3723,6 +4341,7 @@ fn rigid_probe(
     branch_on_stall = false,
     start = None,
     length_scale = None,
+    energy_scale = None,
     species = None,
     sigmas = None,
     rigid = false,
@@ -3735,12 +4354,13 @@ fn rigid_probe(
     ring_moves = None,
     hold_stereocentres = None,
     measured_energy_scale = None,
+    config = None,
     polish_on_improve = None,
 ))]
 fn cluster_search(
     py: Python<'_>,
     obj_fn: Py<PyAny>,
-    grad_fn: Py<PyAny>,
+    grad_fn: Option<Py<PyAny>>,
     n: usize,
     budget: usize,
     seed: u64,
@@ -3751,6 +4371,7 @@ fn cluster_search(
     branch_on_stall: bool,
     start: Option<PyReadonlyArray1<'_, f64>>,
     length_scale: Option<f64>,
+    energy_scale: Option<f64>,
     species: Option<Vec<u32>>,
     sigmas: Option<Vec<f64>>,
     rigid: bool,
@@ -3763,10 +4384,64 @@ fn cluster_search(
     ring_moves: Option<bool>,
     hold_stereocentres: Option<bool>,
     measured_energy_scale: Option<bool>,
+    config: Option<PyRef<'_, PyClusterConfig>>,
     polish_on_improve: Option<bool>,
 ) -> PyResult<Py<PyDict>> {
     use crate::methods::cluster_hopping::Config;
     use crate::methods::tric_opt::LocalStep;
+
+    if let Some(ref user_cfg) = config {
+        if n < 2 {
+            return Err(PyValueError::new_err("n must be at least 2"));
+        }
+        if budget < 1 {
+            return Err(PyValueError::new_err("budget must be positive"));
+        }
+        if user_cfg.inner.n_points != n {
+            return Err(PyValueError::new_err(format!(
+                "config.n_points = {} must match n = {n}",
+                user_cfg.inner.n_points
+            )));
+        }
+        if derived
+            || communicating
+            || length_scale.is_some()
+            || energy_scale.is_some()
+            || species.is_some()
+            || sigmas.is_some()
+            || rigid
+            || water_sites.is_some()
+            || bonds.is_some()
+            || groups.is_some()
+            || local_step.is_some()
+            || ring_moves.is_some()
+            || hold_stereocentres.is_some()
+            || measured_energy_scale.is_some()
+        {
+            return Err(PyValueError::new_err(
+                "config excludes preset-modifier arguments (derived, communicating, length_scale, \
+                 energy_scale, species, sigmas, rigid, water_sites, bonds, groups, local_step, \
+                 ring_moves, hold_stereocentres, measured_energy_scale); mutate config directly",
+            ));
+        }
+        if layout != "block" && layout != "interleaved" {
+            return Err(PyValueError::new_err("layout must be block or interleaved"));
+        }
+        let cfg_rigid = user_cfg.inner.rigid_body_geometry.is_some()
+            || user_cfg.inner.move_library.is_rigid_body();
+        if !cfg_rigid && layout != "block" {
+            return Err(PyValueError::new_err(
+                "interleaved layout is the rigid-body chart",
+            ));
+        }
+        if ras
+            && (cfg_rigid
+                || user_cfg.inner.species.is_some()
+                || user_cfg.inner.move_library.is_molecular())
+        {
+            return Err(PyValueError::new_err("ras is the cartesian archive search"));
+        }
+    }
 
     let local_step = match local_step {
         None => None,
@@ -3795,14 +4470,22 @@ fn cluster_search(
         return Err(PyValueError::new_err("measured_energy_scale needs groups"));
     }
     if let Some(groups) = groups.as_ref() {
+        if groups.is_empty() || groups.iter().any(|group| group.is_empty()) {
+            return Err(PyValueError::new_err("groups must name at least one atom"));
+        }
         if ras || derived || communicating || length_scale.is_some() {
             return Err(PyValueError::new_err(
                 "groups excludes ras, derived, communicating and length_scale",
             ));
         }
-        if rigid || sigmas.is_some() || water_sites.is_some() || layout != "block" {
+        if rigid
+            || sigmas.is_some()
+            || water_sites.is_some()
+            || bonds.is_some()
+            || layout != "block"
+        {
             return Err(PyValueError::new_err(
-                "groups excludes rigid, sigmas, water_sites and a non-block layout",
+                "groups excludes rigid, sigmas, water_sites, bonds and a non-block layout",
             ));
         }
         if species.as_ref().is_none_or(|labels| labels.len() != n) {
@@ -3830,6 +4513,13 @@ fn cluster_search(
             "length_scale must be finite and positive",
         ));
     }
+    if let Some(escale) = energy_scale
+        && (!escale.is_finite() || escale <= 0.0)
+    {
+        return Err(PyValueError::new_err(
+            "energy_scale must be finite and positive",
+        ));
+    }
     if bonds.is_some() && water_sites.is_none() {
         return Err(PyValueError::new_err("bonds needs water_sites"));
     }
@@ -3841,10 +4531,32 @@ fn cluster_search(
     if sigmas.is_some() && species.is_none() {
         return Err(PyValueError::new_err("sigmas require species"));
     }
+    if let Some(labels) = species.as_ref()
+        && labels.len() != n
+    {
+        return Err(PyValueError::new_err(format!(
+            "species length {} must match n ({n})",
+            labels.len()
+        )));
+    }
+    if let Some(vals) = sigmas.as_ref() {
+        if vals.len() != n {
+            return Err(PyValueError::new_err(format!(
+                "sigmas length {} must match n ({n})",
+                vals.len()
+            )));
+        }
+        if vals.iter().any(|v| !v.is_finite() || *v <= 0.0) {
+            return Err(PyValueError::new_err("sigmas must be finite and positive"));
+        }
+    }
     if layout != "block" && layout != "interleaved" {
         return Err(PyValueError::new_err("layout must be block or interleaved"));
     }
-    if !rigid && layout != "block" {
+    let user_rigid = config.as_ref().is_some_and(|c| {
+        c.inner.rigid_body_geometry.is_some() || c.inner.move_library.is_rigid_body()
+    });
+    if !(rigid || user_rigid) && layout != "block" {
         return Err(PyValueError::new_err(
             "interleaved layout is the rigid-body chart",
         ));
@@ -3862,9 +4574,9 @@ fn cluster_search(
                     sl.len()
                 )));
             }
-            if ras || derived || length_scale.is_some() {
+            if ras || derived || length_scale.is_some() || energy_scale.is_some() {
                 return Err(PyValueError::new_err(
-                    "water_sites excludes ras, derived and length_scale",
+                    "water_sites excludes ras, derived, length_scale and energy_scale",
                 ));
             }
             if rigid || species.is_some() || sigmas.is_some() || layout != "block" {
@@ -3894,8 +4606,8 @@ fn cluster_search(
             )
         }
     };
-    let interleaved = rigid && layout == "interleaved";
-    let rigid_chart = water.is_some() || rigid;
+    let rigid_chart = water.is_some() || rigid || user_rigid;
+    let interleaved = (rigid || user_rigid) && layout == "interleaved";
     let dim = if rigid_chart { 6 * n } else { 3 * n };
     let start = match start {
         Some(start) => {
@@ -3913,15 +4625,26 @@ fn cluster_search(
         None => None,
     };
     let scale = length_scale.unwrap_or(1.0);
-    let molecular = groups.is_some();
-    let stock = (species.is_some() || rigid) && !molecular;
+    let escale = energy_scale.unwrap_or(1.0);
+    let has_custom_scales = length_scale.is_some() || energy_scale.is_some();
+    let molecular = groups.is_some()
+        || config
+            .as_ref()
+            .is_some_and(|c| c.inner.move_library.is_molecular());
+    if molecular && config.is_some() && start.is_none() {
+        return Err(PyValueError::new_err("molecular config needs a start"));
+    }
+    let stock = (species.is_some() || rigid) && !molecular && config.is_none();
     let has_water = water.is_some();
-    let mut cfg = if let Some(groups) = groups {
+    let from_config = config.is_some();
+    let mut cfg = if let Some(user_cfg) = config {
+        user_cfg.inner.clone()
+    } else if let Some(groups) = groups {
         let labels = species.clone().unwrap_or_default();
         let mut cfg = if recommended {
-            Config::recommended_molecular(labels, groups, 1.0)
+            Config::recommended_molecular(labels, groups, escale)
         } else {
-            Config::for_molecular(labels, groups, 1.0)
+            Config::for_molecular(labels, groups, escale)
         };
         if let Some(step) = local_step {
             cfg.local_step = step;
@@ -3946,41 +4669,31 @@ fn cluster_search(
         };
         cfg.rigid_body_geometry = Some(geometry);
         cfg
-    } else if ras {
-        Config::recommended(n)
-    } else if communicating {
-        Config::communicating(n)
-    } else if derived {
-        Config::derived(n)
-    } else if recommended {
-        if length_scale.is_some() && !stock {
-            recommended_with_scale(n, scale)
-        } else {
-            Config::recommended(n)
-        }
-    } else if length_scale.is_some() && !stock {
-        Config::with_scales(n, scale, 1.0)
     } else {
-        Config::for_cluster(n)
+        scaled_cluster_preset(
+            n,
+            recommended,
+            derived,
+            communicating,
+            ras,
+            has_custom_scales,
+            scale,
+            escale,
+        )
     };
     if !has_water && stock {
-        cfg = if communicating {
-            Config::communicating(n)
-        } else if derived {
-            Config::derived(n)
-        } else if recommended {
-            Config::recommended(n)
-        } else {
-            Config::for_cluster(n)
-        };
         if rigid {
-            cfg = cfg.with_rigid_bodies(crate::potentials::gmin_water_geometry());
+            cfg = cfg.with_rigid_bodies(scaled_water_geometry(scale)?);
         }
         if let Some(labels) = species {
             cfg = cfg.with_species(labels, sigmas);
         }
     }
-    cfg.branch_on_stall = branch_on_stall;
+    // The keyword is the preset path's switch. A config already carries
+    // the flag, and the default false leaves that choice in place.
+    if !from_config || branch_on_stall {
+        cfg.branch_on_stall = branch_on_stall;
+    }
     if let Some(polish) = polish_on_improve {
         cfg.polish_on_improve = polish;
     }
@@ -3996,101 +4709,216 @@ fn cluster_search(
     }
     let potential_calls = std::sync::Arc::new(PythonCallCounts::default());
     let mut probe_unbacked = 0usize;
-    let gradient_scale = if budget >= 4 {
-        let probe_owned = if rigid_chart || molecular {
-            Some(match start.as_ref() {
-                Some(start) => start.clone(),
-                None => Array1::from_vec(rigid_probe(&cfg, seed, interleaved)),
-            })
-        } else {
-            None
-        };
-        let scale = cluster_gradient_scale(
-            py,
-            &obj_fn,
-            &grad_fn,
-            &cfg,
-            seed,
-            probe_owned.as_ref().map(|probe| probe.view()),
-            &errors,
-            &potential_calls,
-        )?;
-        let probe_callbacks = PythonCallCounts::load(&potential_calls.total);
-        probe_unbacked = 3usize.saturating_sub(probe_callbacks);
-        for _ in 0..3 {
-            assert!(ledger.with_charge_name(
-                crate::methods::cluster_hopping::ChargeName::Probe,
-                |ledger| ledger.charge()
+    let native_pot = if grad_fn.is_none() {
+        let Some(pot) = potentials::NativePotential::extract_bound(obj_fn.bind(py))? else {
+            return Err(PyTypeError::new_err(
+                "grad_fn is required unless obj_fn is a native cluster potential",
             ));
+        };
+        let pot_rigid = pot.is_rigid_body();
+        if pot_rigid != rigid_chart {
+            let expected = if pot_rigid { "rigid-body" } else { "atomic" };
+            let actual = if rigid_chart { "rigid-body" } else { "atomic" };
+            let pot_unit = if pot_rigid { "bodies" } else { "atoms" };
+            let actual_unit = if rigid_chart { "bodies" } else { "atoms" };
+            return Err(PyValueError::new_err(format!(
+                "potential uses a {expected} chart ({} {pot_unit}), which does not match {actual} search ({n} {actual_unit})",
+                pot.n_points()
+            )));
         }
-        scale
+        if pot.n_points() != n {
+            let unit = if pot_rigid { "bodies" } else { "atoms" };
+            return Err(PyValueError::new_err(format!(
+                "potential expects {} {unit}, which does not match n = {n}",
+                pot.n_points()
+            )));
+        }
+        if Objective::dim(&pot) != dim {
+            return Err(PyValueError::new_err(format!(
+                "potential dimension {} does not match state dimension {dim}",
+                Objective::dim(&pot)
+            )));
+        }
+        Some(pot)
     } else {
-        1.0
+        None
     };
     let extent = cfg.container.max(1.0) * 4.0;
-    let bounds = if rigid {
-        Bounds::new(
-            Array1::from_elem(dim, -extent),
-            Array1::from_elem(dim, extent),
-            0.0,
-        )
-    } else if molecular {
-        cluster_bounds(n, dim, cfg.length_scale)
+    let ((out, stats), phase) = if let Some(pot) = native_pot.as_ref() {
+        if ras {
+            let out = cluster_archive_search(
+                py,
+                pot,
+                &cfg,
+                &mut ledger,
+                &potential_calls,
+                seed,
+                probe_unbacked,
+            );
+            return out;
+        }
+        py.detach(|| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let run = if interleaved {
+                    let started = match start.as_ref() {
+                        Some(start) => {
+                            Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
+                                start.as_slice().unwrap_or(&[]),
+                            ))
+                        }
+                        None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
+                    };
+                    crate::methods::cluster_search::search_from(
+                        pot,
+                        &cfg,
+                        &mut ledger,
+                        started.view(),
+                        seed,
+                    )
+                } else if let Some(start) = start.as_ref() {
+                    crate::methods::cluster_search::search_from(
+                        pot,
+                        &cfg,
+                        &mut ledger,
+                        start.view(),
+                        seed,
+                    )
+                } else if rigid_chart {
+                    let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
+                    crate::methods::cluster_search::search_from(
+                        pot,
+                        &cfg,
+                        &mut ledger,
+                        started.view(),
+                        seed,
+                    )
+                } else {
+                    crate::methods::cluster_search::search(pot, &cfg, &mut ledger, seed)
+                };
+                run.map(|pair| (pair, crate::methods::cluster_search::last_search_phase()))
+            }))
+        })
+        .map_err(search_panic_error)?
+        .map_err(search_failure)?
     } else {
-        cluster_bounds(n, dim, scale)
-    };
-    let obj = CallableDiffObjective {
-        fn_: obj_fn,
-        grad_fn,
-        bounds,
-        gradient_scale,
-        errors: std::sync::Arc::clone(&errors),
-        calls: std::sync::Arc::clone(&potential_calls),
-    };
-    if ras {
-        let out = cluster_archive_search(
-            py,
-            &obj,
-            &cfg,
-            &mut ledger,
-            &potential_calls,
-            seed,
-            probe_unbacked,
-        );
-        // The charge identity is an assert. Finish a KeyboardInterrupt or
-        // other ending callback error first, or that assert becomes the
-        // exception the caller sees.
-        errors.finish(py)?;
-        reconcile_python_charges(&potential_calls, &ledger, probe_unbacked)?;
-        return out;
-    }
-    let (out, stats) = if interleaved {
-        let chart = InterleavedChart {
-            inner: &obj,
-            n_molecules: n,
-            bounds: Bounds::new(
+        let grad_fn = grad_fn.expect("checked grad_fn is Some");
+        let gradient_scale = if budget >= 4 {
+            let probe_owned = if rigid_chart || molecular {
+                Some(match start.as_ref() {
+                    Some(start) => start.clone(),
+                    None => Array1::from_vec(rigid_probe(&cfg, seed, interleaved)),
+                })
+            } else {
+                None
+            };
+            let scale = cluster_gradient_scale(
+                py,
+                &obj_fn,
+                &grad_fn,
+                &cfg,
+                seed,
+                probe_owned.as_ref().map(|probe| probe.view()),
+                &errors,
+                &potential_calls,
+            )?;
+            let probe_callbacks = PythonCallCounts::load(&potential_calls.total);
+            probe_unbacked = 3usize.saturating_sub(probe_callbacks);
+            for _ in 0..3 {
+                assert!(ledger.with_charge_name(
+                    crate::methods::cluster_hopping::ChargeName::Probe,
+                    |ledger| ledger.charge()
+                ));
+            }
+            scale
+        } else {
+            1.0
+        };
+        let bounds = if rigid_chart {
+            Bounds::new(
                 Array1::from_elem(dim, -extent),
                 Array1::from_elem(dim, extent),
                 0.0,
-            ),
+            )
+        } else {
+            cluster_bounds(n, dim, cfg.length_scale)
         };
-        let started = match start.as_ref() {
-            Some(start) => Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
-                start.as_slice().unwrap_or(&[]),
-            )),
-            None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
+        let obj = CallableDiffObjective {
+            fn_: obj_fn,
+            grad_fn,
+            bounds,
+            gradient_scale,
+            errors: std::sync::Arc::clone(&errors),
+            calls: std::sync::Arc::clone(&potential_calls),
         };
-        crate::methods::cluster_search::search_from(&chart, &cfg, &mut ledger, started.view(), seed)
-    } else if let Some(start) = start {
-        crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, start.view(), seed)
-    } else if rigid {
-        let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
-        crate::methods::cluster_search::search_from(&obj, &cfg, &mut ledger, started.view(), seed)
-    } else {
-        crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
-    }
-    .map_err(search_failure)?;
-    errors.finish(py)?;
+        if ras {
+            let out = cluster_archive_search(
+                py,
+                &obj,
+                &cfg,
+                &mut ledger,
+                &potential_calls,
+                seed,
+                probe_unbacked,
+            );
+            // The charge identity is an assert. Finish a KeyboardInterrupt or
+            // other ending callback error first, or that assert becomes the
+            // exception the caller sees.
+            errors.finish(py)?;
+            reconcile_python_charges(&potential_calls, &ledger, probe_unbacked)?;
+            return out;
+        }
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if interleaved {
+                let chart = InterleavedChart {
+                    inner: &obj,
+                    n_molecules: n,
+                    bounds: Bounds::new(
+                        Array1::from_elem(dim, -extent),
+                        Array1::from_elem(dim, extent),
+                        0.0,
+                    ),
+                };
+                let started = match start.as_ref() {
+                    Some(start) => {
+                        Array1::from_vec(crate::potentials::block_from_interleaved_gmin(
+                            start.as_slice().unwrap_or(&[]),
+                        ))
+                    }
+                    None => Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false)),
+                };
+                crate::methods::cluster_search::search_from(
+                    &chart,
+                    &cfg,
+                    &mut ledger,
+                    started.view(),
+                    seed,
+                )
+            } else if let Some(start) = start {
+                crate::methods::cluster_search::search_from(
+                    &obj,
+                    &cfg,
+                    &mut ledger,
+                    start.view(),
+                    seed,
+                )
+            } else if rigid_chart {
+                let started = Array1::from_vec(rigid_probe(&cfg, seed.wrapping_add(1), false));
+                crate::methods::cluster_search::search_from(
+                    &obj,
+                    &cfg,
+                    &mut ledger,
+                    started.view(),
+                    seed,
+                )
+            } else {
+                crate::methods::cluster_search::search(&obj, &cfg, &mut ledger, seed)
+            }
+        }));
+        errors.finish(py)?;
+        let (out, stats) = res.map_err(search_panic_error)?.map_err(search_failure)?;
+        let phase = crate::methods::cluster_search::last_search_phase();
+        ((out, stats), phase)
+    };
     let best_block = out
         .best_state
         .map(|value| value.to_vec())
@@ -4100,11 +4928,41 @@ fn cluster_search(
     } else {
         best_block
     };
+    let final_arr = out.final_state.map(|value| {
+        let block = value.to_vec();
+        let coords = if interleaved {
+            crate::potentials::interleaved_gmin_from_block(&block)
+        } else {
+            block
+        };
+        PyArray1::from_vec(py, coords)
+    });
     let dict = PyDict::new(py);
     dict.set_item("best", PyArray1::from_vec(py, best))?;
     dict.set_item("best_energy", out.best)?;
+    dict.set_item("final", final_arr)?;
+    dict.set_item("final_energy", out.final_energy)?;
+    dict.set_item("spent", ledger.spent())?;
     dict.set_item("hops", out.hops)?;
     dict.set_item("accepted", out.accepted)?;
+    dict.set_item("basins", out.basins)?;
+    dict.set_item("screened_out", out.screened_out)?;
+    dict.set_item("restarts", out.restarts)?;
+    dict.set_item("visit_counts", out.visit_counts)?;
+    dict.set_item("escape_scale", out.escape_scale)?;
+    dict.set_item("escape_threshold", out.escape_threshold)?;
+    dict.set_item("merge_radius", out.merge_radius)?;
+    dict.set_item("mean_step", out.mean_step)?;
+    dict.set_item("arms", out.arms)?;
+    dict.set_item("improvements", out.improvements)?;
+    dict.set_item(
+        "stop",
+        out.stop
+            .as_ref()
+            .map(crate::methods::cluster_hopping::HopStop::code),
+    )?;
+    dict.set_item("quenched", out.quenched)?;
+    dict.set_item("energy_trace", out.energy_trace)?;
     dict.set_item("nve_unavailable", out.nve_unavailable)?;
     dict.set_item("branch_on_stall", cfg.branch_on_stall)?;
     let ledger_split = PyDict::new(py);
@@ -4136,7 +4994,21 @@ fn cluster_search(
     };
     dict.set_item("local_step", quench)?;
     dict.set_item("quench_seconds", stats.quench_seconds)?;
-    reconcile_python_charges(&potential_calls, &ledger, probe_unbacked)?;
+    dict.set_item("converged", stats.converged)?;
+    dict.set_item("capped", stats.capped)?;
+    dict.set_item("screens", stats.screens)?;
+    dict.set_item("screen_charged", stats.screen_charged)?;
+    dict.set_item("full_charged", stats.full_charged)?;
+    dict.set_item("check_charged", stats.check_charged)?;
+    dict.set_item("overlap_rejected", stats.overlap_rejected)?;
+    dict.set_item("refused", stats.refused)?;
+    dict.set_item("screen_steps_taken", stats.screen_steps_taken)?;
+    dict.set_item("search_seconds", phase.search_seconds)?;
+    dict.set_item("polish_seconds", phase.polish_seconds)?;
+    dict.set_item("polish_calls", phase.polish_calls)?;
+    if native_pot.is_none() {
+        reconcile_python_charges(&potential_calls, &ledger, probe_unbacked)?;
+    }
     Ok(dict.into())
 }
 
@@ -4144,10 +5016,17 @@ fn cluster_search(
 ///
 /// With `method="lbfgs"` that quench is `WarmLbfgs` with an empty memory and
 /// the 64-probe line search of a species search; with `method="tric"` it is
-/// `TricOpt` over the atomic numbers `species`. Both stop when the largest
-/// gradient component is below `gtol`. `fg_fn(x)` returns
-/// `(energy, gradient)`; each call is one evaluation. Returns
-/// `{x, energy, calls}`.
+/// `TricOpt` over the atomic numbers `species` (`len == len(x0) // 3`). Both
+/// stop when the largest gradient component is below `gtol` or at `max_iter`
+/// iterations/evaluations. `fg_fn` is either a Python callable
+/// `fg_fn(x) -> (energy, gradient)` (each call is one evaluation) or a native
+/// cluster potential (`PairPotential`, `BinaryLennardJones`, `SuttonChen`,
+/// `Gupta`, `Tip4pCluster`, or `GminTip4p`). A bad `gtol`, method, species
+/// length, or dimension is `ValueError` before the kernel runs. A panic
+/// inside the kernel is `ValueError` only when its text is an input
+/// contract, the same list `cluster_search` uses, and `RuntimeError`
+/// otherwise: an internal failure is not bad input. Returns a dict with
+/// `x`, `energy`, and `calls`.
 #[pyfunction]
 #[pyo3(signature = (fg_fn, x0, gtol, max_iter = 10000, method = "lbfgs", species = None))]
 fn quench(
@@ -4182,40 +5061,75 @@ fn quench(
             )));
         }
     };
-    let mut failure: Option<PyErr> = None;
-    let mut calls = 0usize;
     let mut opt = crate::methods::warm_lbfgs::WarmLbfgs::default();
     opt.max_line_evals = 64;
     opt.gtol = gtol;
-    let fg = |v: ArrayView1<f64>| {
-        if failure.is_some() {
-            return None;
+    let mut calls = 0usize;
+    let (energy, x) = if let Some(pot) = potentials::NativePotential::extract_bound(fg_fn.bind(py))?
+    {
+        if tric.is_some() && pot.is_rigid_body() {
+            return Err(PyValueError::new_err(
+                "method=\"tric\" requires an atomic potential, not a rigid-body potential",
+            ));
         }
-        calls += 1;
-        let out = fg_fn
-            .call1(py, (PyArray1::from_vec(py, v.to_vec()),))
-            .and_then(|value| value.extract::<(f64, Vec<f64>)>(py));
-        match out {
-            Ok((e, g)) if g.len() == dim => Some((e, Array1::from_vec(g))),
-            Ok(_) => {
-                failure = Some(PyValueError::new_err(format!(
-                    "fg_fn must return a gradient of {dim} numbers"
-                )));
-                None
-            }
-            Err(err) => {
-                failure = Some(err);
-                None
-            }
+        if Objective::dim(&pot) != dim {
+            return Err(PyValueError::new_err(format!(
+                "potential dimension {} does not match x0 length {dim}",
+                Objective::dim(&pot)
+            )));
         }
+        py.detach(|| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let fg = |v: ArrayView1<f64>| {
+                    calls += 1;
+                    Some(
+                        eindir_core::gradient::DifferentiableObjective::value_and_gradient(&pot, v),
+                    )
+                };
+                let (energy, x, _) = match tric.as_ref() {
+                    Some(tric) => tric.minimize(start.view(), max_iter, fg),
+                    None => opt.minimize(start.view(), max_iter, fg),
+                };
+                (energy, x)
+            }))
+            .map_err(panic_payload_message)
+        })
+        .map_err(reported_panic)?
+    } else {
+        let mut failure: Option<PyErr> = None;
+        let fg = |v: ArrayView1<f64>| {
+            if failure.is_some() {
+                return None;
+            }
+            calls += 1;
+            let out = fg_fn
+                .call1(py, (PyArray1::from_vec(py, v.to_vec()),))
+                .and_then(|value| value.extract::<(f64, Vec<f64>)>(py));
+            match out {
+                Ok((e, g)) if g.len() == dim => Some((e, Array1::from_vec(g))),
+                Ok(_) => {
+                    failure = Some(PyValueError::new_err(format!(
+                        "fg_fn must return a gradient of {dim} numbers"
+                    )));
+                    None
+                }
+                Err(err) => {
+                    failure = Some(err);
+                    None
+                }
+            }
+        };
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match tric.as_ref() {
+            Some(tric) => tric.minimize(start.view(), max_iter, fg),
+            None => opt.minimize(start.view(), max_iter, fg),
+        }));
+        if let Some(err) = failure {
+            return Err(err);
+        }
+        let (energy, x, _) =
+            ran.map_err(|payload| reported_panic(panic_payload_message(payload)))?;
+        (energy, x)
     };
-    let (energy, x, _) = match tric.as_ref() {
-        Some(tric) => tric.minimize(start.view(), max_iter, fg),
-        None => opt.minimize(start.view(), max_iter, fg),
-    };
-    if let Some(err) = failure {
-        return Err(err);
-    }
     let out = PyDict::new(py);
     out.set_item("x", PyArray1::from_vec(py, x.to_vec()))?;
     out.set_item("energy", energy)?;
@@ -4223,9 +5137,11 @@ fn quench(
     Ok(out.into())
 }
 
+const _: () = assert!(crate::DEFAULT_HIT_TOL.to_bits() == 1.0e-3_f64.to_bits());
+
 /// One-sided target-energy hit predicate (`energy <= target + tol`).
 #[pyfunction]
-#[pyo3(signature = (energy, target, tol = crate::DEFAULT_HIT_TOL))]
+#[pyo3(signature = (energy, target, tol = 1e-3))]
 fn energy_hits(energy: f64, target: f64, tol: f64) -> bool {
     crate::energy_hits(energy, target, tol)
 }
@@ -4246,9 +5162,24 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__version__", crate::version::ANNEAL_VERSION)?;
     m.add("DEFAULT_HIT_TOL", crate::DEFAULT_HIT_TOL)?;
     m.add("SEARCH_HIT_TOL", crate::SEARCH_HIT_TOL)?;
+    m.add(
+        "DEFAULT_TARGET_WALKERS",
+        crate::methods::dmc_population::DEFAULT_TARGET_WALKERS,
+    )?;
+    m.add(
+        "DEFAULT_STEPS_PER_CONTROL",
+        crate::methods::dmc_population::DEFAULT_STEPS_PER_CONTROL,
+    )?;
+    m.add(
+        "DEFAULT_BETA0",
+        crate::methods::dmc_population::DEFAULT_BETA0,
+    )?;
+    m.add("IDENTITY_TOL", crate::methods::box_hopping::IDENTITY_TOL)?;
     m.add_function(wrap_pyfunction!(energy_hits, m)?)?;
+    m.add_function(wrap_pyfunction!(recommend_target_n, m)?)?;
     device::register(m)?;
     landfold::register(m)?;
+    potentials::register(m)?;
     m.add_class::<PyBasinBias>()?;
     m.add_class::<PyBoltzmann>()?;
     m.add_class::<PyFast>()?;

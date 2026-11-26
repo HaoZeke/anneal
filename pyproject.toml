@@ -45,7 +45,7 @@ dev = ["tomli>=2; python_version < '3.11'"]
 [project.optional-dependencies]
 plotter = ["matplotlib>=3.6.3"]
 gpu = ["cupy-cuda12x>=13,<15"]
-testing = ["pytest>=8", "pytest-cov>=4.1", "array-api-strict", "tomli>=2; python_version < '3.11'"]
+testing = ["pytest>=8", "pytest-cov>=4.1", "array-api-strict", "mypy", "tomli>=2; python_version < '3.11'"]
 ase = ["ase>=3.23,<3.30"]
 cutest = [
     "cma>=4.4",
@@ -63,7 +63,9 @@ cutest = [
 # The wheel crate installs the rgpot kernels, which anneal-core cannot
 # depend on from crates.io.
 manifest-path = "crates/anneal-python/Cargo.toml"
-features      = ["python"]
+# graphkey carries cluster_search(ras=True); a wheel without it refuses the
+# documented archive search.
+features      = ["python", "graphkey"]
 module-name   = "anneal._core"
 python-source = "python"
 # cargo resolves every path in the root manifest for any build: the

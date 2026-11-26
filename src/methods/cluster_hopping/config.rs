@@ -2774,6 +2774,34 @@ impl Config {
         self.container
     }
 
+    /// Liquid-density start radius scaled by [`Self::length_scale`], species
+    /// diameters, and [`Self::min_separation`].
+    pub fn liquid_start_radius(&self, n: usize) -> f64 {
+        let unit = super::liquid_sphere_radius(n);
+        let sep_scale = if self.min_separation.is_finite() && self.min_separation > 0.0 {
+            self.min_separation / LennardJonesPreset::MIN_SEPARATION
+        } else {
+            1.0
+        };
+        let sigma_scale = self
+            .species_sigma
+            .as_ref()
+            .and_then(|vals| vals.iter().copied().reduce(f64::max))
+            .unwrap_or(1.0)
+            .max(1.0);
+        let scale = (self.length_scale * sigma_scale).max(sep_scale);
+        if scale == 1.0 { unit } else { unit * scale }
+    }
+
+    /// Draw a non-overlapping liquid-density start scaled for `n` points.
+    pub(crate) fn scaled_liquid_start<R: Rng + ?Sized>(
+        &self,
+        n: usize,
+        rng: &mut R,
+    ) -> Array1<f64> {
+        random_cluster_in_radius(n, self.liquid_start_radius(n), self.min_separation, rng)
+    }
+
     /// Proposal mixture for use by the general [`crate::sampler::Sampler`].
     pub fn proposal_kernel(&self) -> ClusterProposal {
         ClusterProposal::new(self.move_library.kernels(self))
