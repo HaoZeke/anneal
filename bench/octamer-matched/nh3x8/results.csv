@@ -1,0 +1,3 @@
+seed,hit,calls_to_hit,stop_reason,best_energy_Eh,wall_s,binary,features,revision
+2000,yes,332675,target,-35.470770945094,5632.148167,gfn2_mol_h2h_matched@sha256:b13c4d62423333719bda035f28e4a7a70227e7f2299ea760a8f6093c2cd36fd9,rgpot-ex,e609b08299ab9e1fe24440e4e1ddcbacfa9a1ada
+2001,yes,332675,target,-35.470770945156,4914.563635,gfn2_mol_h2h_matched@sha256:b13c4d62423333719bda035f28e4a7a70227e7f2299ea760a8f6093c2cd36fd9,rgpot-ex,e609b08299ab9e1fe24440e4e1ddcbacfa9a1ada
