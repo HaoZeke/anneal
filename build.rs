@@ -104,16 +104,18 @@ fn main() {
     // binary is not loaded by a Python interpreter. On macOS, `-undefined
     // dynamic_lookup` lets that binary link, then dyld fails at process
     // start with `_PyBaseObject_Type` missing in the flat namespace.
+    // On Linux, GNU ld will not resolve those symbols through `liblammps`.
     // Link the interpreter that `cargo test` will run against. Maturin sets
     // `PYO3_BUILD_EXTENSION_MODULE` and passes the lookup flag itself; linking
     // libpython there would pin the extension to the build interpreter.
-    link_libpython_for_macos_tests();
+    link_libpython_for_test_binaries();
 }
 
-fn link_libpython_for_macos_tests() {
+fn link_libpython_for_test_binaries() {
     println!("cargo:rerun-if-env-changed=PYO3_BUILD_EXTENSION_MODULE");
     println!("cargo:rerun-if-env-changed=PYO3_PYTHON");
-    if std::env::var("CARGO_CFG_TARGET_OS").ok().as_deref() != Some("macos") {
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if os != "macos" && os != "linux" {
         return;
     }
     if std::env::var("CARGO_FEATURE_PYTHON").is_err() {
@@ -146,12 +148,12 @@ print("1" if on(shared) or on(pyframework) else "0")
         .output()
         .unwrap_or_else(|err| {
             panic!(
-                "feature `python` on macOS requires `{python}` on PATH so the test binaries can link libpython: {err}"
+                "feature `python` requires `{python}` on PATH so the test binaries can link libpython: {err}"
             )
         });
     if !output.status.success() {
         panic!(
-            "feature `python` on macOS could not read LIBDIR from `{python}`: {}",
+            "feature `python` could not read LIBDIR from `{python}`: {}",
             String::from_utf8_lossy(&output.stderr)
         );
     }
@@ -162,11 +164,17 @@ print("1" if on(shared) or on(pyframework) else "0")
     let framework = lines.next().unwrap_or("");
     let shared = lines.next().unwrap_or("0") == "1";
     if libdir.is_empty() || ldversion.is_empty() {
-        panic!("feature `python` on macOS needs LIBDIR and LDVERSION from `{python}`");
+        panic!("feature `python` needs LIBDIR and LDVERSION from `{python}`");
     }
     println!("cargo:rustc-link-search=native={libdir}");
     let lib_name = format!("python{ldversion}");
-    if shared {
+    if shared && os == "linux" {
+        // GNU ld drops a `-l` that appears before the crates that use it
+        // when `--as-needed` is on. Keep this library after those crates.
+        println!("cargo:rustc-link-arg=-Wl,--no-as-needed");
+        println!("cargo:rustc-link-arg=-l{lib_name}");
+        println!("cargo:rustc-link-arg=-Wl,--as-needed");
+    } else if shared {
         println!("cargo:rustc-link-lib=dylib={lib_name}");
     } else {
         println!("cargo:rustc-link-lib=static={lib_name}");
@@ -198,6 +206,6 @@ fn python_interpreter() -> String {
         }
     }
     panic!(
-        "feature `python` on macOS requires PYO3_PYTHON, python3, or python on PATH so the test binaries can link libpython"
+        "feature `python` requires PYO3_PYTHON, python3, or python on PATH so the test binaries can link libpython"
     );
 }
