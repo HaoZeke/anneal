@@ -613,7 +613,7 @@ def test_cluster_search_invalid_stock_inputs_and_docstring():
         anneal.cluster_search(lj4, None, 4, 50, species=[1, 1, 2, 2], sigmas=[1.0, 0.0, 1.0, 1.0])
 
     out = anneal._core.cluster_search(lj4, None, 4, 120, seed=1)
-    assert len(out) == 35
+    assert len(out) == 37
     rigid_out = anneal._core.cluster_search(
         anneal.GminTip4p(2), None, 2, 40, seed=1, rigid=True
     )

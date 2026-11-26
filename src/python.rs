@@ -4314,7 +4314,9 @@ fn rigid_probe(
 ///   `screen_charged`, `full_charged`, `check_charged`,
 ///   `overlap_rejected`, `refused`, `screen_steps_taken`,
 ///   `search_seconds`, `polish_seconds`, `polish_calls`) and, on a rigid
-///   search, `rigid_path`.
+///   search, `rigid_path`. `rigid_path` holds `shell`, `archive`,
+///   `recorded`, `withhold_nonfinite`, `withhold_insane`,
+///   `withhold_overlap`, and `withhold_gradient`.
 ///
 ///   When `ras=True`, a dict with `best`, `best_energy`, `hops`,
 ///   `charged`, `screens`, `same_floor`, `artn`, `best_at`, `floors`,
