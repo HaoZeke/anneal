@@ -3886,7 +3886,7 @@ fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>
         let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
         let start = search_start(cfg, &mut rng);
         let mut archive = Archive::new();
-        archive_search(
+        let searched = archive_search(
             cfg,
             start.view(),
             ledger,
@@ -3894,11 +3894,9 @@ fn cluster_archive_search<O: eindir_core::gradient::DifferentiableObjective<f64>
             Some(&mut grad),
             &mut archive,
             &mut rng,
-        )
-        .map(|outcome| {
-            drop(relax);
-            (outcome, stats)
-        })
+        );
+        drop(relax);
+        searched.map(|outcome| (outcome, stats))
     }))
     .map_err(search_panic_error)?
     .map_err(search_failure)?;
