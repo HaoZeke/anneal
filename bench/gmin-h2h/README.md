@@ -22,7 +22,8 @@ follow from them. Neither file has a `host` column.
 Every new per-seed and summary row keeps `host`, whose value remains the
 compatibility UTS name `bench`. Each row adds:
 
-- `machine_id`: the literal `unrecorded`.
+- `machine_id`: new rows write the literal `unrecorded`. The committed
+  files above have no `machine_id` column and are left as recorded.
 - `cpu_model`: the first CPU model string, normalized to single spaces.
   On Linux it comes from `/proc/cpuinfo`; on macOS from
   `sysctl -n machdep.cpu.brand_string`.

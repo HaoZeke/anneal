@@ -39,10 +39,11 @@ these provenance columns:
   label.  The test reads `.py`, `.sh`, `.sbatch` and `.rs` files, in
   `experiments/` too, and fails when a value derived from a label is used as
   a network address.
-- `machine_id` is the literal `unrecorded`. Harnesses do not read a host
-  machine identifier. A stored row is accepted when its `machine_id` is
-  `unrecorded` or a legacy 64-hex digest, and that acceptance does not abort
-  a resume.
+- New rows write `machine_id` as the literal `unrecorded`. Harnesses do not
+  read a host machine identifier. Existing rows keep a legacy 64-hex digest
+  when that is what was stored. A stored row is accepted when its
+  `machine_id` is `unrecorded` or a legacy 64-hex digest, and that acceptance
+  does not abort a resume.
 - `cpu_model` is the first available CPU model string, with whitespace
   normalized.  On Linux it is the first of the `model name`, `Model`,
   `Processor` and `Hardware` entries of `/proc/cpuinfo` that is not empty.
@@ -50,10 +51,10 @@ these provenance columns:
   `sysctl -n machdep.cpu.brand_string`.  A machine with neither raises an
   error.
 - A process started by a campaign may inherit the CPU model through
-  `ANNEAL_CPU_MODEL`.  Every row writer stamps `machine_id` as `unrecorded`
+  `ANNEAL_CPU_MODEL`.  A new row's `machine_id` is stamped `unrecorded`
   through `machine_columns()` and does not take a machine identifier from
   the environment.  With `ANNEAL_CPU_MODEL` unset, `cpu_model` describes
-  the machine that runs the row.
+  the machine that runs the row.  Existing rows are not rewritten.
 
 The machine fields describe the physical machine that ran the measured row.
 Summaries preserve the distinct source values, separated by semicolons.

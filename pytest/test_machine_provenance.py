@@ -3,6 +3,7 @@
 
 import csv
 import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -3014,8 +3015,32 @@ def test_the_provenance_docs_describe_unrecorded_ids_and_no_host_read():
         assert phrase not in docs, phrase
     assert "unrecorded" in source
     assert "unrecorded" in readme
+    assert "new rows write the literal `unrecorded`" in readme
+    assert "left as recorded" in readme
     assert "unrecorded" in docs
+    assert "New rows write `machine_id` as the literal `unrecorded`" in docs
+    assert "Existing rows keep a legacy 64-hex digest" in docs
+    assert "Existing rows are not rewritten" in docs
     assert "legacy 64-hex" in docs or "legacy 64-hex digest" in docs
+    panel = (ROOT / "bench" / "gmin-panel" / "README.md").read_text()
+    assert "UTS label `bench`" in panel
+    assert "legacy 64-hex" in panel
+    assert "new rows write the literal `unrecorded`" in panel
+    assert "host` is the literal unrecorded" not in panel
+    recorded = (ROOT / "bench" / "ase-nonlj" / "rerun-20261119" / "README.md").read_text()
+    assert re.search(r"(?m)^machine-id sha256 [0-9a-f]{64}\.$", recorded)
+    assert "host fingerprint unrecorded" not in recorded
+    template = (ROOT / "bench" / "template-free2-r7" / "run_cells.py").read_text()
+    assert 'host = "unrecorded"' in template
+    assert 'machine_columns()["machine_id"][:16]' not in template
+    tip = (ROOT / "bench" / "tip4p-h2h" / "run_h2h_r2.py").read_text()
+    gate = (ROOT / "bench" / "gate-pr186-restack" / "run_gate.py").read_text()
+    assert "machine_columns()" in tip
+    assert "machine_provenance()" in gate
+    assert '["machine_id"][:16]' not in tip
+    assert '["machine_id"][:16]' not in gate
+    panel_src = (ROOT / "scripts" / "gmin_panel" / "run_panel.py").read_text()
+    assert 'host = "unrecorded"' in panel_src
     from machine_provenance import stored_machine_id_compatible
 
     legacy = "ab" * 32
