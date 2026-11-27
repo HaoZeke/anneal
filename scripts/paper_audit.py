@@ -5133,6 +5133,20 @@ RECORDED_REVISION_CELL_GAPS = {
     ("bench/water-gmin/rows.csv", "code_revision",
      "gmin-aac1548a8aec13b53ad12a8d6904625081685d2e"): 60,
     ("data/sc96_78_hits.csv", "code_revision", ""): 64,
+    ("bench/pareto-nh3x8/rows.csv", "revision", "3.0.2+6914a25"): 3,
+    ("bench/pareto-nh3x8/rows.csv", "revision",
+     "crest 3.0.2 6914a25; xtb 6.7.1 edcfbbe"): 3,
+    ("bench/pareto-nh3x8/rows.csv", "revision",
+     "crest:3.0.2(af7eb99) xtb:6.7.1(edcfbbe)"): 3,
+    ("bench/pareto-nh3x8/rows.csv", "revision",
+     "d3c3e351e2bfd8c26a279943a26e5a8230467284 engine:8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e xtb:6.7.1(edcfbbe)"): 3,
+    ("bench/pareto-nh3x8/shards/rows-B.csv", "revision",
+     "crest 3.0.2 6914a25; xtb 6.7.1 edcfbbe"): 3,
+    ("bench/pareto-nh3x8/shards/rows-C.csv", "revision", "3.0.2+6914a25"): 3,
+    ("bench/pareto-nh3x8/shards/rows-D.csv", "revision",
+     "crest:3.0.2(af7eb99) xtb:6.7.1(edcfbbe)"): 3,
+    ("bench/pareto-nh3x8/shards/rows-D.csv", "revision",
+     "d3c3e351e2bfd8c26a279943a26e5a8230467284 engine:8efdd246322d1f32bc1bcbd7e5dfdd7a4237960e xtb:6.7.1(edcfbbe)"): 3,
 }
 
 
