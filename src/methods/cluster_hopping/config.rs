@@ -2682,11 +2682,9 @@ impl Config {
         // The binding declares an energy scale of one; a conformer
         // landscape in electronvolts is a few hundredths of that.
         cfg.measured_energy_scale = true;
-        #[cfg(feature = "featomic")]
-        {
-            cfg.keying = Keying::SoapPacking;
-            cfg.merge_radius = crate::featomic_hop::SOAP_PACK_MERGE;
-        }
+        // Pair-spectrum basins, as on the atomic recommended preset.
+        // Unit mean SOAP at merge 0.10 is `packing_superbasin`, measured
+        // on LJ75. Compiling that library must not retarget this preset.
         cfg
     }
 

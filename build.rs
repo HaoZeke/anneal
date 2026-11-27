@@ -104,16 +104,20 @@ fn main() {
     // binary is not loaded by a Python interpreter. On macOS, `-undefined
     // dynamic_lookup` lets that binary link, then dyld fails at process
     // start with `_PyBaseObject_Type` missing in the flat namespace.
+    // On Linux, GNU ld will not resolve those symbols through `liblammps`.
     // Link the interpreter that `cargo test` will run against. Maturin sets
     // `PYO3_BUILD_EXTENSION_MODULE` and passes the lookup flag itself; linking
     // libpython there would pin the extension to the build interpreter.
-    link_libpython_for_macos_tests();
+    link_libpython_for_test_binaries();
 }
 
-fn link_libpython_for_macos_tests() {
+fn link_libpython_for_test_binaries() {
     println!("cargo:rerun-if-env-changed=PYO3_BUILD_EXTENSION_MODULE");
     println!("cargo:rerun-if-env-changed=PYO3_PYTHON");
-    if std::env::var("CARGO_CFG_TARGET_OS").ok().as_deref() != Some("macos") {
+    // `python3` is taken from PATH when PYO3_PYTHON is unset.
+    println!("cargo:rerun-if-env-changed=PATH");
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if os != "macos" && os != "linux" {
         return;
     }
     if std::env::var("CARGO_FEATURE_PYTHON").is_err() {
@@ -127,7 +131,9 @@ fn link_libpython_for_macos_tests() {
     let script = r#"
 import sysconfig
 libdir = sysconfig.get_config_var("LIBDIR") or ""
+libpl = sysconfig.get_config_var("LIBPL") or ""
 ldversion = sysconfig.get_config_var("LDVERSION") or ""
+instsoname = sysconfig.get_config_var("INSTSONAME") or ""
 framework = sysconfig.get_config_var("PYTHONFRAMEWORKPREFIX") or ""
 shared = sysconfig.get_config_var("Py_ENABLE_SHARED")
 pyframework = sysconfig.get_config_var("PYTHONFRAMEWORK")
@@ -136,7 +142,9 @@ def on(value):
     return value not in (None, 0, "0", "")
 
 print(libdir)
+print(libpl)
 print(ldversion)
+print(instsoname)
 print(framework)
 print("1" if on(shared) or on(pyframework) else "0")
 "#;
@@ -146,38 +154,98 @@ print("1" if on(shared) or on(pyframework) else "0")
         .output()
         .unwrap_or_else(|err| {
             panic!(
-                "feature `python` on macOS requires `{python}` on PATH so the test binaries can link libpython: {err}"
+                "feature `python` requires `{python}` on PATH so the test binaries can link libpython: {err}"
             )
         });
     if !output.status.success() {
         panic!(
-            "feature `python` on macOS could not read LIBDIR from `{python}`: {}",
+            "feature `python` could not read LIBDIR from `{python}`: {}",
             String::from_utf8_lossy(&output.stderr)
         );
     }
     let text = String::from_utf8(output.stdout).expect("python sysconfig stdout is utf-8");
     let mut lines = text.lines();
     let libdir = lines.next().unwrap_or("");
+    let libpl = lines.next().unwrap_or("");
     let ldversion = lines.next().unwrap_or("");
+    let instsoname = lines.next().unwrap_or("");
     let framework = lines.next().unwrap_or("");
     let shared = lines.next().unwrap_or("0") == "1";
     if libdir.is_empty() || ldversion.is_empty() {
-        panic!("feature `python` on macOS needs LIBDIR and LDVERSION from `{python}`");
+        panic!("feature `python` needs LIBDIR and LDVERSION from `{python}`");
     }
-    println!("cargo:rustc-link-search=native={libdir}");
+    // `rustc-link-search` and `rustc-link-lib` apply to the cdylib as well
+    // as to tests. Pass `-L` and `-l` only to test, bench, and example
+    // binaries. `cargo test` builds examples with `test = true`, and those
+    // link this crate without `cfg(test)`.
+    let mut flags = Vec::new();
+    flags.push(format!("-L{libdir}"));
+    // The unversioned shared object can live in LIBPL while LIBDIR has only
+    // the versioned soname. Search that directory when it names somewhere else.
+    if !libpl.is_empty() && libpl != libdir {
+        flags.push(format!("-L{libpl}"));
+    }
     let lib_name = format!("python{ldversion}");
-    if shared {
-        println!("cargo:rustc-link-lib=dylib={lib_name}");
+    if shared && os == "linux" {
+        // GNU ld drops a `-l` that appears before the crates that use it
+        // when `--as-needed` is on. Keep this library after those crates.
+        // -lname needs libname.so. When that file is absent, name the
+        // installed soname instead.
+        let unversioned = format!("lib{lib_name}.so");
+        let link_arg = if config_dir_has(&unversioned, libdir, libpl) {
+            format!("-l{lib_name}")
+        } else if config_dir_has(instsoname, libdir, libpl) {
+            format!("-l:{instsoname}")
+        } else {
+            format!("-l{lib_name}")
+        };
+        flags.push("-Wl,--no-as-needed".to_string());
+        flags.push(link_arg);
+        flags.push("-Wl,--as-needed".to_string());
+    } else if shared {
+        flags.push(format!("-l{lib_name}"));
     } else {
-        println!("cargo:rustc-link-lib=static={lib_name}");
+        // `-l:libpythonX.Y.a` is rejected by ld64. The archive path that
+        // was found is accepted by that linker and by GNU ld.
+        let archive = format!("lib{lib_name}.a");
+        if let Some(path) = config_dir_file(&archive, libdir, libpl) {
+            flags.push(path.display().to_string());
+        } else {
+            flags.push(format!("-l{lib_name}"));
+        }
     }
     // python-build-standalone, which GitHub's setup-python installs, records
-    // `@rpath/libpythonX.Y.dylib`. The test harness is not next to that
+    // `@rpath/libpythonX.Y.dylib`. The test binary is not next to that
     // library, so the rpath has to name LIBDIR.
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{libdir}");
+    flags.push(format!("-Wl,-rpath,{libdir}"));
     if !framework.is_empty() {
-        println!("cargo:rustc-link-arg=-Wl,-rpath,{framework}");
+        flags.push(format!("-Wl,-rpath,{framework}"));
     }
+    for flag in &flags {
+        println!("cargo:rustc-link-arg-tests={flag}");
+        println!("cargo:rustc-link-arg-benches={flag}");
+        println!("cargo:rustc-link-arg-examples={flag}");
+    }
+}
+
+fn config_dir_file(name: &str, libdir: &str, libpl: &str) -> Option<std::path::PathBuf> {
+    if name.is_empty() {
+        return None;
+    }
+    for dir in [libdir, libpl] {
+        if dir.is_empty() {
+            continue;
+        }
+        let path = std::path::Path::new(dir).join(name);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn config_dir_has(name: &str, libdir: &str, libpl: &str) -> bool {
+    config_dir_file(name, libdir, libpl).is_some()
 }
 
 fn python_interpreter() -> String {
@@ -198,6 +266,6 @@ fn python_interpreter() -> String {
         }
     }
     panic!(
-        "feature `python` on macOS requires PYO3_PYTHON, python3, or python on PATH so the test binaries can link libpython"
+        "feature `python` requires PYO3_PYTHON, python3, or python on PATH so the test binaries can link libpython"
     );
 }

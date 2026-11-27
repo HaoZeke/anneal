@@ -3636,6 +3636,13 @@ mod move_scaling_tests {
     fn recommended_molecular_offers_flexible_soap_with_species() {
         let rec = Config::recommended_molecular(vec![8, 1, 1], vec![vec![0, 1, 2]], 1.0);
         assert_eq!(rec.soap_mode, SoapProposalMode::Flexible);
+        assert_eq!(rec.keying, Keying::Distances);
+        assert!(
+            (rec.merge_radius - 0.7 * rec.length_scale).abs() < 1e-12,
+            "molecular merge is the length-scaled pair spectrum, got {} at scale {}",
+            rec.merge_radius,
+            rec.length_scale
+        );
         assert!(
             !rec.packing_cna_applies(),
             "CNA 555 must not apply to a molecule"
