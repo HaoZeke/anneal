@@ -1366,9 +1366,9 @@ pub struct Config {
     /// Screened hopping leaves almost every hop short of the tolerance a
     /// shared census uses, so a cooperative run has nothing valid to offer.
     /// A new best is polished at once. A basin visit is polished once four
-    /// times this many charged evaluations have passed since the last one.
-    /// `Config::recommended` sets the count to one full quench, 1000 steps,
-    /// and those calls are charged to the ledger.
+    /// times this many charged spent have passed since the last one.
+    /// `recommended_with_scales` sets `relax_steps` to 1000 and leaves this
+    /// count at 0. The cluster-search example copies `relax_steps` into it.
     /// Zero disables the polish and leaves the solo behaviour untouched.
     pub polish_records: usize,
     /// Polish the incumbent when a hop improves it.
