@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Type-7 medians, Fisher exact tests, and Mann-Whitney ranks."""
 
 from __future__ import annotations

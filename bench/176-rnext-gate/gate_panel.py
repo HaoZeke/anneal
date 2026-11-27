@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Cell panel and row schema for the 176 r-next default-on gate."""
 
 from __future__ import annotations

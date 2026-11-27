@@ -1158,9 +1158,9 @@ def self_test() -> None:
     better = mannwhitney_worse([5.0, 6.0, 7.0, 8.0], [1.0, 2.0, 3.0, 4.0])
     if not better > 0.5:
         raise SystemExit(f"better mann-whitney {better}")
-    if not tol.energy_hits(-1.0, -1.001, 0.001):
+    if not tol.energy_hits(-1.0, -1.001, tol.DEFAULT_HIT_TOL):
         raise SystemExit("hit edge")
-    if tol.energy_hits(-1.0, -1.001 - 1e-6, 0.001):
+    if tol.energy_hits(-1.0, -1.001 - 1e-6, tol.DEFAULT_HIT_TOL):
         raise SystemExit("miss edge")
     if miss_score("0", 10, 10) <= miss_score("1", 10, 10):
         raise SystemExit("miss rank")

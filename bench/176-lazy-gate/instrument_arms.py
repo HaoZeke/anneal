@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Insert in-process telemetry into a clean arm worktree.
 
 The worktree is restored by the build wrapper after the binaries exist.

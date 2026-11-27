@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Score the lazy-basin gate. A FAIL is never relabeled."""
 
 from __future__ import annotations

@@ -10,7 +10,13 @@ import hashlib
 import os
 import shlex
 import subprocess
+import sys
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 REVISION = "9837358ae1027067ff654fac8b48969020853452"
 TREE = "15032ef401fb681e230d27c7b315d89f7ac53e4e"
@@ -18,7 +24,7 @@ ASE_VERSION = "3.29.0"
 ASE_WHEEL_SHA256 = (
     "7b9dd103f007810339c24acfee2f6b677c0c48443b21d3c98e52959246cf4ebf"
 )
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 SYSTEMS = {
     "lj38": (400_000, -173.928427),
     "lj55": (1_000_000, -279.248470),
@@ -195,7 +201,7 @@ def run_one(
     best = float(fields[7])
     if hit not in {"0", "1"}:
         raise RuntimeError(f"{stem} produced an invalid hit value")
-    if (best <= reference + HIT_TOL) != (hit == "1"):
+    if energy_hits(best, reference, HIT_TOL) != (hit == "1"):
         raise RuntimeError(f"{stem} hit classification disagrees with the reference")
     return {
         "system": system,

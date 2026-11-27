@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Round-2 three-arm runner for the 176 r-next gate.
 
 Rows are append-only. A failed attempt is kept and marked superseded
@@ -43,6 +44,12 @@ from gate_panel import (
     SESSION_R2,
     pad_bytes_for,
 )
+
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.append(str(_SCRIPTS))
+from target_tol import energy_hits  # noqa: E402
+
 
 def git_rev(worktree: Path, rev: str) -> str:
     out = subprocess.check_output(
@@ -163,7 +170,7 @@ def run_attempt(spec, arm: Arm, seed: int, slot: int, attempt: int, core: str, m
     wall_s = float(parsed["wall_s"])
     pot_s = float(parsed["pot_s"])
     outside_s = float(parsed["outside_s"]) if "outside_s" in parsed else max(0.0, wall_s - pot_s)
-    hit = 1 if best <= spec.reference + HIT_TOL and best == best else 0
+    hit = 1 if energy_hits(best, spec.reference, HIT_TOL) else 0
     row.update({
         "hit": str(hit),
         "best": f"{best:.10f}",

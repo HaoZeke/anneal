@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Release-build the four arms into separate target directories.
 set -euo pipefail
 

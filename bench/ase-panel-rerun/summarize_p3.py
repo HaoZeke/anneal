@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 import revision_reach  # noqa: E402
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
@@ -30,7 +31,7 @@ LABELS = {
 SYSTEMS = {
     "lj150": (150, 4_000_000, -893.310258, "LJ150"),
 }
-HIT_TOL = 1.0e-3
+HIT_TOL = DEFAULT_HIT_TOL
 REV = "61fa67cf380e46876b569da45e7cc091647a775b"
 BASE_FIELDS = (
     "system", "arm", "seed", "budget", "hit", "evals_to_hit", "charged", "best",
@@ -42,12 +43,6 @@ HEADER = (
     "median_outside_s,fisher_p_bh,mann_whitney_U_bh,mann_whitney_p_bh,"
     "fisher_p_mh,mann_whitney_U_mh,mann_whitney_p_mh,wall_cap_s,code_revision,host"
 )
-
-
-def energy_hits(energy: float, target: float, tol: float = HIT_TOL) -> bool:
-    if not (math.isfinite(energy) and math.isfinite(target) and math.isfinite(tol)):
-        return False
-    return tol >= 0.0 and float(energy) <= float(target) + float(tol)
 
 
 def type7(ordered: list[float], probability: float) -> float:

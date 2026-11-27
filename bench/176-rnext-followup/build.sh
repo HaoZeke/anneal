@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 set -euo pipefail
 
 : "${STAGE_DIR:?STAGE_DIR is required}"

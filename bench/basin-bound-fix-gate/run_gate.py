@@ -26,6 +26,11 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+from target_tol import energy_hits  # noqa: E402
+
 HIT_TOL = 1.0e-3
 OUTSIDE_RATIO_LIMIT = 1.10
 RSS_RATIO_LIMIT = 1.10
@@ -318,7 +323,7 @@ def parse_float(text: str) -> float:
 
 
 def is_hit(best: float, reference: float, tol: float = HIT_TOL) -> bool:
-    return math.isfinite(best) and best <= reference + tol
+    return energy_hits(best, reference, tol)
 
 
 def observation_order(seed: int) -> tuple[str, ...]:

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Apply in-process RssAnon and 176-rnext path-counter instrumentation to A/B worktrees."""
 
 import hashlib

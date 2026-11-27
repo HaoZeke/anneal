@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Panel and row schema for the paired PR 176 follow-up."""
 
 from __future__ import annotations

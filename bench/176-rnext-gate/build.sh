@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) anneal developers
 # Round-2 release builds for the 176 r-next gate.
 # Required: STAGE_DIR. When the B worktree is created, PATCH_MBOX.
 # Optional: SEED_STAGE_DIR, a previous stage whose target dirs can be copied.

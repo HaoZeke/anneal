@@ -22,13 +22,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+
 REFERENCES = {
     "m38r6": -157.477108,
     "m38r14": -144.321054,
     "sc126-38": -35419.9804,
     "sc108-38": -10117.2454,
 }
-HIT_TOL = 0.001
+HIT_TOL = DEFAULT_HIT_TOL
 THREAD_KEYS = (
     "OMP_NUM_THREADS",
     "MKL_NUM_THREADS",
@@ -199,9 +204,7 @@ def parse_anneal(text: str, system: str) -> dict[str, str]:
 
 
 def is_hit(best: float, system: str) -> bool:
-    if not math.isfinite(best):
-        return False
-    return best <= REFERENCES[system] + HIT_TOL
+    return energy_hits(best, REFERENCES[system], HIT_TOL)
 
 
 def run_one(binary: Path, system: str, seed: int, budget: int, log: Path) -> dict[str, str]:

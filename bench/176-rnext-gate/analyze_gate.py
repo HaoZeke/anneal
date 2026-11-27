@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Round-2 decision rule for the 176 r-next gate.
 
 The functions in this file are the pre-registered bar. They are committed

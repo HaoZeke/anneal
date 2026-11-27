@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Install the measurement overlay in one detached arm worktree."""
 
 from __future__ import annotations

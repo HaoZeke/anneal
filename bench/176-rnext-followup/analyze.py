@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Analyze paired PR 176 follow-up rows without dropping outliers."""
 
 from __future__ import annotations

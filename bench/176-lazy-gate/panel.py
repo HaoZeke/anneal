@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Cell panel and row schema for the lazy-basin gate."""
 
 from __future__ import annotations

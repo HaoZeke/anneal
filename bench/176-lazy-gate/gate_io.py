@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Durable row and log writes, and in-process telemetry capture."""
 
 from __future__ import annotations

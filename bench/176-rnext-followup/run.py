@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Run the paired two-cell follow-up and append one row per launch."""
 
 from __future__ import annotations
@@ -33,6 +34,11 @@ from panel import (
     SEEDS,
     SESSION,
 )
+
+_SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.append(str(_SCRIPTS))
+from target_tol import energy_hits  # noqa: E402
 
 
 def git_rev(worktree: Path, rev: str) -> str:
@@ -141,7 +147,7 @@ def run_one(
     wall_s = float(parsed["wall_s"])
     pot_s = float(parsed["pot_s"])
     outside_s = float(parsed.get("outside_s", max(0.0, wall_s - pot_s)))
-    hit = int(best == best and best <= spec.reference + HIT_TOL)
+    hit = int(energy_hits(best, spec.reference, HIT_TOL))
     row.update({
         "hit": str(hit),
         "best": f"{best:.10f}",

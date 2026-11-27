@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Placement pads are compared with arm A at the same seed."""
 
 from __future__ import annotations

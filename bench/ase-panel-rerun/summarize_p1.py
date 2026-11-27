@@ -18,6 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 import revision_reach  # noqa: E402
 OUT = ROOT / "bench" / "ase-panel-rerun"
 SEEDS = tuple(range(2000, 2012))
@@ -34,7 +35,7 @@ SYSTEMS = {
     "lj55": (1_000_000, -279.248470, "LJ55"),
     "au55": (1_000_000, -191.03085280, "Au55"),
 }
-HIT_TOL = 1.0e-3
+HIT_TOL = DEFAULT_HIT_TOL
 ROW_FIELDS = (
     "system", "arm", "seed", "budget", "hit", "evals_to_hit", "charged", "best",
     "wall_s", "inside_s", "outside_s", "code_revision", "host", "stop", "cap_s",
@@ -75,12 +76,6 @@ def calls(row: dict[str, str]) -> float:
 
 def wall_censored(rows: list[dict[str, str]]) -> bool:
     return any(row["stop"] == "wall" and row["hit"] == "0" for row in rows)
-
-
-def energy_hits(energy: float, target: float, tol: float = HIT_TOL) -> bool:
-    if not (math.isfinite(energy) and math.isfinite(target) and math.isfinite(tol)):
-        return False
-    return tol >= 0.0 and float(energy) <= float(target) + float(tol)
 
 
 def load(system: str) -> dict[str, list[dict[str, str]]]:

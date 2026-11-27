@@ -33,10 +33,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 PANEL_SEEDS = tuple(range(2000, 2012))
 TIP4P_SEEDS = tuple(range(2000, 2024))
-HIT_TOL = 1.0e-3
+HIT_TOL = DEFAULT_HIT_TOL
 TIP4P_BUDGET = 2_000_000
 TIP4P_SIZES = tuple(range(9, 22))
 ARMS = ("A", "A2", "B")
@@ -416,7 +419,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                     if int(got["budget"]) != budget:
                         raise RuntimeError(f"driver budget {got['budget']}")
                     best = got["best"]
-                    hit = float(best) <= ref + HIT_TOL
+                    hit = energy_hits(float(best), ref, HIT_TOL)
                     calls = int(got["evals"]) if hit else budget
                     per_call = float(got["outside"]) / int(got["charged"])
                     final_path = Path(f"{prefix}.xyz")

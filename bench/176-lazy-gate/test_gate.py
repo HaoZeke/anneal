@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Bars for the lazy-basin gate, including the no-relabel rule."""
 
 from __future__ import annotations
