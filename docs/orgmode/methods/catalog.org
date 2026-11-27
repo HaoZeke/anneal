@@ -369,10 +369,13 @@ stopped improving, each answering a different way of being stuck.
   normalised Laplacian as a continuous collective variable for an
   extra well-tempered bias, replacing a hand-chosen order parameter.
 
-Constants and defaults: escape trigger is
-=escape_stall_factor= times the longest quiet stretch already survived,
-not a fixed patience (config.rs:206-222, measured: fixed patience 400
-scored 2/8 seeds vs. 9/16 without it). =STALL_LEAVE=-style thresholds
+Constants and defaults: the chain is stalled once =quiet= reaches the
+larger of =escape_stall_patience= and =escape_stall_factor= times the
+longest quiet stretch already survived
+(src/methods/cluster_hopping.rs:5097). Those defaults are 5000 and 2.0
+(src/methods/cluster_hopping/config.rs:2331). A fixed patience of 400
+scored 2 seeds in 8 against 9 in 16 without it
+(src/methods/cluster_hopping/config.rs:662). =STALL_LEAVE=-style thresholds
 recur elsewhere in the crate at value 8 (see
 [[file:catalog.org::*Catalog policy][catalog policy]] and [[file:catalog.org::*Cooperative wells and swarm role][swarm role]]).
 
