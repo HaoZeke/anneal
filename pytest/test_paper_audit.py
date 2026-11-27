@@ -3793,6 +3793,7 @@ def test_record_refs_are_not_fetched_unless_asked(tmp_path, monkeypatch):
     monkeypatch.setattr(audit_mod, "_FETCH_RECORDS", False)
     audit_mod._record_ref_status.cache_clear()
     audit_mod.origin_record_heads.cache_clear()
+    audit_mod.origin_bench_record_heads.cache_clear()
     registry(tmp_path, monkeypatch, [("record/repro-pin", REPRO_PIN, "0" * 40)])
     assert "record/repro-pin fetches" in record_drifts()
     assert "record/repro-pin is on origin at " + REPRO_PIN[:8] in record_drifts()
@@ -3834,6 +3835,7 @@ def test_the_gmin_record_is_fetched_by_its_ref(tmp_path, monkeypatch):
     audit_mod._record_ref_status.cache_clear()
     audit_mod.origin_record_heads.cache_clear()
     audit_mod.origin_audit_record_refs.cache_clear()
+    audit_mod.origin_bench_record_heads.cache_clear()
     registry(tmp_path, monkeypatch, [(audit_mod.GMIN_RECORD_REF, audit_mod.GMIN_RECORD_SHA, audit_mod.GMIN_RECORD_TREE)])
     assert record_drifts() == set()
     fetches = [args for args in seen if args and args[0] == "fetch"]
@@ -4684,6 +4686,49 @@ def test_a_differing_stop_wall_ratio_is_a_drift():
     drifts = [row for row in audit.drifts() if row[2] == "wall ratio across differing stops"]
     assert drifts
     assert drifts[0][1] == path
+
+
+def test_summary_ratio_columns_follow_the_stop_mix():
+    audit = audit_mod.Audit()
+    audit_mod.wall_ratios_follow_stops(audit)
+    assert audit.drifts() == []
+    lj98 = list(csv.DictReader((ROOT / "bench/ase-lj98/summary.csv").open()))
+    by_arm = {row["arm"]: row for row in lj98}
+    assert by_arm["anneal"]["median_over_anneal"] == "1.000000"
+    assert by_arm["recommended"]["median_over_anneal"] == ""
+    assert by_arm["ase_mh"]["median_anneal_over"] == ""
+    lj55 = list(csv.DictReader((ROOT / "bench/ase-lj55/summary.csv").open()))
+    by_arm = {row["arm"]: row for row in lj55}
+    assert by_arm["recommended"]["median_over_anneal"] == "0.065000"
+    lj75 = list(csv.DictReader((ROOT / "bench/ase-lj75/summary.csv").open()))
+    by_arm = {row["arm"]: row for row in lj75}
+    assert by_arm["ase_mh"]["median_over_anneal"] == ""
+    assert by_arm["ase_bh"]["median_over_anneal"] == ""
+
+
+def test_a_numeric_cross_stop_summary_ratio_is_a_drift():
+    audit = audit_mod.Audit()
+    path = "bench/ase-lj98/summary.csv"
+    planted = audit.text(path).replace(",,,", ",1.234567,,", 1)
+    assert planted != audit.text(path)
+    audit.text_cache[path] = planted
+    audit_mod.wall_ratios_follow_stops(audit)
+    drifts = [row for row in audit.drifts() if row[2] == "wall ratio across differing stops"]
+    assert drifts
+    assert drifts[0][1] == path
+
+
+def test_an_agox_ratio_column_across_differing_stops_is_a_drift():
+    audit = audit_mod.Audit()
+    path = audit_mod.AGOX_RATIO_SUMMARY
+    text = audit.text(path)
+    assert "median_over_anneal" not in text.splitlines()[0]
+    header, *rows = text.splitlines()
+    planted = header + ",median_over_anneal\n" + "\n".join(row + ",1.0" for row in rows if row) + "\n"
+    audit.text_cache[path] = planted
+    audit_mod.wall_ratios_follow_stops(audit)
+    drifts = [row for row in audit.drifts() if row[1] == path and row[2] == "wall ratio across differing stops"]
+    assert drifts
 
 
 def test_agox_summary_keeps_hits_when_ratio_columns_go():

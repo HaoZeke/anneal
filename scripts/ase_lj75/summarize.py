@@ -122,6 +122,11 @@ def main() -> None:
             fisher_p = fisher(hits, base_hits)
             u_stat, mw_p = mann_whitney([calls(row) for row in group], base_calls)
             print(f"{arm} note ratio {note_ratio(group, anneal)}")
+        # Leave the stored ratio empty when the stop mix differs. The value is
+        # the median of the paired wall ratios when the mixes match.
+        same_stop = stop_mix(group) == stop_mix(anneal)
+        over_cell = f"{over:.6f}" if same_stop else ""
+        back_cell = f"{back:.6f}" if same_stop else ""
         print(
             f"{arm} hits {hits}/12 median_best {best:.8f} gap {best - REFERENCE:.8f} "
             f"wall {wall:.6f} inside {inside:.6f} outside {outside:.6f} "
@@ -129,7 +134,7 @@ def main() -> None:
         )
         lines.append(
             f"{arm},{hits},12,{best:.8f},{best - REFERENCE:.8f},{wall:.6f},{inside:.6f},{outside:.6f},"
-            f"{over:.6f},{back:.6f},{fisher_p:.6g},{u_stat:.6g},{mw_p:.6g},{wall_stops},{cap}"
+            f"{over_cell},{back_cell},{fisher_p:.6g},{u_stat:.6g},{mw_p:.6g},{wall_stops},{cap}"
         )
     SUMMARY.write_text("\n".join(lines) + "\n")
 

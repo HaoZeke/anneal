@@ -266,10 +266,15 @@ def render(system: str) -> tuple[str, str]:
             over = wall / base_wall
             back = base_wall / wall
             fisher_p = comparison(group, anneal)
+        # The cell is this arm's median wall divided by anneal's median wall.
+        # Leave it empty when the stop mix differs.
+        same_stop = arm == "anneal" or stop_mix(group) == stop_mix(anneal)
+        over_cell = f"{over:.6f}" if same_stop else ""
+        back_cell = f"{back:.6f}" if same_stop else ""
         versus = {other: comparison(group, grouped[other]) for other in ASE_ARMS}
         lines.append(
             f"{arm},{hits},12,{best:.8f},{best - reference:.8f},{wall:.6f},{inside:.6f},{outside:.6f},"
-            f"{over:.6f},{back:.6f},{fisher_p},{wall_stops},{cap},"
+            f"{over_cell},{back_cell},{fisher_p},{wall_stops},{cap},"
             f"{versus['ase_bh']},{versus['ase_mh']}"
         )
         wall_charged = [int(row["charged"]) for row in group if row["stop"] == "wall"]
@@ -335,7 +340,8 @@ def render(system: str) -> tuple[str, str]:
                 f"{best - reference:.8f} | {wall:.6f} | {inside:.6f} | {outside:.6f} |"
             )
         else:
-            # A wall ratio is a paired comparison. Blank it when the stop mix differs.
+            # The cell is this arm's median wall divided by anneal's median wall.
+            # Blank it when the stop mix differs.
             fisher_cell = fisher_p if same_stop else "—"
             over_cell = f"{over:.6f}" if same_stop else "—"
             back_cell = f"{back:.6f}" if same_stop else "—"
@@ -348,7 +354,7 @@ def render(system: str) -> tuple[str, str]:
                 f"{LABELS[arm].capitalize()} stopped at the wall cap on {wall_stops}/12 seeds; "
                 f"those rows charged {low_charged:,}-{high_charged:,} calls."
             )
-        # The summary CSV keeps the computed p and the computed wall ratios.
+        # The summary stores a wall ratio only when the stop mixes match.
         # The note prints a test or a ratio only when the stop mixes match.
         if system == "lj38" and wall_stops == 12:
             report[-1] = report[-1].replace(f"| {fisher_p} |", "| — |", 1)

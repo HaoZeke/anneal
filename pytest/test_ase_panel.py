@@ -89,6 +89,27 @@ def test_au_length_comes_from_the_evaluator(monkeypatch):
     assert '"length"' not in RUNNER_PATH.read_text()
 
 
+def test_a_summary_ratio_follows_the_stop_mix():
+    summary, _report = SUMMARY.render("lj98")
+    rows = {line.split(",")[0]: line.split(",") for line in summary.splitlines()[1:]}
+    assert rows["anneal"][8] == "1.000000"
+    assert rows["recommended"][8] == ""
+    assert rows["ase_bh"][8] == ""
+    assert rows["ase_mh"][8] == ""
+    summary, _report = SUMMARY.render("lj55")
+    rows = {line.split(",")[0]: line.split(",") for line in summary.splitlines()[1:]}
+    assert rows["recommended"][8] == "0.065000"
+    assert rows["ase_bh"][8] == ""
+    summary, _report = SUMMARY.render("lj104")
+    rows = {line.split(",")[0]: line.split(",") for line in summary.splitlines()[1:]}
+    assert rows["ase_bh"][8] != ""
+    assert rows["recommended"][8] == ""
+    summary, _report = SUMMARY.render("au55")
+    rows = {line.split(",")[0]: line.split(",") for line in summary.splitlines()[1:]}
+    assert rows["recommended"][8] != ""
+    assert rows["ase_mh"][8] == ""
+
+
 def test_a_ratio_cell_follows_the_stop_mix():
     _summary, report = SUMMARY.render("lj55")
     assert "Ratios and tests are printed only for same-stop pairs." in report

@@ -7049,6 +7049,9 @@ H2O8_STATS_COMMIT = "b1b7338d4891348f41bb5bf493936cd83ffb42fd"
 H2O8_STATS_TREE = "63a349daaa7015807f3faad875133169990152a4"
 H2O8_ANNEAL_COMMIT = "42e708289a718d3d916b46e5ae43f26cf0a677c1"
 H2O8_ANNEAL_TREE = "ce01f4dc590926748b68c01167ef75bd09cec552"
+H2O8_MATCHED_COMMIT = "4a5dd65dc791203ac350e2769739ddb2dab6f83a"
+H2O8_MATCHED_TREE = "56668e0894bc89f1b46b30299d2de89d4f0438ce"
+H2O8_MATCHED_REF = "bench/h2o8-matched"
 H2O8_CREST_COMMIT = "7ad8eab67d61f1d5835a9ce7b67e7b2cb2b4ede9"
 H2O8_CREST_TREE = "e161694dae3f663d407763dd1f415127b9bedb69"
 NH3_RECORD_COMMIT = "d3c3e351e2bfd8c26a279943a26e5a8230467284"
@@ -7121,9 +7124,14 @@ def _crest_win_sentence(audit: Audit, anneal: list[dict[str, str]], crest: list[
                      "absent" if present is None else ("shared" if shared else "stops differ"))
 
 
+def _sci_tex(value: float, digits: int) -> str:
+    mantissa, exponent = f"{value:.{digits}e}".split("e")
+    return f"{mantissa}\\times 10^{{{int(exponent)}}}"
+
+
 def h2o8_prose(row: dict[str, object]) -> str:
     """The anneal file records no target, tolerance, budget, or stop."""
-    return (
+    text = (
         f"On (H\\(_2\\)O)\\(_8\\), seeds {row['anneal_seeds']} are the anneal rows and seeds {row['crest_seeds']} "
         f"are the CREST rows. "
         f"The anneal octamer rows record no target, tolerance, budget, or stop. "
@@ -7133,6 +7141,83 @@ def h2o8_prose(row: dict[str, object]) -> str:
         f"anneal's rows do not record the CREST target or budget. "
         f"There is no paired test, and the Holm family for CREST is empty."
     )
+    if "hop_hits" not in row:
+        return text
+    return text + (
+        f" The rows of \\path{{{H2O8_MATCHED_REF}}}, commit {row['matched_commit']}, record "
+        f"{row['hop_hits']} of {row['matched_n']} seeds reaching the threshold during the hop phase. "
+        f"All {row['polish_hits']} hits come in the charged answer polish, with margins "
+        f"\\({row['margin_low']}\\) to \\({row['margin_high']}\\) Eh below the threshold. "
+        f"The file \\path{{bench/octamer-matched/h2o8/REPORT.md}} at {row['poi_commit']} is a different record: "
+        f"seeds {row['unstarted']} never started, and the {row['finished_n']} finished seeds sit at one best energy, "
+        f"\\({row['poi_energy']}\\) Eh, \\({row['poi_below']}\\) Eh below the threshold."
+    )
+
+
+def _h2o8_matched(audit: Audit) -> dict[str, object]:
+    """Hop-phase margins from bench/h2o8-matched, and the separate poi report."""
+    if _FETCH_RECORDS and git("cat-file", "-e", f"{H2O8_MATCHED_COMMIT}^{{commit}}").returncode != 0:
+        spec = f"+refs/heads/{H2O8_MATCHED_REF}:{_AUDIT_FETCH_REF}"
+        git("fetch", "--quiet", "--no-tags", "--no-write-fetch-head", "origin", "--", spec)
+    held = _record_tree(H2O8_MATCHED_COMMIT)
+    audit.record(held == H2O8_MATCHED_TREE, "bench/h2o8-matched/phases.csv",
+                 "record bench/h2o8-matched tree", H2O8_MATCHED_TREE[:8], held[:8] or "absent")
+    phases = _record_csv(H2O8_MATCHED_COMMIT, "bench/h2o8-matched/phases.csv")
+    matched_rows = _record_csv(H2O8_MATCHED_COMMIT, "bench/h2o8-matched/rows.csv")
+    present = bool(phases) and bool(matched_rows)
+    audit.record(present, "bench/h2o8-matched/phases.csv",
+                 "the matched hop record is present", "present", "present" if present else "absent")
+    if not present or held != H2O8_MATCHED_TREE:
+        return {}
+    hop_hits = 0
+    polish_hits = 0
+    margins = []
+    for row in phases:
+        margins.append(float(row["margin"]))
+        if row["where"] == "polish" and int(row["first_hit"]) > int(row["hop_end"]):
+            polish_hits += 1
+        else:
+            hop_hits += 1
+    hits = sum(row["hit"] == "1" for row in matched_rows)
+    audit.record(hop_hits == 0 and polish_hits == len(phases) == hits == len(matched_rows),
+                 "bench/h2o8-matched/phases.csv", "hop-phase hits and polish hits",
+                 f"{hop_hits} {polish_hits} {len(phases)}", f"0 {len(matched_rows)} {len(matched_rows)}")
+    listing = git("ls-tree", "-r", "--name-only", H2O8_ANNEAL_COMMIT, "bench/octamer-matched/h2o8/runs")
+    run_seeds = sorted(
+        int(line.split("/")[-2]) for line in listing.stdout.splitlines() if line.endswith("/run.txt")
+    )
+    poi = _record_csv(H2O8_ANNEAL_COMMIT, "bench/octamer-matched/h2o8/poi/results.csv")
+    finished = [row for row in poi if int(row["seed"]) in set(run_seeds)]
+    energies = {row["best_Eh"] for row in finished}
+    missing = sorted(set(range(2000, 2012)) - set(run_seeds))
+    one_energy = len(energies) == 1
+    audit.record(
+        run_seeds == list(range(2000, 2008)) and missing == [2008, 2009, 2010, 2011] and one_energy,
+        "bench/octamer-matched/h2o8/REPORT.md",
+        "seeds 2008-2011 never started and the finished seeds share one energy",
+        "2000-2007 one energy",
+        f"{run_seeds[:1]} {len(energies)} energies",
+    )
+    thresholds = {row["threshold_eh"] for row in matched_rows}
+    audit.record(len(thresholds) == 1, "bench/h2o8-matched/rows.csv",
+                 "the matched rows share one threshold", "1", str(len(thresholds)))
+    if not one_energy or len(thresholds) != 1:
+        return {}
+    energy = next(iter(energies))
+    below = float(next(iter(thresholds))) - float(energy)
+    return {
+        "matched_commit": H2O8_MATCHED_COMMIT,
+        "hop_hits": hop_hits,
+        "matched_n": len(phases),
+        "polish_hits": polish_hits,
+        "margin_low": _sci_tex(min(margins), 1),
+        "margin_high": _sci_tex(max(margins), 1),
+        "poi_commit": H2O8_ANNEAL_COMMIT,
+        "unstarted": _seed_span(missing),
+        "finished_n": len(finished),
+        "poi_energy": energy,
+        "poi_below": _sci_tex(below, 3),
+    }
 
 
 def nh3_prose(row: dict[str, object]) -> str:
@@ -7253,6 +7338,7 @@ def octamer_records(audit: Audit) -> dict[str, dict[str, object]] | None:
         "low": float(summary["median_ratio_crest_over_anneal"]["ci95"][0]),
         "high": float(summary["median_ratio_crest_over_anneal"]["ci95"][1]),
     }
+    water.update(_h2o8_matched(audit))
     prose = h2o8_prose(water)
     for path in (TEX, SI):
         audit.said(path, prose)
@@ -8057,20 +8143,34 @@ APPEND_ONLY_RECORDS = {
 
 
 AGOX_RATIO_SUMMARY = "bench/agox-lj98/summary.csv"
+_RATIO_FIELDS = {"median_over_anneal", "median_anneal_over"}
 
 
 def _kept_summary_fields(text: str) -> list[str]:
-    """Hit count and median wall, without a wall-ratio column."""
+    """Core summary fields, without a wall-ratio column."""
+    rows = list(csv.reader(text.splitlines()))
+    if not rows:
+        return []
+    width = len(rows[0])
+    keep = [index for index, name in enumerate(rows[0]) if name not in _RATIO_FIELDS]
     kept = []
-    for line in text.splitlines():
-        if not line:
+    for row in rows:
+        if len(row) != width:
+            kept.append(",".join(row))
             continue
-        parts = line.split(",")
-        if parts[0] == "code":
-            kept.append("code,hits,n,median_wall_s")
-        else:
-            kept.append(",".join(parts[:4]))
+        kept.append(",".join(row[index] for index in keep))
     return kept
+
+
+def _summary_projects_ratios(old: str, cur: str) -> bool:
+    """True when either summary names a wall-ratio column."""
+    heads = []
+    for text in (old, cur):
+        lines = text.splitlines()
+        if lines:
+            heads.append(lines[0])
+    named = {name for head in heads for name in next(csv.reader([head]))}
+    return bool(named & _RATIO_FIELDS)
 
 
 def touched_record_paths(base: str) -> set[str]:
@@ -8151,9 +8251,9 @@ def append_only_rows(audit: Audit) -> None:
             old_lines = shown.stdout.splitlines(keepends=True)
             allowed = _upstream_removed_lines(ref, base_ref, path)
             compared_old, compared_cur = old_lines, cur_lines
-            if path == AGOX_RATIO_SUMMARY:
-                # The hit count and the median wall stay. The ratio columns do not:
-                # the arms do not share a stop.
+            if _summary_projects_ratios(shown.stdout, "".join(cur_lines)):
+                # Hit counts and median walls stay. A wall-ratio cell may go blank
+                # when the stop mixes differ.
                 compared_old = [line + "\n" for line in _kept_summary_fields(shown.stdout)]
                 compared_cur = [line + "\n" for line in _kept_summary_fields("".join(cur_lines))]
                 allowed = set()
@@ -8189,16 +8289,22 @@ def append_only_rows(audit: Audit) -> None:
             "log", "-p", "--no-renames", "--format=", f"{base}..HEAD", "--",
             *history_paths,
         ).stdout.splitlines() if history_paths else []
-        ratio_cores_held = False
-        agox_develop_lines: set[str] = set()
-        if AGOX_RATIO_SUMMARY in history_paths and (ROOT / AGOX_RATIO_SUMMARY).is_file():
-            shown = git("show", f"{base}:{AGOX_RATIO_SUMMARY}")
-            if shown.returncode == 0:
-                ratio_cores_held = (
-                    _kept_summary_fields(shown.stdout)
-                    == _kept_summary_fields((ROOT / AGOX_RATIO_SUMMARY).read_text())
-                )
-                agox_develop_lines = set(shown.stdout.splitlines())
+        # A summary whose hit counts and median walls still match may drop or
+        # blank a wall-ratio column. Any other removed line still fails.
+        ratio_cores: dict[str, tuple[list[str], set[str]]] = {}
+        for path in history_paths:
+            if not (ROOT / path).is_file():
+                continue
+            shown = git("show", f"{base}:{path}")
+            if shown.returncode != 0 or not shown.stdout.splitlines():
+                continue
+            current = (ROOT / path).read_text()
+            if not _summary_projects_ratios(shown.stdout, current):
+                continue
+            if _kept_summary_fields(shown.stdout) != _kept_summary_fields(current):
+                continue
+            header = next(csv.reader([shown.stdout.splitlines()[0]]))
+            ratio_cores[path] = (header, set(_kept_summary_fields(current)))
         removed = []
         diff_path = ""
         for line in history:
@@ -8207,15 +8313,15 @@ def append_only_rows(audit: Audit) -> None:
                 diff_path = match.group(1)
                 continue
             if line.startswith("-") and not line.startswith("---"):
-                # Only the develop lines of this one summary, and only while its
-                # hit counts and median walls still match. Any other removed line
-                # still fails, including a later record that shares the log.
-                if (
-                    ratio_cores_held
-                    and diff_path == AGOX_RATIO_SUMMARY
-                    and line[1:] in agox_develop_lines
-                ):
-                    continue
+                held = ratio_cores.get(diff_path)
+                if held:
+                    header, cores = held
+                    parsed = next(csv.reader([line[1:]]))
+                    if len(parsed) == len(header):
+                        keep = [index for index, name in enumerate(header) if name not in _RATIO_FIELDS]
+                        core = ",".join(parsed[index] for index in keep)
+                        if core in cores:
+                            continue
                 removed.append(line)
         audit.record(
             not removed,
@@ -8447,6 +8553,7 @@ _FETCH_RECORDS = False
 _AUDIT_FETCH_REF = "refs/audit/record/fetched"
 _RECORD_REF_NAME = re.compile(r"record/[A-Za-z0-9][A-Za-z0-9._-]*")
 _AUDIT_RECORD_REF_NAME = re.compile(r"refs/audit/record/[A-Za-z0-9][A-Za-z0-9._-]*")
+_BENCH_RECORD_REF = "bench/h2o8-matched"
 
 
 def record_ref_name(ref: str) -> bool:
@@ -8475,6 +8582,18 @@ def audit_record_ref_name(ref: str) -> bool:
     return git("check-ref-format", ref).returncode == 0
 
 
+def bench_record_ref_name(ref: str) -> bool:
+    """True for the bench branch origin holds when it has no refs/audit name.
+
+    Only bench/h2o8-matched. A bare branch name such as develop stays rejected.
+    """
+    if ref != _BENCH_RECORD_REF:
+        return False
+    if ".." in ref or ref.endswith(".") or ref.endswith(".lock"):
+        return False
+    return git("check-ref-format", "--branch", ref).returncode == 0
+
+
 @functools.cache
 def origin_record_heads() -> dict[str, str]:
     """The record/* branches on origin, by name. Empty when origin cannot be reached, so every registry row fails."""
@@ -8491,6 +8610,20 @@ def origin_audit_record_refs() -> dict[str, str]:
     if out.returncode != 0:
         return {}
     return {ref: sha for sha, ref in (line.split("\t") for line in out.stdout.splitlines())}
+
+
+@functools.cache
+def origin_bench_record_heads() -> dict[str, str]:
+    """bench/h2o8-matched on origin. Empty when origin cannot be reached."""
+    out = git("ls-remote", "origin", f"refs/heads/{_BENCH_RECORD_REF}")
+    if out.returncode != 0:
+        return {}
+    found = {}
+    for line in out.stdout.splitlines():
+        sha, name = line.split("\t")
+        if name == f"refs/heads/{_BENCH_RECORD_REF}":
+            found[_BENCH_RECORD_REF] = sha
+    return found
 
 
 def record_ref_status(path: str) -> tuple[tuple[str, str, tuple[tuple[str, bool, str, str], ...]], ...]:
@@ -8511,12 +8644,14 @@ def _record_ref_status(root: Path, path: str, fetch_records: bool) -> tuple[tupl
     if fetch_records:
         heads.update(origin_record_heads())
         heads.update(origin_audit_record_refs())
+        heads.update(origin_bench_record_heads())
     out = []
     for row in table:
         ref, sha, tree = row["ref"].strip(), row["sha"].strip(), row["tree"].strip()
         as_branch = record_ref_name(ref)
         as_ref = audit_record_ref_name(ref)
-        named = (as_branch or as_ref) and revision_reach.is_full_sha(sha)
+        as_bench = bench_record_ref_name(ref)
+        named = (as_branch or as_ref or as_bench) and revision_reach.is_full_sha(sha)
         fetched = False
         if named and fetch_records and as_ref:
             fetch = git("fetch", "--quiet", "--no-tags", "origin", ref)
@@ -8531,7 +8666,7 @@ def _record_ref_status(root: Path, path: str, fetch_records: bool) -> tuple[tupl
         actual = git("rev-parse", "--verify", "--quiet", f"{sha}^{{tree}}").stdout.strip() if present else ""
         out.append((ref, sha, (
             (f"{ref} is a record ref with a full SHA", named, f"{ref} {sha}",
-             "record/<name> or refs/audit/record/<name>, and 40 hex digits"),
+             "record/<name>, refs/audit/record/<name>, or bench/h2o8-matched, and 40 hex digits"),
             (f"{ref} is on origin at {sha[:8]}", heads.get(ref) == sha, heads.get(ref, "absent"), sha),
             (f"{ref} fetches", fetched, "fetched" if fetched else "fails", "fetched"),
             (f"{ref} has tree {tree[:8] or 'unrecorded'}", bool(tree) and actual == tree, actual or "absent",
@@ -9219,12 +9354,46 @@ def cross_document_equations(audit: Audit) -> None:
         audit.record(False, "paper/jctc", "a cross-document equation reference", "present", "none")
 
 
+def _ratio_number(cell: str) -> bool:
+    if cell in {"", "—"}:
+        return False
+    try:
+        float(cell)
+    except ValueError:
+        return False
+    return True
+
+
+def _summary_ratio_columns(audit: Audit, path: str, grouped: dict, mix, key: str) -> None:
+    """A summary.csv wall-ratio cell is a number only when the stop mixes match."""
+    rows = list(csv.DictReader(line for line in audit.text(path).splitlines() if line.strip()))
+    if not rows or not _RATIO_FIELDS <= set(rows[0]):
+        return
+    if "anneal" not in grouped:
+        audit.record(False, path, "summary names anneal", "absent", "anneal")
+        return
+    anneal_mix = mix(grouped["anneal"])
+    for row in rows:
+        arm = row.get(key, "")
+        if arm not in grouped:
+            continue
+        same = mix(grouped[arm]) == anneal_mix
+        for column in ("median_over_anneal", "median_anneal_over"):
+            cell = (row.get(column) or "").strip()
+            if same:
+                audit.record(_ratio_number(cell), path, "same-stop wall ratio", cell or "blank", "a ratio")
+            else:
+                audit.record(cell == "", path, "wall ratio across differing stops", cell or "empty", "empty")
+
+
 def wall_ratios_follow_stops(audit: Audit) -> None:
     """A printed wall ratio requires the two arms to record the same stop mix."""
     panel = load_script("ase_panel_ratios", "scripts/ase_panel/summarize.py")
     labels = {label: arm for arm, label in panel.LABELS.items()}
     for system in panel.SYSTEMS:
-        _ratio_table(audit, f"bench/ase-{system}/README.md", panel.load(system), panel.stop_mix, labels)
+        grouped = panel.load(system)
+        _ratio_table(audit, f"bench/ase-{system}/README.md", grouped, panel.stop_mix, labels)
+        _summary_ratio_columns(audit, f"bench/ase-{system}/summary.csv", grouped, panel.stop_mix, "arm")
     # The LJ75 summarizer imports scipy. The stop mix is the row column, so this
     # check reads the rows and does not import that module.
     lj75_rows = [
@@ -9241,14 +9410,29 @@ def wall_ratios_follow_stops(audit: Audit) -> None:
         panel.stop_mix,
         {"anneal": "anneal", "basin hopping": "ase_bh", "minima hopping": "ase_mh"},
     )
+    _summary_ratio_columns(audit, "bench/ase-lj75/summary.csv", lj75_grouped, panel.stop_mix, "arm")
+    _agox_ratio_guard(audit)
+
+
+def _agox_ratio_guard(audit: Audit) -> None:
+    """AGOX prints a wall ratio only when every arm records anneal's stop mix."""
+    agox = load_script("agox_lj98_ratios", "scripts/agox_lj98/summarize.py")
+    rows = agox.load()
+    grouped = {code: agox.by_code(rows, code) for code in agox.CODES}
+    anneal_mix = agox.stop_mix(grouped["anneal"])
+    shared = all(agox.stop_mix(grouped[code]) == anneal_mix for code in agox.CODES)
     summary = audit.text(AGOX_RATIO_SUMMARY)
     readme = audit.text("bench/agox-lj98/README.md")
-    leaked = [token for token in ("median_over_anneal", "87.498181", "103.653286") if token in summary or token in readme]
-    audit.record(not leaked, "bench/agox-lj98/README.md", "wall ratio across differing stops",
-                 "absent", " ".join(leaked) or "absent")
-    audit.record("prints no wall ratio" in readme, "bench/agox-lj98/README.md",
-                 "the note says the arms do not share a stop", "present",
-                 "present" if "prints no wall ratio" in readme else "absent")
+    header = summary.splitlines()[0] if summary.splitlines() else ""
+    has_ratio = bool(set(next(csv.reader([header]))) & _RATIO_FIELDS) if header else False
+    if shared:
+        _summary_ratio_columns(audit, AGOX_RATIO_SUMMARY, grouped, agox.stop_mix, "code")
+    else:
+        audit.record(not has_ratio, AGOX_RATIO_SUMMARY, "wall ratio across differing stops",
+                     "present" if has_ratio else "absent", "absent")
+        audit.record("prints no wall ratio" in readme, "bench/agox-lj98/README.md",
+                     "the note says the arms do not share a stop", "present",
+                     "present" if "prints no wall ratio" in readme else "absent")
 
 
 def _ratio_table(audit: Audit, path: str, grouped: dict, mix, labels: dict[str, str]) -> None:
@@ -9355,6 +9539,8 @@ def main(argv: list[str]) -> int:
     _FETCH_RECORDS = args.fetch_records
     _record_ref_status.cache_clear()
     origin_record_heads.cache_clear()
+    origin_audit_record_refs.cache_clear()
+    origin_bench_record_heads.cache_clear()
     return run(args.report, args.write_revision_map, args.pre_submission)
 
 

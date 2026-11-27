@@ -750,13 +750,16 @@ The stored total\_calls is the counted calls, capped at that budget.
 Seeds 17000, 17002, and 17006 store 151538, 142740, and 139177.
 anneal's rows do not record the CREST target or budget.
 There is no paired test, and the Holm family for CREST is empty.
-The rows of this code are \path{bench/octamer-matched/h2o8/poi/results.csv}
-and the CREST rows are \path{bench/h2o8-crest-firsthit/rows.csv}.
-\path{bench/h2o8-poi-vs-crest/results.json} is not a paired test.
-The rows of \path{bench/h2o8-matched} record 0 of 12 seeds reaching
+The rows of \path{bench/h2o8-matched}, commit 4a5dd65dc791203ac350e2769739ddb2dab6f83a, record 0 of 12 seeds reaching
 the threshold during the hop phase.
 All 12 hits come in the charged answer polish, with margins
 \(1.1\times 10^{-9}\) to \(1.0\times 10^{-7}\) Eh below the threshold.
+The file \path{bench/octamer-matched/h2o8/REPORT.md} at 42e708289a718d3d916b46e5ae43f26cf0a677c1 is a different record:
+seeds 2008--2011 never started, and the 8 finished seeds sit at one best energy,
+\(-40.681336013361\) Eh, \(1.000\times 10^{-6}\) Eh below the threshold.
+The rows of this code are \path{bench/octamer-matched/h2o8/poi/results.csv}
+and the CREST rows are \path{bench/h2o8-crest-firsthit/rows.csv}.
+\path{bench/h2o8-poi-vs-crest/results.json} is not a paired test.
 
 \emph{Ammonia octamer.}
 The rows of this code are the 12 seeds of
