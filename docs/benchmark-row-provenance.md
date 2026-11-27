@@ -15,12 +15,14 @@ these provenance columns:
   the key is computed), and `binary_sha256=`.  Saved GMIN rows are reused only when both
   `code_revision` and `gmin_build_key` match the current build; any mismatch
   is rejected naming the mismatched field.
-- `host` is written through `host_label` in `scripts/machine_provenance.py`.
-  The UTS name `bench`, which every bench run sets and which is not a
-  physical-machine identity, is recorded as is.  Any other hostname is
-  recorded as `host-` and the first sixteen hexadecimal digits of the
-  SHA-256 of the public salt `anneal-bench-host-label-v1\0` followed by
-  the name.  No script records a raw hostname, and a test fails when one
+- `host` is the literal `unrecorded` in `scripts/gmin_panel/run_panel.py`
+  and `bench/template-free2-r7/run_cells.py`. Other row writers still record
+  it through `host_label` in `scripts/machine_provenance.py`. The UTS name
+  `bench`, which every bench run sets and which is not a physical-machine
+  identity, is recorded as is when `host_label` writes it. Any other
+  hostname is recorded as `host-` and the first sixteen hexadecimal digits
+  of the SHA-256 of the public salt `anneal-bench-host-label-v1\0` followed
+  by the name. No script records a raw hostname, and a test fails when one
   reads it another way.
 - A kernel boot id is written through `boot_label` in the same file, as
   `boot-` and the first sixteen hexadecimal digits of the SHA-256 of the
@@ -56,7 +58,9 @@ these provenance columns:
   the environment.  With `ANNEAL_CPU_MODEL` unset, `cpu_model` describes
   the machine that runs the row.  Existing rows are not rewritten.
 
-The machine fields describe the physical machine that ran the measured row.
+A new row's `machine_id` is `unrecorded` and does not describe the physical
+machine; its `cpu_model` does. A legacy row keeps the stored `machine_id`
+digest and the `cpu_model` of the machine that ran it.
 Summaries preserve the distinct source values, separated by semicolons.
 In `metal_h2h`, reused legacy `.row` files that lack provenance fields
 (`anneal_head`, `code_revision`, `host`, `machine_id`, or `cpu_model`) are

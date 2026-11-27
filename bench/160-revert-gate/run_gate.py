@@ -27,6 +27,7 @@ import re
 import struct
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -145,7 +146,7 @@ def bits(text: str) -> str:
 
 def child_env() -> dict[str, str]:
     env = {
-        "HOME": os.environ.get("HOME", "/tmp"),
+        "HOME": os.environ.get("HOME", tempfile.gettempdir()),
         "LANG": "C",
         "LC_ALL": "C",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),

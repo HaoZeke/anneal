@@ -15,7 +15,9 @@ arm; the per-seed rows of these sessions were not committed.
 
 The GMIN arm's per-seed rows (same GMIN revision, seeds and ceiling) are in
 `../gmin-wall-v4/results.csv`, and its LJ104 median and interquartile range
-follow from them. Neither file has a `host` column.
+follow from them. `results.csv` and that per-seed file have no `host`
+column. `results-05e9ef4d.csv` has a `host` column, and each of its rows
+holds the label `bench`.
 
 ## Rows written by the next campaign
 

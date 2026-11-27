@@ -29,18 +29,13 @@ class SavedRowProvenanceMismatch(ValueError):
     """Raised when a saved row disagrees with expected producer provenance."""
 
 
+_LEGACY_MACHINE_ID = re.compile(r"[0-9a-f]{64}")
+
+
 def stored_machine_id_compatible(value: object) -> bool:
     """True when a stored id is the literal unrecorded or a legacy 64-hex digest."""
     text = "" if value is None else str(value).strip()
-    if text == UNRECORDED:
-        return True
-    if len(text) != 64 or text != text.lower():
-        return False
-    try:
-        int(text, 16)
-    except ValueError:
-        return False
-    return True
+    return text == UNRECORDED or _LEGACY_MACHINE_ID.fullmatch(text) is not None
 
 
 def _darwin_cpu_model() -> str:

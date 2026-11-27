@@ -1013,7 +1013,7 @@ def summarize(args: argparse.Namespace) -> None:
                 raise SystemExit(f"{system} {arm} seeds {seeds}")
     machines = {row["machine_id"] for row in rows}
     if any(not stored_machine_id_compatible(mid) for mid in machines):
-        raise SystemExit("more than one machine id")
+        raise SystemExit("machine id is not unrecorded or a legacy digest")
     for arm in ("A", "B"):
         trees = {row["code_tree"] for row in rows if row["arm"] == arm}
         if len(trees) != 1:

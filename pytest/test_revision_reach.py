@@ -368,15 +368,31 @@ def test_the_listed_tuned_rewrite_is_what_accepts_the_committed_rows(monkeypatch
     head = git_text("rev-parse", "HEAD:scripts/gmin_panel/tuned.py")
     harness = audited_row()["harness_commit"]
     old = git_text("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
+    recorded_old, heads = revision_reach.TUNED_SOURCE_REWRITES[harness]
     assert old != head
-    assert revision_reach.TUNED_SOURCE_REWRITES == {harness: (old, head)}
+    assert recorded_old == old
+    assert head in heads and len(heads) == 2
+    legacy = next(blob for blob in heads if blob != head)
+    assert revision_reach.tuned_source_accepted(harness, old, head)
+    assert revision_reach.tuned_source_accepted(harness, old, legacy)
+    assert not revision_reach.tuned_source_accepted(harness, old, "0" * 40)
+    assert not revision_reach.tuned_source_accepted(harness, "0" * 40, head)
+    assert not revision_reach.tuned_source_accepted(HELD, old, head)
+    assert not revision_reach.tuned_source_accepted(HELD, old, legacy)
     assert revision_reach.tuned_gmin_harness_verified(audited_row())
     monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {})
     assert not revision_reach.tuned_gmin_harness_verified(audited_row())
-    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {harness: (old, "0" * 40)})
+    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {harness: (old, frozenset({"0" * 40}))})
     assert not revision_reach.tuned_gmin_harness_verified(audited_row())
-    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {HELD: (old, head)})
+    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {HELD: (old, frozenset({head, legacy}))})
     assert not revision_reach.tuned_gmin_harness_verified(audited_row())
+
+
+def test_a_committed_tuned_row_verifies_at_head(paths):
+    rows = [row for row in tuned_rows() if row["system"] in revision_reach.TUNED_SYSTEMS]
+    assert rows
+    for row in rows:
+        assert {name: bool(check(row)) for name, check in paths.items()} == dict.fromkeys(paths, True)
 
 
 def side_commit(repo: Path, parent: str, files: dict[str, str]) -> str:

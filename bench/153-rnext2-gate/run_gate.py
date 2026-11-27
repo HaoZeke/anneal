@@ -957,7 +957,7 @@ def check_identity(rows: list[dict[str, str]]) -> None:
         return
     machines = {row["machine_id"] for row in rows}
     if any(not stored_machine_id_compatible(token) for token in machines):
-        raise RuntimeError("machine id is not one digest")
+        raise RuntimeError("machine id is not unrecorded or a legacy digest")
     if len({row["probe_sha256"] for row in rows}) != 1:
         raise RuntimeError("more than one probe build")
     for row in rows:

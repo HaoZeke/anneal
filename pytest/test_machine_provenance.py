@@ -3009,10 +3009,14 @@ def test_the_provenance_docs_describe_unrecorded_ids_and_no_host_read():
     source = (ROOT / "scripts" / "machine_provenance.py").read_text()
     readme = (ROOT / "bench" / "gmin-h2h" / "README.md").read_text()
     docs = " ".join((ROOT / "docs" / "benchmark-row-provenance.md").read_text().split())
+    fragment = (ROOT / "docs/newsfragments/+machine-fields-one-reader.changed.rst").read_text()
     for phrase in ("/etc/machine-id", "product_uuid", "IOPlatformUUID", "ioreg", "machine_id_path"):
         assert phrase not in source, phrase
         assert phrase not in readme, phrase
         assert phrase not in docs, phrase
+        assert phrase not in fragment, phrase
+    assert "reads no host identifier" in fragment
+    assert "read the machine id" not in fragment
     assert "unrecorded" in source
     assert "unrecorded" in readme
     assert "new rows write the literal `unrecorded`" in readme
@@ -3021,6 +3025,8 @@ def test_the_provenance_docs_describe_unrecorded_ids_and_no_host_read():
     assert "New rows write `machine_id` as the literal `unrecorded`" in docs
     assert "Existing rows keep a legacy 64-hex digest" in docs
     assert "Existing rows are not rewritten" in docs
+    assert "does not describe the physical machine" in docs
+    assert "A legacy row keeps the stored `machine_id`" in docs
     assert "legacy 64-hex" in docs or "legacy 64-hex digest" in docs
     panel = (ROOT / "bench" / "gmin-panel" / "README.md").read_text()
     assert "UTS label `bench`" in panel
@@ -3048,6 +3054,9 @@ def test_the_provenance_docs_describe_unrecorded_ids_and_no_host_read():
     assert stored_machine_id_compatible("unrecorded")
     assert not stored_machine_id_compatible("host-name")
     assert not stored_machine_id_compatible(legacy[:-1])
+    assert not stored_machine_id_compatible("0x" + legacy[2:])
+    assert not stored_machine_id_compatible("+" + legacy[1:])
+    assert not stored_machine_id_compatible(legacy[:32] + "_" + legacy[33:])
     assert "/proc/cpuinfo" in source and "/proc/cpuinfo" in docs
     assert "ANNEAL_CPU_MODEL" in source and "ANNEAL_CPU_MODEL" in docs
     assert "ANNEAL_MACHINE_ID" not in source

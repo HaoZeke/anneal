@@ -46,16 +46,36 @@ TUNED_CODES = frozenset({"anneal", "gmin"})
 # reject. The file of HEAD builds the path in a variable first, and its
 # --verify rebuilds a row's command from the row's system, code and seed rather
 # than running the stored text. It also points $ROOT at a copy of the input
-# whose blob it records. Both give the same command text for every committed
-# row, so the one rewrite is accepted: old blob to new blob, and only for that
-# harness commit, whose SHA fixes every file tuned.py imports.
+# whose blob it records. A later edit of that same file stops reading a host
+# identifier. Both HEAD blobs give the same command text for every committed
+# row, so both are accepted: the recorded blob to either listed blob, and only
+# for that harness commit, whose SHA fixes every file tuned.py imports.
 TUNED_SOURCE_REWRITES = {
     "3d71865c78e5ff19866bae2616251929fd08e453": (
         "9b8e4c3a12291fa33804fa35a2c09a6142316233",
-        "9221af2660e263dfbf7c650e11b454fcaec59e58",
+        frozenset({
+            "9221af2660e263dfbf7c650e11b454fcaec59e58",
+            "1e4e1a0ded9db7c90bc1f5057259b8725974e700",
+        }),
     ),
 }
 TUNED_SOURCE = "scripts/gmin_panel/tuned.py"
+
+
+def tuned_source_accepted(harness: str, ref_blob: str, head_blob: str) -> bool:
+    """True when the harness tuned.py blob is HEAD's, or this harness's listed rewrite.
+
+    The listed rewrite is one harness commit, its recorded blob, and the two
+    HEAD blobs of that file. A different harness, a different recorded blob,
+    or any other HEAD blob is refused.
+    """
+    if ref_blob and ref_blob == head_blob:
+        return True
+    recorded = TUNED_SOURCE_REWRITES.get(harness)
+    if recorded is None:
+        return False
+    old, heads = recorded
+    return ref_blob == old and head_blob in heads
 
 
 def is_full_sha(value: str | None) -> bool:
@@ -135,7 +155,8 @@ def tuned_gmin_harness_verified(
     at a full SHA, must be a commit of ``repo`` whose
     ``bench/gmin-tuned/inputs/<system>.data`` is the recorded blob and the one
     of HEAD, and whose ``scripts/gmin_panel/tuned.py`` is the one of HEAD or,
-    for the harness ``TUNED_SOURCE_REWRITES`` names, its listed old blob. Since
+    for the harness ``TUNED_SOURCE_REWRITES`` names, its recorded blob against
+    either listed HEAD blob. Since
     the merge base with HEAD it may change no ``src/``, ``examples/`` or Cargo
     file and no Python file under ``scripts/`` but tuned.py, so the modules
     tuned.py imports are ones HEAD's history holds.
@@ -168,7 +189,7 @@ def tuned_gmin_harness_verified(
     if ref_data.returncode != 0 or ref_data.stdout.strip() != data_blob:
         return False
     ref_blob, head_blob = ref_tuned.stdout.strip(), head_tuned.stdout.strip()
-    if ref_tuned.returncode != 0 or (ref_blob != head_blob and TUNED_SOURCE_REWRITES.get(harness) != (ref_blob, head_blob)):
+    if ref_tuned.returncode != 0 or not tuned_source_accepted(harness, ref_blob, head_blob):
         return False
     base = run("merge-base", "HEAD", harness)
     if base.returncode != 0 or not base.stdout.strip():
