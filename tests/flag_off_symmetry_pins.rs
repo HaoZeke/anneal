@@ -38,7 +38,9 @@ fn quench(potential: &PairPotential, x: ArrayView1<f64>, iterations: usize) -> A
 /// moved by up to `noise`.
 fn icosahedron(noise: f64, rng: &mut StdRng) -> Array1<f64> {
     let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
-    let edge = 2.0_f64.powf(1.0 / 6.0);
+    // Host pow is not one function on glibc and libSystem. The edge is
+    // the same portable call the soft math path uses.
+    let edge = libm::pow(2.0, 1.0 / 6.0);
     let radius = edge * (phi * phi + 1.0).sqrt() / 2.0;
     let scale = radius / (1.0 + phi * phi).sqrt();
     let mut coords = vec![0.0, 0.0, 0.0];
@@ -75,7 +77,10 @@ fn ring_core(
         let phase = std::f64::consts::PI * ring as f64 / order as f64;
         for step in 0..order {
             let angle = std::f64::consts::TAU * step as f64 / order as f64 + phase;
-            coords.extend([1.12 * angle.cos(), 1.12 * angle.sin(), height]);
+            // Host sine and cosine of one angle differ between glibc and
+            // libSystem. These rings use the portable calls, as the
+            // rotation that places a completed orbit does.
+            coords.extend([1.12 * libm::cos(angle), 1.12 * libm::sin(angle), height]);
         }
     }
     for _ in 0..outer {
@@ -84,8 +89,8 @@ fn ring_core(
         let radius = 2.6 + 0.3 * rng.random::<f64>();
         let ring = (1.0 - z * z).sqrt();
         coords.extend([
-            radius * ring * azimuth.cos(),
-            radius * ring * azimuth.sin(),
+            radius * ring * libm::cos(azimuth),
+            radius * ring * libm::sin(azimuth),
             radius * z,
         ]);
     }
@@ -221,7 +226,7 @@ fn dual_core_candidates_match_develop() {
     let (hash, produced) = candidate_hash(both);
     assert!(produced > 0, "no dual-core completion to compare");
     assert_eq!(
-        hash, "fa1270d07def3d1432f038037e48998e1ebe838ec298b0c85299bfbe9fed397b",
+        hash, "f8a49913e79f0317777a5c918d919e40f761aabe29f77499c7693b22b6469aa8",
         "dual-core candidates moved: {hash}"
     );
 }
