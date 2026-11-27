@@ -100,8 +100,10 @@ evaluations, the same twelve seeds and the same serial arm. The driver is
 `scripts/tip4p_h2h/enter_budget.sh`, the Snakemake rule is
 `tip4p21_budget_h2h`, and the asv class is `Tip4p21BudgetHeadToHead`. GMIN at
 a (budget, seed) pair is deterministic: the 2 M GMIN rows repeat the panel's
-best and median energies, and their median wall is 75.15 s against the
-panel's 76.37 s. Summary rows are `summary-budget21.csv`
+best and median energies, and their median wall is 75.15 s. The twelve GMIN
+rows at 21 molecules in `rows-h2h-r2.csv` have median wall 81.097 s, the
+value `wall-r2.csv` stores as 81.096750 s. The 76.37 s figure is the earlier
+`h2h-summary.csv` panel. Summary rows are `summary-budget21.csv`
 and per-seed rows are `rows-budget21.csv`. `p(U)` is the two-sided
 Mann–Whitney U test on the per-seed best energies; the hit counts are 0/12 on
 both arms at every budget, so the Fisher exact p is 1.000 throughout.
