@@ -167,7 +167,9 @@ order:
 4. *Report the current position.* It asks =DescriptorSpace::describe=
    for the descriptor of the current state
    (examples/lj_cluster_search.rs:5158). A failed
-   describe returns at once. This runs on the checkpoints that reach
+   describe returns through =continue_checkpoint=
+   (examples/lj_cluster_search.rs:5161), which records a slice
+   (examples/lj_cluster_search.rs:3671). This runs on the checkpoints that reach
    it, including those that later reconfigure. It is not an identity
    claim: it reports wherever the chain stands, mid-hop or not. Only
    the offer in step 3 feeds the identity tier.
