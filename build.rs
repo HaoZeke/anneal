@@ -108,6 +108,7 @@ fn main() {
     // `PYO3_BUILD_EXTENSION_MODULE` and passes the lookup flag itself; linking
     // libpython there would pin the extension to the build interpreter.
     link_libpython_for_macos_tests();
+    emit_rust_api_sample();
 }
 
 fn link_libpython_for_macos_tests() {
@@ -200,4 +201,79 @@ fn python_interpreter() -> String {
     panic!(
         "feature `python` on macOS requires PYO3_PYTHON, python3, or python on PATH so the test binaries can link libpython"
     );
+}
+
+/// The crate-root sample on the Rust API page is the test body.
+///
+/// The published crate omits that page. An unpacked crate has
+/// `Cargo.toml.orig` and no sample to compile.
+fn emit_rust_api_sample() {
+    println!("cargo:rerun-if-changed=docs/orgmode/reference/rust-api.org");
+    let manifest =
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let out_dir = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
+    let dest = out_dir.join("rust_api_snippet.rs");
+    let org = manifest.join("docs/orgmode/reference/rust-api.org");
+    let snippet = if org.is_file() {
+        let text = std::fs::read_to_string(&org)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", org.display()));
+        let body = rust_api_sample(&text)
+            .unwrap_or_else(|err| panic!("docs/orgmode/reference/rust-api.org: {err}"));
+        format!("#[test]\nfn rust_api_crate_root_helpers_match_docs() {{\n{body}}}\n")
+    } else if manifest.join("Cargo.toml.orig").is_file() {
+        "#[test]\nfn rust_api_crate_root_helpers_match_docs() {}\n".to_string()
+    } else {
+        panic!(
+            "missing {} and this checkout is not an unpacked crate",
+            org.display()
+        );
+    };
+    std::fs::write(&dest, snippet)
+        .unwrap_or_else(|err| panic!("failed to write {}: {err}", dest.display()));
+    println!(
+        "cargo:rustc-env=ANNEAL_RUST_API_SNIPPET_DIR={}",
+        out_dir.display()
+    );
+}
+
+fn is_rust_src_begin(line: &str) -> bool {
+    let lower = line.trim().to_ascii_lowercase();
+    let Some(rest) = lower.strip_prefix("#+begin_src") else {
+        return false;
+    };
+    rest.split_whitespace().next() == Some("rust")
+}
+
+fn is_src_end(line: &str) -> bool {
+    let lower = line.trim().to_ascii_lowercase();
+    lower == "#+end_src" || lower.starts_with("#+end_src ")
+}
+
+fn rust_api_sample(text: &str) -> Result<String, String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut blocks = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        if is_rust_src_begin(lines[index]) {
+            let start = index + 1;
+            index += 1;
+            while index < lines.len() && !is_src_end(lines[index]) {
+                index += 1;
+            }
+            if index >= lines.len() {
+                return Err("unclosed rust source block".to_string());
+            }
+            let body = lines[start..index].join("\n");
+            if body.trim().is_empty() {
+                return Err("empty rust source block".to_string());
+            }
+            blocks.push(body);
+        }
+        index += 1;
+    }
+    match blocks.len() {
+        1 => Ok(format!("{}\n", blocks.pop().expect("one block"))),
+        0 => Err("no rust source block".to_string()),
+        count => Err(format!("{count} rust source blocks")),
+    }
 }
