@@ -58,14 +58,15 @@ Every symbol re-exported at =src/lib.rs= is grouped below by role and documented
 - =portfolio_optimize=, =portfolio_optimize_from=, =portfolio_optimize_seeded=, =portfolio_optimize_with_policy=, =portfolio_ensemble_optimize=, =portfolio_values_ensemble_optimize= :: budget-only and ensemble portfolio drivers (=PortfolioPolicy=, =PortfolioResult=, =PortfolioEnsembleConfig=, =PortfolioEnsembleResult=, =ArmStat=).
 - =box_ensemble_optimize=, =ensemble_hop_optimize=, =BoxEnsembleConfig=, =BoxEnsembleResult=, =EnsembleHopResult= :: multi-replica box hopping drivers and results.
 - =amsa_optimize=, =AmsaResult= :: whitened BFWT annealed descent and result.
-- =dmc_population_optimize=, =run_dmc_population=, =population_control=, =walker_weight=, =diffusion_displace=, =Walker=, =Population=, =DmcPopulationResult=, =DEFAULT_ALPHA=, =DEFAULT_BETA0=, =DEFAULT_GAMMA=, =DEFAULT_STEPS_PER_CONTROL=, =DEFAULT_TARGET_WALKERS= :: entropy-controlled population diffusion search.
+- =dmc_population_optimize=, =run_dmc_population=, =population_control=, =walker_weight=, =diffusion_displace=, =default_sigma=, =Walker=, =Population=, =DmcPopulationResult=, =DEFAULT_BETA0=, =DEFAULT_STEPS_PER_CONTROL=, =DEFAULT_TARGET_WALKERS= :: entropy-controlled population diffusion search.
 - =gle_langevin_sa=, =gle_langevin_adaptive_sa=, =gle_langevin_preconditioned_sa=, =estimate_gle_omega0=, =estimate_gle_preconditioner=, =GleLangevinResult=, =GlePreconditioner= :: generalized Langevin colored-noise drivers and frequency/diagonal estimators.
 - =projected_gradient_polish=, =qmc_projected_gradient_polish=, =shifted_qmc_projected_gradient_polish=, =qmc_best1bin_scout=, =qmc_gsa_global_search=, =qmc_gsa_global_search_from=, =qmc_trust_region_poll=, =LocalPolishResult=, =QmcPolishResult= :: projected-gradient local polish and QMC global/local scouts.
 - =BayesianMixingSampler=, =BayesianMixingResult=, =MultiChainSampler=, =MultiChainState=, =MultiChainResult=, =GelmanRubin= :: multi-chain mixing and Gelman--Rubin convergence diagnostics.
 - =ParallelTemperingSampler=, =PtChainState=, =PtResult=, =geometric_ladder= :: classical SA parallel tempering sampler and ladder constructor.
-- =PilotObservation=, =PilotPrior=, =LaplacePosterior=, =fit_laplace=, =pilot_draws=, =pilot_draws_qmc=, =Q_V_MIN=, =Q_V_MAX=, =TARGET_ACCEPT_RATE=, =default_sigma= :: Bayesian pilot parameter estimation.
+- =PilotObservation=, =PilotPrior=, =LaplacePosterior=, =fit_laplace=, =pilot_draws=, =pilot_draws_qmc=, =Q_V_MIN=, =Q_V_MAX=, =TARGET_ACCEPT_RATE= :: Bayesian pilot parameter estimation.
 - =OptimizationRegime=, =ProblemFeatures=, =RegimeError=, =select_regime=, =arm_prior_boost=, =arm_slice_multiplier=, =order_arms=, =preferred_arm_tail=, =regime_exploit_prob=, =regime_exploit_width=, =check_accept_path=, =exact_accept_allowed=, =require_accept_compatible= :: regime classification and portfolio arm priors.
-- =TpeCategorical=, =TpeContinuous1d=, =ShootDirection= :: tree-structured Parzen estimators and transition-path shooting helpers.
+- =TpeCategorical=, =TpeContinuous1d=, =DEFAULT_ALPHA=, =DEFAULT_GAMMA= :: tree-structured Parzen estimators.
+- =ShootDirection= :: transition-path shooting helper.
 
 ** Replica-exchange and barrier tempering
 
