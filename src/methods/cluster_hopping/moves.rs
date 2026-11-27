@@ -64,9 +64,9 @@ pub enum MoveLibrary {
         /// `rtrans` and `rrot` arms. [`Config::with_rigid_bodies`] turns it on.
         local: bool,
         /// Offer the reversal of a directed hydrogen-bond cycle as one more
-        /// arm. It needs a site geometry with one oxygen and two hydrogens.
+        /// arm when `has_contact_cycles` is true for the site geometry.
         /// [`Config::for_tip4p`] turns it on. With it off, a stalled archive
-        /// walk still reverses contact chains for any bonded rigid body.
+        /// walk still reverses a chain when that same test is true.
         reverse_cycles: bool,
         /// Move one body onto a vacant contact.
         ///
