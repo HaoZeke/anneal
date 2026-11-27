@@ -1,0 +1,99 @@
+{
+  "arms": [
+    "anneal",
+    "crest"
+  ],
+  "n": {
+    "anneal": 12,
+    "crest": 12,
+    "rows": 24
+  },
+  "hits": {
+    "anneal": 8,
+    "crest": 11
+  },
+  "misses": {
+    "anneal": 4,
+    "crest": 1
+  },
+  "calls": {
+    "anneal": [
+      331153,
+      331374,
+      331155,
+      331153,
+      331132,
+      331138,
+      332676,
+      331149,
+      331135,
+      332676,
+      332676,
+      332676
+    ],
+    "crest": [
+      232593,
+      256391,
+      223705,
+      194258,
+      162306,
+      194242,
+      614049,
+      316369,
+      288895,
+      319746,
+      286601,
+      320915
+    ]
+  },
+  "fisher": {
+    "alternative": "two-sided",
+    "table_rows": [
+      "anneal",
+      "crest"
+    ],
+    "table_columns": [
+      "hit",
+      "miss"
+    ],
+    "table": [
+      [
+        8,
+        4
+      ],
+      [
+        11,
+        1
+      ]
+    ],
+    "odds_ratio": 0.18181818181818182,
+    "p": 0.3167701863354037
+  },
+  "mann_whitney": {
+    "alternative": "two-sided",
+    "continuity": true,
+    "tie_correction": true,
+    "sample_order": [
+      "anneal",
+      "crest"
+    ],
+    "u": 132.0,
+    "p": 0.0005742825174940987
+  },
+  "median_calls": {
+    "anneal": 331154.0,
+    "crest": 271496.0
+  },
+  "median_ratio": {
+    "definition": "median crest calls divided by median anneal calls",
+    "point": 0.8198481673179245,
+    "ci95": [
+      0.6310704385270901,
+      0.9604519347493915
+    ],
+    "resamples": 10000,
+    "seed": 20261123,
+    "quantile": "linear",
+    "draw": "anneal indices, then crest indices"
+  }
+}
