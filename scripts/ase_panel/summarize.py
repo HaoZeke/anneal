@@ -296,27 +296,46 @@ def render(system: str) -> tuple[str, str]:
                 f"{LABELS[arm].capitalize()} stopped at the wall cap on {wall_stops}/12 seeds; "
                 f"those rows charged {low_charged:,}-{high_charged:,} calls."
             )
+        # LJ38 basin hopping and minima hopping stop at the wall on every seed.
+        # Their Fisher cells are blank; the summary CSV keeps the computed p.
+        if system == "lj38" and wall_stops == 12:
+            report[-1] = report[-1].replace(f"| {fisher_p} |", "| — |", 1)
     recommended = next(item for item in reports if item[0] == "recommended")
     recommended_hits = recommended[1]
     recommended_versus = recommended[-1]
-    report.extend(["", *stop_notes, "",
-        "Fisher below compares recommended with each ASE arm.",
-        "",
-        "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
-        "| --- | --- | --- | --- | --- |",
-    ])
+    if system == "lj38":
+        report.extend(["", *stop_notes, "",
+            "Basin hopping and minima hopping stopped at the wall on every seed.",
+            "Recommended did not. The stops differ, and there is no paired test.",
+            "",
+            "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
+            "| --- | --- | --- | --- | --- |",
+        ])
+    else:
+        report.extend(["", *stop_notes, "",
+            "Fisher below compares recommended with each ASE arm.",
+            "",
+            "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
+            "| --- | --- | --- | --- | --- |",
+        ])
     for other in ASE_ARMS:
         other_report = next(item for item in reports if item[0] == other)
         other_hits = other_report[1]
         fisher_text = recommended_versus[other]
+        if system == "lj38" and other_report[9] == 12 and recommended[9] != 12:
+            fisher_text = "—"
         wall_ratio = recommended[3] / other_report[3]
         inverse_ratio = other_report[3] / recommended[3]
         report.append(
             f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
             f"{fisher_text} | {wall_ratio:.6f} | {inverse_ratio:.6f} |"
         )
+    if system == "lj38":
+        fisher_line = "The Fisher cells above are blank where one arm stopped at the wall on every seed."
+    else:
+        fisher_line = "Fisher is the two-sided exact test on hits under the recorded stopping rule."
     report.extend(["",
-        "Fisher is the two-sided exact test on hits under the recorded stopping rule.",
+        fisher_line,
         "Medians are type 7. Wall ratios are ratios of arm medians. The Rust and",
         "NumPy random generators do not make a shared starting geometry from the",
         "same numeric seed, so the report does not treat seed labels as pairs.",

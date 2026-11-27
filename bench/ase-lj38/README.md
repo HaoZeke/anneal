@@ -16,20 +16,21 @@ the full call budget, so its call count is right-censored at `charged`.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | anneal | 10/12 | 1 | -173.92842659 | 0.00000041 | 0.982206 | 1.000000 | 1.000000 | 0.582390 | 0.399817 |
 | recommended | 12/12 | 0.478261 | -173.92842659 | 0.00000041 | 0.605387 | 0.616354 | 1.622444 | 0.283605 | 0.321782 |
-| basin hopping | 0/12 | 6.73038e-05 | -171.10081694 | 2.82761006 | 4.644532 | 4.728672 | 0.211476 | 1.313719 | 3.330812 |
-| minima hopping | 0/12 | 6.73038e-05 | -170.08494879 | 3.84347821 | 4.858002 | 4.946008 | 0.202183 | 0.136979 | 4.727197 |
+| basin hopping | 0/12 | — | -171.10081694 | 2.82761006 | 4.644532 | 4.728672 | 0.211476 | 1.313719 | 3.330812 |
+| minima hopping | 0/12 | — | -170.08494879 | 3.84347821 | 4.858002 | 4.946008 | 0.202183 | 0.136979 | 4.727197 |
 
 Basin hopping stopped at the wall cap on 12/12 seeds; those rows charged 315,352-351,628 calls.
 Minima hopping stopped at the wall cap on 12/12 seeds; those rows charged 21,363-31,032 calls.
 
-Fisher below compares recommended with each ASE arm.
+Basin hopping and minima hopping stopped at the wall on every seed.
+Recommended did not. The stops differ, and there is no paired test.
 
 | comparison | hits | Fisher p | median wall ratio | inverse ratio |
 | --- | --- | --- | --- | --- |
-| recommended against basin hopping | 12/12 vs 0/12 | 7.39602e-07 | 0.130344 | 7.672005 |
-| recommended against minima hopping | 12/12 vs 0/12 | 7.39602e-07 | 0.124616 | 8.024621 |
+| recommended against basin hopping | 12/12 vs 0/12 | — | 0.130344 | 7.672005 |
+| recommended against minima hopping | 12/12 vs 0/12 | — | 0.124616 | 8.024621 |
 
-Fisher is the two-sided exact test on hits under the recorded stopping rule.
+The Fisher cells above are blank where one arm stopped at the wall on every seed.
 Medians are type 7. Wall ratios are ratios of arm medians. The Rust and
 NumPy random generators do not make a shared starting geometry from the
 same numeric seed, so the report does not treat seed labels as pairs.
