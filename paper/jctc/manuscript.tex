@@ -753,8 +753,8 @@ rigid TIP4P clusters of 8, 15, 20, 21, and 25 molecules, at
 \(2\times 10^{6}\) arm-specific evaluations on seeds 2000--2011, both arms
 from the same start on each seed in alternating order.
 GMIN runs its rigid TIP4P potential at a fixed temperature of 2~kJ/mol and
-fixed steps of 0.40 and 0.51, in its default Lennard-Jones container, which
-does not hold the (H\(_2\)O)\(_{20}\) reference minimum.
+fixed steps of 0.40 and 0.51.
+GMIN hits 0 of 12 on (H\(_2\)O)\(_{20}\).
 The budget counts combined energy-and-gradient passes for this code and
 \texttt{POTENTIAL} entries for GMIN, so no cross-arm test is reported.
 The hit counts for this code and GMIN are 12 and 8 on
@@ -770,8 +770,7 @@ of GMIN \(-1087.334\)~kJ/mol.
 This code uses its recommended template-free rigid-water preset.
 Seeds 2000--2011, \(2\times 10^{6}\) arm-specific evaluations, both arms from the same start on each
 seed, in alternating order.
-GMIN uses its default Lennard-Jones container, which does not hold the
-(H\(_2\)O)\(_{20}\) reference minimum.
+GMIN hits 0 of 12 on (H\(_2\)O)\(_{20}\).
 The budget of this code counts one call per combined energy and gradient pass, and GMIN's budget counts
 every \texttt{POTENTIAL} entry, including \texttt{GRADT=false}.
 The numeric ceiling is applied separately in each arm's unit and is not an equal-work budget;
@@ -824,8 +823,7 @@ hits LJ\(_{55}\) on 1 of 12 and no other cluster, and ASE minima hopping hits
 none; no arm hits Au\(_{55}\).
 On the Morse clusters this code hits M\(_{38}\) and M\(_{55}\) at
 \(\rho=6\) on 12 of 12 and at \(\rho=14\) on 9 and 8 of 12, and neither ASE
-arm hits any; each ASE run there stopped at the cap after 3933 to 20950
-calls.
+arm hits any.
 
 % ase-panel table: start
 \begin{table}
@@ -913,8 +911,7 @@ CREST runs to its own end, so a pair is kept only when the budget of this
 code is at least the median calls of the complete CREST runs.
 An aborted CREST run is dropped from its pair.
 CREST hits the water hexamer on 4 of 12 runs and this code on 1 of 12
-(\(p=0.32\)); this code is charged 3021 calls on every seed, and CREST a
-median of 3055.
+(\(p=0.32\)).
 On (H\(_2\)O)\(_8\), seeds 2000--2011 of this code run with the opt-in
 polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
 seeds 17000--17011.

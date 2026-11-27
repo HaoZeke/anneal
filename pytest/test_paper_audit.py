@@ -3895,12 +3895,12 @@ def test_a_process_note_in_the_cover_letter_is_reported():
     assert [r[2] for r in audit.drifts()] == ["the cover letter carries no process note (being run)"]
 
 
-def test_a_drifted_ase_call_range_is_reported():
+def test_a_drifted_ase_hit_sentence_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "stopped at the cap after 3933 to 20950 calls"
+    old = "and neither ASE arm hits any"
     assert old in audit_mod.collapse(tex)
-    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("3933", "3934"))
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, "and neither ASE arm hits all")
     audit_mod.manuscript_ase(audit)
     assert [r[2] for r in audit.drifts()] == ["prose"]
 

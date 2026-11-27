@@ -304,14 +304,14 @@ def tip4p_summary() -> dict[int, dict]:
 
 def tip4p_table() -> str:
     summary = tip4p_summary()
+    g20 = summary[20]["table"]
     lines = [
         "\\begin{table}",
         "\\caption{This code against GMIN on rigid TIP4P water clusters, paired by seed.",
         "This code uses its recommended template-free rigid-water preset.",
         "Seeds 2000--2011, \\(2\\times 10^{6}\\) arm-specific evaluations, both arms from the same start on each",
         "seed, in alternating order.",
-        "GMIN uses its default Lennard-Jones container, which does not hold the",
-        "(H\\(_2\\)O)\\(_{20}\\) reference minimum.",
+        f"GMIN hits {g20[0] + g20[2]} of {sum(g20)} on (H\\(_2\\)O)\\(_{{20}}\\).",
         "The budget of this code counts one call per combined energy and gradient pass, and GMIN's budget counts",
         "every \\texttt{POTENTIAL} entry, including \\texttt{GRADT=false}.",
         "The numeric ceiling is applied separately in each arm's unit and is not an equal-work budget;",

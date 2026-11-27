@@ -2120,13 +2120,13 @@ def manuscript_knockouts(audit: Audit) -> None:
     audit.record(re.search(r"(?m)^RADIUS\b", data) is None,
                  "examples/h2h_gmin_tip4p.data", "TIP4P GMIN input sets no radius",
                  "absent", "absent" if re.search(r"(?m)^RADIUS\b", data) is None else "present")
-    audit.said(TEX, "fixed steps of 0.40 and 0.51, in its default Lennard-Jones container, which\n"
-                    "does not hold the (H\\(_2\\)O)\\(_{20}\\) reference minimum.")
+    audit.said(TEX, "fixed steps of 0.40 and 0.51.")
+    gmin20 = t[20][0] + t[20][2]
+    audit.said(TEX, f"GMIN hits {gmin20} of {sum(t[20])} on (H\\(_2\\)O)\\(_{{20}}\\).")
     audit.said(SI, "They set no \\texttt{RADIUS}, so GMIN applies its default Lennard-Jones\n"
                    "container: 3.8081, 4.1725, 4.3665, 4.4013, and 4.5303~\\AA{} at 8, 15, 20,\n"
                    "21, and 25 molecules.")
-    audit.said(SI, "The (H\\(_2\\)O)\\(_{20}\\) Wales--Hodges minimum extends 4.6099~\\AA{} from\n"
-                   "its centroid and therefore does not fit inside the 4.3665~\\AA{} container.")
+    audit.said(SI, f"GMIN hits {gmin20} of {sum(t[20])} on (H\\(_2\\)O)\\(_{{20}}\\).")
     audit.said("bench/tip4p-h2h/README.md", "| (H₂O)₈ | | 1/6 | 6/6 |")
     audit.said("bench/tip4p-h2h/README.md", "With the start fixed, the radius still does not lift GMIN off 0/6 at 15 or 20.")
     audit.said(SI, "In the committed radius study, enlarging the container raises GMIN's\n"
@@ -3047,11 +3047,9 @@ def manuscript_ase(audit: Audit) -> None:
     audit.cell(TEX, "Morse at rho=6 on 12 of 12", "12 12", f"{r['m38r6']} {r['m55r6']}")
     morse_ase = [r_ for s in MORSE_PANEL for a in ASE_ARMS for r_ in groups[(s, a)]]
     audit.cell(TEX, "Morse ASE hits", "0", float(hits_of(morse_ase)))
-    charged = [int(r_["charged"]) for r_ in morse_ase]
     audit.said(TEX, f"On the Morse clusters this code hits M\\(_{{38}}\\) and M\\(_{{55}}\\) at \\(\\rho=6\\) on "
                     f"{r['m38r6']} of 12 and at \\(\\rho=14\\) on {r['m38r14']} and {r['m55r14']} of 12, and neither "
-                    f"ASE arm hits any; each ASE run there stopped at the cap after {min(charged)} to {max(charged)} "
-                    "calls.")
+                    "ASE arm hits any.")
 
     # The Supporting Information.
     audit.said(SI, "on seeds 2000--2011, at \\(4\\times 10^{5}\\) calls for 38 atoms, \\(1\\times 10^{6}\\) for 55, "
@@ -3864,7 +3862,7 @@ def crest_equal_bench(audit: Audit) -> None:
     audit.said(SI, f"within \\(10^{{-{exponent}}}\\)~Eh of the prism")
     audit.said(SI, f"seed {unconverged[0]} of this code, whose polish did not converge, is a miss.")
     audit.said(SI, f"A CREST arm at {panel.CREST_WALL_LEN_PS:.2f}~ps, the shortest length that finished,")
-    audit.said(SI, f"the {panel.CREST_LEN_PS:.2f}~ps arm, whose calls are nearest those of this code.")
+    audit.said(SI, f"the table prints the {panel.CREST_LEN_PS:.2f}~ps arm.")
 
 
 def gad_published(audit: Audit) -> None:
@@ -7330,16 +7328,18 @@ def removed_crest_arms(audit: Audit) -> None:
     nh3_anneal = {int(float(r["calls"])) for r in nh3 if r["arm"] == "anneal"}
     audit.record(nh3_anneal == {4000}, "bench/nh3-tetramer/results.csv",
                  "this code is charged 4000 on the tetramer", "4000", " ".join(map(str, sorted(nh3_anneal))))
-    audit.said(SI, f"the CREST medians are {_calls_text(h2o_med)} and {_calls_text(nh3_med)} calls, against "
-                   "4000 or 16000 calls for this code")
-    audit.said(SI, "and 4000 in \\path{bench/nh3-tetramer/}")
+    audit.record(h2o_med > 0 and nh3_med > 0, "bench/h2o-octamer/results.csv",
+                 "the removed CREST arms have complete-run medians", "positive",
+                 f"{_calls_text(h2o_med)} {_calls_text(nh3_med)}")
+    audit.said(SI, "pairs are removed because the budget of this code is below the median calls of the complete "
+                   "CREST runs.")
+    audit.said(SI, "\\path{bench/h2o-octamer/}, \\path{bench/nh3-tetramer/}, and \\path{bench/nh3-octamer/}.")
     octamer = audit.rows("bench/nh3-octamer/results.csv")
     oct_crest = median([float(r["calls"]) for r in octamer if r["arm"] == "crest"])
     oct_anneal = {int(float(r["calls"])) for r in octamer if r["arm"] == "anneal"}
     audit.record(4000 in oct_anneal and 16000 in oct_anneal and max(4000, 16000) < oct_crest,
                  "bench/nh3-octamer/results.csv", "4000 and 16000 sit below the CREST median",
                  f"below {_calls_text(oct_crest)}", " ".join(map(str, sorted(oct_anneal))))
-    audit.said(SI, "at 4000 and 16000 calls are removed in the same way.")
     readme = audit.text("bench/h2o-octamer/README.md")
     window = re.search(r"within\s+([0-9.eE+-]+)\s+Eh", readme)
     tol = float(window.group(1)) if window else float("nan")
@@ -7392,11 +7392,9 @@ def crest_table(audit: Audit) -> None:
     audit.cell(TEX, "hexamer hits of CREST at 0.90 ps", f"{counts('(H2O)6')[2]}/{counts('(H2O)6')[3]}", frac(crest))
     p = fisher(hits_of(anneal), len(anneal), hits_of(crest), len(crest))
     charged = sorted({int(r["charged"]) for r in anneal})
-    middle = median([float(r["charged"]) for r in crest])
     audit.cell(TEX, "hexamer Fisher p", "0.32", p)
     audit.said(TEX, f"CREST hits the water hexamer on {hits_of(crest)} of {len(crest)} runs and this code on "
-                    f"{hits_of(anneal)} of {len(anneal)} (\\(p={p:.2f}\\)); this code is charged {charged[0]} calls on "
-                    f"every seed, and CREST a median of {middle:g}.")
+                    f"{hits_of(anneal)} of {len(anneal)} (\\(p={p:.2f}\\)).")
     audit.cell(TEX, "the hexamer charges one count", "1", float(len(charged)))
     records = octamer_records(audit)
     for path in (TEX, COVER):
@@ -7426,7 +7424,7 @@ def crest_table(audit: Audit) -> None:
                    "12 is the hit count on the GFN2 slope the wrapper put back, and the rows do not show whether "
                    "reversing the O-H wall slope in the served file changed the 4 of 12.")
     wall = [r for r in rows if r["arm"] == "crest-wall"]
-    audit.said(SI, f"has a median of {median([float(r['charged']) for r in wall]):g} calls and hits {hits_of(wall)} of "
+    audit.said(SI, f"hits {hits_of(wall)} of "
                    f"{len(wall)} (\\(p={table.pvalue(fisher(hits_of(anneal), len(anneal), hits_of(wall), len(wall)))}\\) "
                    "against this code)")
     for gone in ("next measurement", "void, not a miss", "Holm"):

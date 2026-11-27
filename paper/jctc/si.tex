@@ -84,8 +84,7 @@ The rigid TIP4P rows select \texttt{NEWTIP} with \texttt{NTIP 4}
 They set no \texttt{RADIUS}, so GMIN applies its default Lennard-Jones
 container: 3.8081, 4.1725, 4.3665, 4.4013, and 4.5303~\AA{} at 8, 15, 20,
 21, and 25 molecules.
-The (H\(_2\)O)\(_{20}\) Wales--Hodges minimum extends 4.6099~\AA{} from
-its centroid and therefore does not fit inside the 4.3665~\AA{} container.
+GMIN hits 0 of 12 on (H\(_2\)O)\(_{20}\).
 In the committed radius study, enlarging the container raises GMIN's
 (H\(_2\)O)\(_8\) hits from 1 of 6 to 6 of 6 and does not raise its 0 of 6
 hits at 15 or 20 molecules.
@@ -754,9 +753,8 @@ CREST wrapper at that revision negated the gradient it served, so the 1 of
 12 is the hit count on that reversed GFN2 slope and the 4 of 12 is the hit
 count on the GFN2 slope the wrapper put back, and the rows do not show
 whether reversing the O-H wall slope in the served file changed the 4 of 12.
-A CREST arm at 0.11~ps, the shortest length that finished, has a median of
-916.5 calls and hits 0 of 12 (\(p=1\) against this code); the table prints
-the 0.90~ps arm, whose calls are nearest those of this code.
+A CREST arm at 0.11~ps, the shortest length that finished, hits 0 of 12
+(\(p=1\) against this code); the table prints the 0.90~ps arm.
 
 \emph{Water octamer.}
 On (H\(_2\)O)\(_8\), seeds 2000--2011 of this code run with the opt-in
@@ -805,11 +803,10 @@ On C\(_{20}\) both arms are the rows of \path{rows.csv} at
 \texttt{5351f272}.
 
 \emph{Arms that the budget rule removes.}
-On (H\(_2\)O)\(_8\) and (NH\(_3\))\(_4\) the CREST medians are 127658.5
-and 146795 calls, against 4000 or 16000 calls for this code in
-\path{bench/h2o-octamer/} and 4000 in \path{bench/nh3-tetramer/}; the
-(NH\(_3\))\(_8\) rows of this code at 4000 and 16000 calls are removed in
-the same way.
+The (H\(_2\)O)\(_8\), (NH\(_3\))\(_4\), and (NH\(_3\))\(_8\) pairs are removed
+because the budget of this code is below the median calls of the complete CREST runs.
+The rows are \path{bench/h2o-octamer/}, \path{bench/nh3-tetramer/}, and
+\path{bench/nh3-octamer/}.
 At the calls of each seed's CREST run, \path{bench/h2o-octamer/ladder.csv}
 holds two seeds, and this code hits 1 of 2 and CREST 2 of 2.
 The (H\(_2\)O)\(_{16}\) and (H\(_2\)O)\(_{20}\) records give no CREST call
