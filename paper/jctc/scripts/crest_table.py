@@ -175,7 +175,7 @@ def table() -> str:
         "anneal's rows do not record the CREST target or budget.",
         "There is no paired test.",
         "The Holm family for CREST is empty.",
-        "The Supporting Information reports the other clusters under their own stops.}",
+        "The Supporting Information reports the other clusters at the stop recorded for each arm.}",
         "\\label{tab:crest}",
         "\\centering",
         "\\footnotesize",

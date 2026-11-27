@@ -28,22 +28,22 @@ The same 0.001 band is the hit rule for the GAD rerun, anneal and GMIN.
 
 Anneal is `Config::recommended` from `examples/gad_published`. GMIN is Wales's public tarball at `aac1548a8aec13b53ad12a8d6904625081685d2e`, with the evaluator cap in `bench/lj104-lattice/v2/h2h-gmin.patch`. In the pre-correction rows below (recorded in `8f91a35e4076963c866082f60b06e669f64f7a3b` with `h2h-gmin.patch` from `465e583be21e9b82befc94ff01cf931a13f8f0a9`, `a31221a67883d20032a029e34e3d81bd62c5bcb786c97fff02a9c234adc34553`), anneal counted one combined energy and force evaluation while GMIN, like the GAD rerun, counted every entry to `POTENTIAL` (`GRADT=true` and `GRADT=false` alike); in the current in-tree `h2h-gmin.patch` (`3bf5d49a0a1cb0512a228212482e76e98195946096ceae3b54e88ca4a43b7189`), GMIN caps `GRADT=true` gradient passes and reports `GRADT=false` energy-only entries separately. All three stop at 400000 calls. That ceiling is the LJ38 entry of the elja map. LJ31 is not on the map; this bench uses the same ceiling so the two sizes share one force-call budget. A rerun that does not reach the Cambridge energy is stored as 400000 calls. Seeds are 2000 through 2011, one process at a time, under `sudo unshare --uts` with hostname `bench`, pinned to one core (`GAD_BENCH_CORE`, core 4 for the rows below).
 
-In `rows.csv`, `hits` counts reruns that reach the 0.001 band at or before 400000 calls, and a miss is stored as 400000. The `gad_deposit` rows have no hit column. They report the generation index at which the deposit first reaches Cambridge, and both evaluation bounds. On the `gmin` and `gad` rows, `fisher_p` is two-sided on hits against anneal and `mannwhitney_p` is two-sided on calls to the hit against anneal, exact when the pooled sample has no ties and the tie-corrected normal approximation otherwise. Medians and the interquartile range are Hyndman–Fan type 7. Inside microseconds are potential time divided by charged calls. Outside microseconds are the rest of the wall on the same denominator. The deposit has no wall clock, so those columns are empty. `summary.csv` keeps the earlier bound tests for the deposit.
+In `rows.csv`, `hits` counts reruns that reach the 0.001 band at or before 400000 calls, and a miss is stored as 400000. The `gad_deposit` rows have no hit column. They report the generation index at which the deposit first reaches Cambridge, and both evaluation bounds. The stored `gmin` and `gad` rows keep `fisher_p` and `mannwhitney_p`. This note does not print them: anneal counts one energy-and-gradient pass and the other arms count every potential entry. Medians and the interquartile range are Hyndman–Fan type 7. Inside microseconds are potential time divided by charged calls. Outside microseconds are the rest of the wall on the same denominator. The deposit has no wall clock, so those columns are empty.
 
 Cambridge energies are −133.586422 for LJ31 and −173.928427 for LJ38.
 
 ## Results
 
-Twelve seeds, 2000–2011, for anneal, GMIN and the GAD rerun, all at 400000 calls, serial on core 4 under `sudo unshare --uts` with hostname `bench`. Anneal is `Config::recommended` built at `48ecd4c0f348bc40bb6120a92a9e5bc5b124e142`, whose Rust sources are those of `91f835fe951d5bcaa13e43c1a3fb98d6887da9e0`. A miss counts as 400000 calls. Fisher is two-sided on hits against anneal, Mann–Whitney two-sided on calls to the hit against anneal. Pot is median wall inside the potential, outside is the rest of the wall.
+Twelve seeds, 2000–2011, for anneal, GMIN and the GAD rerun, each at its own ceiling of 400000 calls, serial on core 4 under `sudo unshare --uts` with hostname `bench`. Anneal is `Config::recommended` built at `48ecd4c0f348bc40bb6120a92a9e5bc5b124e142`, whose Rust sources are those of `91f835fe951d5bcaa13e43c1a3fb98d6887da9e0`. A miss counts as 400000 calls. Anneal counts one energy-and-gradient pass. GMIN and the GAD rerun count every potential entry. Pot is median wall inside the potential, outside is the rest of the wall. No cross-arm test is printed.
 
-| Size | Arm | Hits | Median calls to hit | IQR | Best (median) | Wall (s) | Pot (s) | Outside (s) | Inside µs/call | Outside µs/call | Fisher p | Mann–Whitney p |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| LJ31 | anneal | 12/12 | 18666 | 29896.8 | −133.58642192 | 0.107647 | 0.032629 | 0.073946 | 1.5603 | 3.4399 | | |
-| LJ31 | gmin | 12/12 | 90210.5 | 102713.8 | −133.58640476 | 0.486330 | 0.307743 | 0.187484 | 3.1514 | 1.7074 | 1 | 0.0172712 |
-| LJ31 | gad | 2/12 | 400000 | 0 | −133.10462015 | 187.522859 | 23.479254 | 163.718770 | 59.3887 | 411.3383 | 6.73038e-05 | 1.83067e-05 |
-| LJ38 | anneal | 12/12 | 10615.5 | 3591.2 | −173.92842659 | 0.069455 | 0.029011 | 0.042200 | 2.4370 | 3.2839 | | |
-| LJ38 | gmin | 7/12 | 329662 | 326680 | −173.92837772 | 1.802020 | 1.276786 | 0.525234 | 3.8734 | 1.5935 | 0.0372671 | 0.000693135 |
-| LJ38 | gad | 0/12 | 400000 | 0 | −171.77778794 | 195.144155 | 31.069388 | 164.491350 | 77.6735 | 411.2284 | 7.39602e-07 | 1.02689e-05 |
+| Size | Arm | Hits | Median calls to hit | IQR | Best (median) | Wall (s) | Pot (s) | Outside (s) | Inside µs/call | Outside µs/call |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LJ31 | anneal | 12/12 | 18666 | 29896.8 | −133.58642192 | 0.107647 | 0.032629 | 0.073946 | 1.5603 | 3.4399 |
+| LJ31 | gmin | 12/12 | 90210.5 | 102713.8 | −133.58640476 | 0.486330 | 0.307743 | 0.187484 | 3.1514 | 1.7074 |
+| LJ31 | gad | 2/12 | 400000 | 0 | −133.10462015 | 187.522859 | 23.479254 | 163.718770 | 59.3887 | 411.3383 |
+| LJ38 | anneal | 12/12 | 10615.5 | 3591.2 | −173.92842659 | 0.069455 | 0.029011 | 0.042200 | 2.4370 | 3.2839 |
+| LJ38 | gmin | 7/12 | 329662 | 326680 | −173.92837772 | 1.802020 | 1.276786 | 0.525234 | 3.8734 | 1.5935 |
+| LJ38 | gad | 0/12 | 400000 | 0 | −171.77778794 | 195.144155 | 31.069388 | 164.491350 | 77.6735 | 411.2284 |
 
 The per-seed rerun log is `seed-reruns.csv`, recorded at the verified source alias `407731c5c3983cc927966cd308cbf23975bb0ffb` with hostname `bench`. The two LJ31 GAD hits are seed 2000 at 226282 calls and seed 2006 at 114143 calls. Within the budget GAD completed a median of 13 generations on LJ31 (2–20) and 15.5 on LJ38 (12–24).
 

@@ -363,13 +363,14 @@ fewest of the ten.
 The record pairs these rows with stored GMIN rows of earlier sessions, which
 name no machine for any cluster and no GMIN revision for five of the ten, so
 the article prints this code alone here.
-On M\(_{70}\) that earlier record is \path{bench/morse-panel/seeds.csv},
+On M\(_{70}\) the earlier GMIN record is \path{bench/morse-panel/seeds.csv},
 whose rows name no revision or host.
+This code's counts are the rows of the table.
 Both arms use a budget of \(10^{6}\) calls and a miss stops at that budget.
-At \(\rho=3\) and 6 GMIN hits 12 and 11 of 12 seeds and this code 11 and 9,
-and at \(\rho=10\) and 14 this code hits 2 and 3 and GMIN none.
-This session has no GMIN arm, so on M\(_{70}\) at \(\rho=6\) the paired
-comparison remains GMIN ahead.
+At \(\rho=3\) and 6 GMIN's hit counts are 12 and 11 of 12 and this code's are 11 and 11 of 12.
+At \(\rho=10\) and 14 this code's hit counts are 6 and 10 of 12 and GMIN's are 0 and 0 of 12.
+The two arms do not record one shared call unit, so there is no paired test.
+This session has no GMIN arm.
 The rows are copied from commit \texttt{\seqsplit{4256269394435f77787d2bfdbead2321e08340a6}}
 of \path{record/g1-develop-stock}, as \path{paper/jctc/data/gmin_g1/PROVENANCE}
 names, and \path{paper/jctc/scripts/morse_g1_table.py} writes the table.
@@ -733,7 +734,7 @@ The anneal octamer rows record no target, tolerance, budget, or stop.
 anneal's rows do not record the CREST target or budget.
 There is no paired test, and the Holm family for CREST is empty.
 The ammonia, carbon, and silicon arms are not rows of the table.
-Each is reported below under its own stop, with no paired test.
+Each is reported below at the stop recorded for that arm, with no paired test.
 A budget pair is kept only when the budget of this code is at least the
 median calls of the complete CREST runs.
 An aborted CREST run, which made no call, is dropped from its pair.

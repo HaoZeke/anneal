@@ -60,27 +60,25 @@ hits only. `p(F)` and `p(U)` are blank unless both arms share one stop.
 Times are medians in seconds;
 `pot` is inside the potential, `out` the rest of the wall.
 
-| Size | anneal | GMIN | anneal calls (all / hits) | GMIN calls (all / hits) | wall a / g | anneal pot / out | GMIN pot | p(F) | p(U) |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| (H₂O)₈ | 12/12 | 8/12 | 6_339 / 6_339 | 240_163 / 90_822 | 0.020 / 1.65 | 0.012 / 0.008 | 1.32 | — | — |
-| (H₂O)₁₂ | 12/12 | 5/12 | 41_418.5 / 41_418.5 | 2_000_000 / 976_528 | 0.229 / 26.9 | 0.150 / 0.078 | 23.6 | — | — |
-| (H₂O)₁₆ | 2/12 | 0/12 | 2_000_000 / 275_150.5 | 2_000_000 / – | 15.9 / 45.2 | 11.7 / 4.16 | 41.2 | — | — |
-| (H₂O)₂₀ | 6/12 | 0/12 | 1_686_249.5 / 556_785 | 2_000_000 / – | 18.8 / 69.2 | 14.7 / 4.09 | 64.6 | — | — |
-| (H₂O)₂₁ | 0/12 | 0/12 | 2_000_000 / – | 2_000_000 / – | 24.8 / 75.4 | 18.9 / 5.88 | 70.5 | 1.000 | 1.000 |
+| Size | Arm | Hits | Calls all | Calls hits | Wall | Pot | Out |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| (H₂O)₈ | anneal | 12/12 | 6_339 | 6_339 | 0.020 | 0.012 | 0.008 |
+| (H₂O)₈ | GMIN | 8/12 | 240_163 | 90_822 | 1.65 | 1.32 | 0.334 |
+| (H₂O)₁₂ | anneal | 12/12 | 41_418.5 | 41_418.5 | 0.229 | 0.150 | 0.078 |
+| (H₂O)₁₂ | GMIN | 5/12 | 2_000_000 | 976_528 | 26.9 | 23.6 | 3.311 |
+| (H₂O)₁₆ | anneal | 2/12 | 2_000_000 | 275_150.5 | 15.9 | 11.7 | 4.16 |
+| (H₂O)₁₆ | GMIN | 0/12 | 2_000_000 | – | 45.2 | 41.2 | 3.992 |
+| (H₂O)₂₀ | anneal | 6/12 | 1_686_249.5 | 556_785 | 18.8 | 14.7 | 4.09 |
+| (H₂O)₂₀ | GMIN | 0/12 | 2_000_000 | – | 69.2 | 64.6 | 4.632 |
+| (H₂O)₂₁ | anneal | 0/12 | 2_000_000 | – | 24.8 | 18.9 | 5.88 |
+| (H₂O)₂₁ | GMIN | 0/12 | 2_000_000 | – | 75.4 | 70.5 | 4.837 |
 
-Anneal loses no size. It has at least GMIN's hits everywhere and fewer median
-calls at 8, 12 and 20. At 8 anneal stops on a hit on every seed and GMIN does
-not, so there is no paired test. At 12 and 20 GMIN stops at the 2 M budget on
-every seed and anneal does not, so there is no paired test. At 16 the stops
-differ, and there is no paired test. At 16 and 21 both all-seed medians are
-the 2 M budget, and at 21 both arms stop at the 2 M budget on every seed and
-neither code reaches the minimum in 2 M calls.
-There anneal's lowest energy is below GMIN's on all twelve paired seeds,
-median −914.368 against −895.593 kJ/mol. Over the twelve
+The call units differ, so there is no paired test. At size 8 anneal stops on a hit on every seed. GMIN hits 8 of 12. At size 12 GMIN hits 5 of 12, the median calls on a hit are 976528, and 7 of 12 seeds run to the 2 M budget. At size 20 GMIN hits 0 of 12 and every seed runs to the 2 M budget. At 16 the stops differ. At 16 and 21 both all-seed medians are
+the 2 M budget, and at 21 both arms stop at the 2 M budget on every seed.
+At 21 this code's median best energy is −914.368 kJ/mol and GMIN's is −895.593 kJ/mol. Over the twelve
 seeds anneal spends 73–77% of its wall inside the potential from 16 up, and
 58–61% at 8 and 12, where the median run stops within 0.25 s.
 
 At (H₂O)₁₆ anneal's ten misses end in a few recurring basins: −676.186 kJ/mol
 on four seeds and −674.006 on three, 5.0 and 7.2 kJ/mol above the header.
-GMIN's misses end 12.7 to 19.0 kJ/mol above it. Because anneal does not lose
-the size, those basins were not diagnosed in this run.
+GMIN's misses end 12.7 to 19.0 kJ/mol above it. Those basins were not diagnosed in this run.

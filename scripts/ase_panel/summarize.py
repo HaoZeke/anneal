@@ -275,13 +275,22 @@ def render(system: str) -> tuple[str, str]:
             f"The recorded wall caps are {'; '.join(cap_details)}. A wall-stopped row did not receive",
             "the full call budget, so its call count is right-censored at `charged`.",
         ])
-    report.extend([
-        "",
-        "| arm | hits | Fisher p vs anneal | median best | "
-        f"gap to {reference_text(reference)} | median wall s | over anneal | anneal over | "
-        "median inside s | median outside s |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-    ])
+    if system == "lj38":
+        report.extend([
+            "",
+            "| arm | stop | hits | median best | "
+            f"gap to {reference_text(reference)} | median wall s | "
+            "median inside s | median outside s |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ])
+    else:
+        report.extend([
+            "",
+            "| arm | hits | Fisher p vs anneal | median best | "
+            f"gap to {reference_text(reference)} | median wall s | over anneal | anneal over | "
+            "median inside s | median outside s |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ])
     def signature(arm: str) -> tuple[int, int, int]:
         group = grouped[arm]
         return (
@@ -295,10 +304,17 @@ def render(system: str) -> tuple[str, str]:
         arm, hits, best, wall, inside, outside, over, back, fisher_p,
         wall_stops, cap, low_charged, high_charged, versus,
     ) in reports:
-        report.append(
-            f"| {LABELS[arm]} | {hits}/12 | {fisher_p} | {best:.8f} | {best - reference:.8f} | "
-            f"{wall:.6f} | {over:.6f} | {back:.6f} | {inside:.6f} | {outside:.6f} |"
-        )
+        if system == "lj38":
+            stop = "hit or budget" if arm in ("anneal", "recommended") else f"wall cap on {wall_stops}"
+            report.append(
+                f"| {LABELS[arm]} | {stop} | {hits}/12 | {best:.8f} | {best - reference:.8f} | "
+                f"{wall:.6f} | {inside:.6f} | {outside:.6f} |"
+            )
+        else:
+            report.append(
+                f"| {LABELS[arm]} | {hits}/12 | {fisher_p} | {best:.8f} | {best - reference:.8f} | "
+                f"{wall:.6f} | {over:.6f} | {back:.6f} | {inside:.6f} | {outside:.6f} |"
+            )
         if wall_stops:
             stop_notes.append(
                 f"{LABELS[arm].capitalize()} stopped at the wall cap on {wall_stops}/12 seeds; "
@@ -322,9 +338,9 @@ def render(system: str) -> tuple[str, str]:
         report.extend(["", *stop_notes, "",
             "Basin hopping and minima hopping stopped at the wall on every seed.",
             "Recommended did not. The stops differ, and there is no paired test.",
-            "",
-            "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
-            "| --- | --- | --- | --- | --- |",
+            "Medians are type 7. Each wall is that arm's own median. The Rust and",
+            "NumPy random generators do not make a shared starting geometry from the",
+            "same numeric seed, so the report does not treat seed labels as pairs.",
         ])
     elif mixed_wall:
         report.extend(["", *stop_notes, "",
@@ -340,7 +356,7 @@ def render(system: str) -> tuple[str, str]:
             "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
             "| --- | --- | --- | --- | --- |",
         ])
-    for other in ASE_ARMS:
+    for other in (() if system == "lj38" else ASE_ARMS):
         other_report = next(item for item in reports if item[0] == other)
         other_hits = other_report[1]
         fisher_text = recommended_versus[other]
@@ -356,17 +372,18 @@ def render(system: str) -> tuple[str, str]:
             f"{fisher_text} | {wall_ratio:.6f} | {inverse_ratio:.6f} |"
         )
     if system == "lj38":
-        fisher_line = "The Fisher cells above are blank where one arm stopped at the wall on every seed."
+        fisher_line = ""
     elif mixed_wall:
         fisher_line = "The Fisher cells above are blank where the arms do not share a stop."
     else:
         fisher_line = "Fisher is the two-sided exact test on hits under the recorded stopping rule."
-    report.extend(["",
-        fisher_line,
-        "Medians are type 7. Wall ratios are ratios of arm medians. The Rust and",
-        "NumPy random generators do not make a shared starting geometry from the",
-        "same numeric seed, so the report does not treat seed labels as pairs.",
-    ])
+    if system != "lj38":
+        report.extend(["",
+            fisher_line,
+            "Medians are type 7. Wall ratios are ratios of arm medians. The Rust and",
+            "NumPy random generators do not make a shared starting geometry from the",
+            "same numeric seed, so the report does not treat seed labels as pairs.",
+        ])
     if system == "au55":
         report.extend([
             "",

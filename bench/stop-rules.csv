@@ -1,0 +1,33 @@
+comparison,arm,stop
+knockout,with,energy-gradient hit-or-budget
+knockout,without,energy-gradient hit-or-budget
+gmin-panel,anneal,energy-gradient hit-or-ceiling
+gmin-panel,gmin,potential-entry hit-or-ceiling
+ase-panel,anneal,hit-or-budget-or-wall
+ase-panel,ase,wall-cap
+crest-octamer,anneal,not-recorded
+crest-octamer,crest,driver-budget
+covalent,anneal,energy-gradient hit-or-budget
+covalent,gmin,potential-entry hit-or-ceiling
+covalent,ase,ase-budget
+covalent,crest,end-of-run
+covalent-h2h,first,energy-gradient hit-or-budget
+covalent-h2h,second,energy-gradient hit-or-budget
+sc-builds,anneal,hit
+sc-n12,old,hit
+sc-n12,new,hit
+template-era,c2de652d,energy-gradient hit-or-budget
+template-era,eeec8e2c,energy-gradient hit-or-budget
+paper-0120,before,energy-gradient hit-or-budget
+paper-0120,after,energy-gradient hit-or-budget
+paper-rerun,old,hit
+paper-rerun,new,hit
+template-free2-r7,base,energy-gradient hit-or-budget
+template-free2-r7,child,energy-gradient hit-or-budget
+perf-quench10,off,hit
+perf-quench10,on,hit
+no-motif-soap-gate,off,hit
+no-motif-soap-gate,on,hit
+openconf-h2h,branch,matched-call-count
+openconf-h2h,develop,matched-call-count
+openconf-h2h,openconf,matched-call-count

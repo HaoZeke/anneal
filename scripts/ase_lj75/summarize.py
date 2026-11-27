@@ -107,7 +107,6 @@ def main() -> None:
         print(
             f"{arm} hits {hits}/12 median_best {best:.8f} gap {best - REFERENCE:.8f} "
             f"wall {wall:.6f} inside {inside:.6f} outside {outside:.6f} "
-            f"over {over:.6f} back {back:.6f} fisher {fisher_p:.6g} U {u_stat:.6g} mw {mw_p:.6g} "
             f"wall_stops {wall_stops}"
         )
         lines.append(

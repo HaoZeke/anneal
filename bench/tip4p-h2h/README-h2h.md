@@ -58,20 +58,21 @@ offset never changes which cage a run is scored at.
 ## Panel
 
 Rows are `rows-h2h-r2.csv`. `best` is the lowest of the twelve and the median is
-beside it. Calls is the median per run. `p(U)` is the two-sided asymptotic
-Mann–Whitney U test without continuity correction on the per-seed best
-energies.
+that arm's own median. Calls is the median per run of that arm. The two arms
+count different operations, so no rank test is printed.
 
-| Size | anneal | GMIN | calls (a/g) | anneal best / median | GMIN best / median | p(U) |
-| --- | --- | --- | --- | --- | --- | --- |
-| (H₂O)₈  | 12/12 | 8/12 | 6339 / 240163 | −305.5177 / −305.5176 | −305.5189 / −305.5189 | — |
-| (H₂O)₁₅ | 7/12  | 0/12 | 1481619.5 / 2000000 | −628.3716 / −628.3713 | −622.859 / −619.933 | — |
-| (H₂O)₂₀ | 6/12  | 0/12 | 1686249.5 / 2000000 | −872.9879 / −868.8666 | −860.701 / −851.443 | — |
-| (H₂O)₂₁ | 0/12  | 0/12 | 2000000 / 2000000 | −915.774 / −914.368 | −903.760 / −895.593 | 3.2e-05 |
+| Size | Arm | Hits | Calls | Best | Median |
+| --- | --- | --- | --- | --- | --- |
+| (H₂O)₈ | anneal | 12/12 | 6339 | −305.5177 | −305.5176 |
+| (H₂O)₈ | GMIN | 8/12 | 240163 | −305.5189 | −305.5189 |
+| (H₂O)₁₅ | anneal | 7/12 | 1481619.5 | −628.3716 | −628.3713 |
+| (H₂O)₁₅ | GMIN | 0/12 | 2000000 | −622.859 | −619.933 |
+| (H₂O)₂₀ | anneal | 6/12 | 1686249.5 | −872.9879 | −868.8666 |
+| (H₂O)₂₀ | GMIN | 0/12 | 2000000 | −860.701 | −851.443 |
+| (H₂O)₂₁ | anneal | 0/12 | 2000000 | −915.774 | −914.368 |
+| (H₂O)₂₁ | GMIN | 0/12 | 2000000 | −903.760 | −895.593 |
 
-Each arm has twelve seeds. The 8 of 12 is GMIN's hit count. The call medians count different operations, so there is no paired test. At scored sizes 15 and 20, GMIN stops at the 2 M budget on every seed and anneal does not, so there is no paired test. At (H₂O)₂₁ both arms stop at the 2 M budget on every seed. At (H₂O)₂₁ neither arm reaches the global
-minimum in 2 M calls, but anneal stops 0.93 kJ/mol short of it against GMIN's
-13 kJ/mol. For size 25, anneal's best and median final energies are
+Each arm has twelve seeds. The 8 of 12 is GMIN's hit count. The call medians count different operations, so there is no paired test. At scored sizes 15 and 20, GMIN stops at the 2 M budget on every seed and anneal does not, so there is no paired test. At (H₂O)₂₁ both arms stop at the 2 M budget on every seed. The call units differ, so there is no paired test. At (H₂O)₂₁ this code's best is −915.774 kJ/mol and GMIN's best is −903.760 kJ/mol. For size 25, anneal's best and median final energies are
 −1113.0346568571 and −1103.3447313609 kJ/mol and its median wall is
 35.730266 s. GMIN's corresponding values are −1087.3344641800 and
 −1082.1265516750 kJ/mol and 107.109000 s.
@@ -81,8 +82,7 @@ At (H₂O)₈ both arms find the same global-minimum cage. GMIN's best reads
 GMIN's quench settling past the early-stop energy that anneal halts on; it is
 the same cage, not a lower one. Anneal finds that cage on all twelve seeds and
 GMIN on eight. The two budgets count different operations, so there is no
-cross-arm test and no win on hits. Because no arm beats anneal,
-there is no accompanying fix.
+cross-arm test and no win on hits. There is no accompanying fix.
 
 The r2 wall comparison is in `wall-r2.csv`; it records the one-machine,
 core-0 ABBA protocol and the exact rank-enumeration wall-time test.
@@ -101,15 +101,17 @@ evaluations, the same twelve seeds and the same serial arm. The driver is
 a (budget, seed) pair is deterministic: the 2 M GMIN rows repeat the panel's
 best and median energies, and their median wall is 75.15 s against the
 panel's 81.09675 s. Summary rows are `summary-budget21.csv`
-and per-seed rows are `rows-budget21.csv`. `p(U)` is the two-sided
-Mann–Whitney U test on the per-seed best energies; the hit counts are 0/12 on
-both arms at every budget, so the Fisher exact p is 1.000 throughout.
+and per-seed rows are `rows-budget21.csv`. Both arms hit 0 of 12 at every
+budget. The call units differ, so no Fisher value is printed.
 
-| Budget | anneal | GMIN | anneal best / median | GMIN best / median | wall (a/g s) | p(U) |
-| --- | --- | --- | --- | --- | --- | --- |
-| 2 M | 0/12 | 0/12 | −915.774 / −914.368 | −903.760 / −895.593 | 24.70 / 75.15 | 3.2e-05 |
-| 4 M | 0/12 | 0/12 | −915.774 / −914.889 | −905.330 / −897.861 | 49.48 / 150.16 | 3.2e-05 |
-| 8 M | 0/12 | 0/12 | −915.774 / −915.143 | −905.330 / −899.538 | 102.45 / 299.73 | 3.2e-05 |
+| Budget | Arm | Hits | Best | Median | Wall (s) |
+| --- | --- | --- | --- | --- | --- |
+| 2 M | anneal | 0/12 | −915.774 | −914.368 | 24.70 |
+| 2 M | GMIN | 0/12 | −903.760 | −895.593 | 75.15 |
+| 4 M | anneal | 0/12 | −915.774 | −914.889 | 49.48 |
+| 4 M | GMIN | 0/12 | −905.330 | −897.861 | 150.16 |
+| 8 M | anneal | 0/12 | −915.774 | −915.143 | 102.45 |
+| 8 M | GMIN | 0/12 | −905.330 | −899.538 | 299.73 |
 
 Four times the budget does not reach the global minimum on either arm. Anneal's
 best holds at −915.7735 kJ/mol, 0.93 kJ/mol short of the −916.7074 header,
@@ -117,9 +119,7 @@ from 2 M through 8 M: the same seed plateaus in another oxygen cage with as
 many hydrogen bonds (next section), and more calls from that incumbent do not
 leave it. The median does climb,
 from −914.37 to −915.14, as the slower seeds reach that plateau. GMIN's best
-improves from −903.76 to −905.33 and then holds, 11.4 kJ/mol short. Anneal's
-per-seed best distribution stays below GMIN's at every budget, Mann–Whitney p
-3.2e-05, at a third of the wall. The default preset is unchanged here.
+moves from −903.76 to −905.33. The call units differ, so there is no paired test. The default preset is unchanged here.
 
 ## (H₂O)₂₁ misses at 2 M
 Each of the twelve 2 M rows above is rerun with the panel's stop target and
@@ -225,9 +225,7 @@ potential, Fisher p and the lost and gained seeds are in
 
 Water cells give hits and the median best in kJ/mol. None of the three is made
 default. (a) and (b) do not raise (H₂O)₂₁, and the median falls. (a)+(b)
-reaches the minimum once (seed 2011) with a lower median. Every variant loses
-five or six of the six (H₂O)₂₀ hits: Fisher p 0.014 for (a), 0.069 for (b) and
-0.19 for (a)+(b). (a)+(b) also loses three (H₂O)₁₅ seeds and four sc96-80
-seeds. LJ75 gains one or two seeds under each variant (Fisher p 0.48 for (b)
-and (a)+(b)), LJ38 and (H₂O)₈ stay at 12/12, and sc96-80 under (a) or (b) loses
-three seeds and gains three.
+records the minimum on one seed (seed 2011). Every variant records five or six
+fewer of the six (H₂O)₂₀ hits. (a)+(b) records three fewer (H₂O)₁₅ seeds and four fewer sc96-80
+seeds. LJ75 records one or two more seeds under each variant, LJ38 and (H₂O)₈ stay at 12/12, and sc96-80 under (a) or (b) records
+three fewer seeds and three more.

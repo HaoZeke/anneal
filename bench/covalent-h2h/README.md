@@ -148,7 +148,7 @@ minimum a return. On P over seeds 2000-2003, turning the screen off, polishing
 returns, a radius of 0.35 and the calibrated radius all stayed within seed
 noise.
 
-On carbon anneal beats ASE in every arm: ASE misses C10 on all six seeds.
+On carbon, anneal's C10 hit counts and ASE's C10 hit counts are in the table. ASE's C10 hit count in that panel is 0 of 6.
 G is the weakest anneal arm on C10. In a G walk on C10, 65 of 138 accepted
 hops held a piece with no neighbour inside 2.1 Å. That is Tersoff's cutoff,
 so the piece feels no force at all. Of 89 such hops, 52 had shed a single
@@ -324,32 +324,32 @@ The protocol is that of the first panel, with these changes:
 | Si10 | anneal G vs anneal G v1 | 1,599 vs 1,336 | 12/12 vs 12/12 | 0.8 | 1 |
 | Si10 | anneal P vs anneal R | 1,782 vs 758 | 12/12 vs 12/12 | 0.019 | 1 |
 | Si10 | anneal G vs anneal R | 1,599 vs 758 | 12/12 vs 12/12 | 0.019 | 1 |
-| Si10 | anneal R vs GMIN 1e-6 | 758 vs 1,118 | 12/12 vs 12/12 | 0.1 | 1 |
-| Si10 | anneal P vs GMIN 1e-6 | 1,782 vs 1,118 | 12/12 vs 12/12 | 0.67 | 1 |
-| Si10 | anneal G vs GMIN 1e-6 | 1,599 vs 1,118 | 12/12 vs 12/12 | 0.75 | 1 |
-| Si10 | anneal R 5e-3 vs GMIN 5e-3 | 667 vs 624 | 12/12 vs 12/12 | 0.84 | 1 |
-| Si10 | anneal P 5e-3 vs GMIN 5e-3 | 879 vs 624 | 12/12 vs 12/12 | 0.29 | 1 |
-| Si10 | anneal G 5e-3 vs GMIN 5e-3 | 802 vs 624 | 12/12 vs 12/12 | 0.31 | 1 |
+| Si10 | anneal R vs GMIN 1e-6 | 758 vs 1,118 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal P vs GMIN 1e-6 | 1,782 vs 1,118 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal G vs GMIN 1e-6 | 1,599 vs 1,118 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal R 5e-3 vs GMIN 5e-3 | 667 vs 624 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal P 5e-3 vs GMIN 5e-3 | 879 vs 624 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal G 5e-3 vs GMIN 5e-3 | 802 vs 624 | 12/12 vs 12/12 | — | — |
 | Si13 | anneal P vs anneal P v1 | 1,006 vs 1,467 | 12/12 vs 12/12 | 0.14 | 1 |
 | Si13 | anneal G vs anneal G v1 | 1,016 vs 2,234 | 12/12 vs 12/12 | 0.019 | 1 |
 | Si13 | anneal P vs anneal R | 1,006 vs 1,166 | 12/12 vs 12/12 | 1 | 1 |
 | Si13 | anneal G vs anneal R | 1,016 vs 1,166 | 12/12 vs 12/12 | 0.98 | 1 |
-| Si13 | anneal R vs GMIN 1e-6 | 1,166 vs 2,225 | 12/12 vs 12/12 | 0.11 | 1 |
-| Si13 | anneal P vs GMIN 1e-6 | 1,006 vs 2,225 | 12/12 vs 12/12 | 0.13 | 1 |
-| Si13 | anneal G vs GMIN 1e-6 | 1,016 vs 2,225 | 12/12 vs 12/12 | 0.13 | 1 |
-| Si13 | anneal R 5e-3 vs GMIN 5e-3 | 636 vs 683 | 12/12 vs 12/12 | 0.98 | 1 |
-| Si13 | anneal P 5e-3 vs GMIN 5e-3 | 837 vs 683 | 12/12 vs 12/12 | 0.11 | 1 |
-| Si13 | anneal G 5e-3 vs GMIN 5e-3 | 850 vs 683 | 12/12 vs 12/12 | 0.11 | 1 |
+| Si13 | anneal R vs GMIN 1e-6 | 1,166 vs 2,225 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal P vs GMIN 1e-6 | 1,006 vs 2,225 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal G vs GMIN 1e-6 | 1,016 vs 2,225 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal R 5e-3 vs GMIN 5e-3 | 636 vs 683 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal P 5e-3 vs GMIN 5e-3 | 837 vs 683 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal G 5e-3 vs GMIN 5e-3 | 850 vs 683 | 12/12 vs 12/12 | — | — |
 | Si20 | anneal P vs anneal P v1 | 9,230 vs 105,620 | 12/12 vs 12/12 | 0.00012 | 1 |
 | Si20 | anneal G vs anneal G v1 | 8,207 vs 59,803 | 12/12 vs 12/12 | 0.00031 | 1 |
 | Si20 | anneal P vs anneal R | 9,230 vs 4,454 | 12/12 vs 12/12 | 0.11 | 1 |
 | Si20 | anneal G vs anneal R | 8,207 vs 4,454 | 12/12 vs 12/12 | 0.29 | 1 |
-| Si20 | anneal R vs GMIN 1e-6 | 4,454 vs 9,601 | 12/12 vs 12/12 | 0.11 | 1 |
-| Si20 | anneal P vs GMIN 1e-6 | 9,230 vs 9,601 | 12/12 vs 12/12 | 0.84 | 1 |
-| Si20 | anneal G vs GMIN 1e-6 | 8,207 vs 9,601 | 12/12 vs 12/12 | 0.84 | 1 |
-| Si20 | anneal R 5e-3 vs GMIN 5e-3 | 7,256 vs 5,900 | 12/12 vs 12/12 | 0.89 | 1 |
-| Si20 | anneal P 5e-3 vs GMIN 5e-3 | 6,142 vs 5,900 | 12/12 vs 12/12 | 0.8 | 1 |
-| Si20 | anneal G 5e-3 vs GMIN 5e-3 | 7,276 vs 5,900 | 12/12 vs 12/12 | 0.75 | 1 |
+| Si20 | anneal R vs GMIN 1e-6 | 4,454 vs 9,601 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal P vs GMIN 1e-6 | 9,230 vs 9,601 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal G vs GMIN 1e-6 | 8,207 vs 9,601 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal R 5e-3 vs GMIN 5e-3 | 7,256 vs 5,900 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal P 5e-3 vs GMIN 5e-3 | 6,142 vs 5,900 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal G 5e-3 vs GMIN 5e-3 | 7,276 vs 5,900 | 12/12 vs 12/12 | — | — |
 | C10 | anneal P vs anneal P v1 | 13,788 vs 62,863 | 12/12 vs 9/12 | 0.00089 | 0.22 |
 | C10 | anneal G vs anneal G v1 | 15,504 vs 55,243 | 12/12 vs 11/12 | 0.0051 | 1 |
 | C10 | anneal P vs anneal R | 13,788 vs 16,696 | 12/12 vs 12/12 | 0.58 | 1 |
@@ -362,12 +362,11 @@ The protocol is that of the first panel, with these changes:
 ### Findings
 
 - Si20: P and G go from 106k and 60k calls to 9.2k and 8.2k, p ≤ 3.1e-4.
-  GMIN takes 9.6k at 1e-6 (p = 0.84) and 5.9k at 5e-3, against 6.1k-7.3k
-  for anneal at 5e-3 (p ≥ 0.75). R stays faster at 4.5k, but the gap to R
-  is not significant at n=12 (p = 0.11 and 0.29).
-- Si13: at the same tolerance, the codes are level. At 5e-3, R takes 636
-  calls and GMIN 683 (p = 0.98). At 1e-6, R takes 1,166 and GMIN 2,225
-  (p = 0.11). The first panel's 1,154 against 612 compared two different
+  GMIN's median calls are 9.6k at 1e-6 and 5.9k at 5e-3. The anneal medians at 5e-3 are 6.1k-7.3k.
+  R's median is 4.5k. The anneal-to-anneal gap at n=12 has p = 0.11 and 0.29.
+- Si13: at the same tolerance, the anneal codes are level. At 5e-3, R takes 636
+  calls and GMIN takes 683. At 1e-6, R takes 1,166 and GMIN takes 2,225.
+  The call units differ, so there is no paired test. The first panel's 1,154 against 612 compared two different
   quench tolerances. G improves from 2,234 to 1,016 (p = 0.019).
 - Si10: P rises from 966 to 1,782 calls. That change is not significant
   (p = 0.29), but P and G at 1e-6 are now behind R (p = 0.019).
@@ -400,8 +399,8 @@ parallel. They count calls only; the numbers are not from the timed panel.
   gathering with the window, reaches it in at most 1 of 12 runs, and the
   orbit arm is needed with it.
 - C20, population: CSA (`csa_cluster`, 8 or 16 members, 20k or 50k calls
-  per member) gave P 0-2/12 and G 2-3/12, no better than one walk (4/12
-  and 3/12).
+  per member) gave P 0-2/12 and G 2-3/12, beside one walk at 4/12
+  and 3/12.
 - C20, plateau restarts (`restart_on_stall` with `escape_on_stall` off, at
   2e4 or 6e4 stalled calls): P 1-2/12 and G 5/12, against 4/12 and 3/12
   without restarts. The G gain is within noise (Fisher p = 0.67), so
@@ -465,8 +464,7 @@ The start of each seed is drawn on the dimer scale. The new probe's scale
 differs from the old one in the tenth digit, so every code starts from
 slightly different coordinates than in the second panel, and R's chaotic
 runs land on different call counts. R's code is unchanged. Between the
-panels, R's samples differ at Mann-Whitney p ≥ 0.11 on every system: Si10
-0.67, Si13 0.11, Si20 0.31, C10 0.13, and at 5e-3 0.71-0.98.
+panels, R's call counts are reported for each panel at R's own stop.
 
 ### Method
 
@@ -539,63 +537,63 @@ The protocol is that of the second panel, with these changes:
 | Si10 | anneal G vs anneal G v2 | 990 vs 1,599 | 12/12 vs 12/12 | 0.13 | 1 |
 | Si10 | anneal P vs anneal R | 734 vs 597 | 12/12 vs 12/12 | 0.51 | 1 |
 | Si10 | anneal G vs anneal R | 990 vs 597 | 12/12 vs 12/12 | 0.31 | 1 |
-| Si10 | anneal R vs GMIN 1e-6 | 597 vs 986 | 12/12 vs 12/12 | 0.13 | 1 |
-| Si10 | anneal P vs GMIN 1e-6 | 734 vs 986 | 12/12 vs 12/12 | 0.62 | 1 |
-| Si10 | anneal G vs GMIN 1e-6 | 990 vs 986 | 12/12 vs 12/12 | 0.71 | 1 |
-| Si10 | anneal R 5e-3 vs GMIN 5e-3 | 567 vs 550 | 12/12 vs 12/12 | 1 | 1 |
-| Si10 | anneal P 5e-3 vs GMIN 5e-3 | 502 vs 550 | 12/12 vs 12/12 | 0.71 | 1 |
-| Si10 | anneal G 5e-3 vs GMIN 5e-3 | 472 vs 550 | 12/12 vs 12/12 | 0.51 | 1 |
-| Si10 | anneal P vs ASE BH | 734 vs 16,162 | 12/12 vs 10/12 | 0.00016 | 0.48 |
-| Si10 | anneal G vs ASE BH | 990 vs 16,162 | 12/12 vs 10/12 | 0.00012 | 0.48 |
+| Si10 | anneal R vs GMIN 1e-6 | 597 vs 986 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal P vs GMIN 1e-6 | 734 vs 986 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal G vs GMIN 1e-6 | 990 vs 986 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal R 5e-3 vs GMIN 5e-3 | 567 vs 550 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal P 5e-3 vs GMIN 5e-3 | 502 vs 550 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal G 5e-3 vs GMIN 5e-3 | 472 vs 550 | 12/12 vs 12/12 | — | — |
+| Si10 | anneal P vs ASE BH | 734 vs 16,162 | 12/12 vs 10/12 | — | — |
+| Si10 | anneal G vs ASE BH | 990 vs 16,162 | 12/12 vs 10/12 | — | — |
 | Si13 | anneal P vs anneal P v2 | 640 vs 1,006 | 12/12 vs 12/12 | 0.03 | 1 |
 | Si13 | anneal G vs anneal G v2 | 658 vs 1,016 | 12/12 vs 12/12 | 0.11 | 1 |
 | Si13 | anneal P vs anneal R | 640 vs 769 | 12/12 vs 12/12 | 0.14 | 1 |
 | Si13 | anneal G vs anneal R | 658 vs 769 | 12/12 vs 12/12 | 0.37 | 1 |
-| Si13 | anneal R vs GMIN 1e-6 | 769 vs 1,164 | 12/12 vs 12/12 | 0.01 | 1 |
-| Si13 | anneal P vs GMIN 1e-6 | 640 vs 1,164 | 12/12 vs 12/12 | 0.069 | 1 |
-| Si13 | anneal G vs GMIN 1e-6 | 658 vs 1,164 | 12/12 vs 12/12 | 0.13 | 1 |
-| Si13 | anneal R 5e-3 vs GMIN 5e-3 | 591 vs 784 | 12/12 vs 12/12 | 0.71 | 1 |
-| Si13 | anneal P 5e-3 vs GMIN 5e-3 | 424 vs 784 | 12/12 vs 12/12 | 0.24 | 1 |
-| Si13 | anneal G 5e-3 vs GMIN 5e-3 | 424 vs 784 | 12/12 vs 12/12 | 0.14 | 1 |
-| Si13 | anneal P vs ASE BH | 640 vs 86,979 | 12/12 vs 6/12 | 3.2e-05 | 0.014 |
-| Si13 | anneal G vs ASE BH | 658 vs 86,979 | 12/12 vs 6/12 | 3.2e-05 | 0.014 |
+| Si13 | anneal R vs GMIN 1e-6 | 769 vs 1,164 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal P vs GMIN 1e-6 | 640 vs 1,164 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal G vs GMIN 1e-6 | 658 vs 1,164 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal R 5e-3 vs GMIN 5e-3 | 591 vs 784 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal P 5e-3 vs GMIN 5e-3 | 424 vs 784 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal G 5e-3 vs GMIN 5e-3 | 424 vs 784 | 12/12 vs 12/12 | — | — |
+| Si13 | anneal P vs ASE BH | 640 vs 86,979 | 12/12 vs 6/12 | — | — |
+| Si13 | anneal G vs ASE BH | 658 vs 86,979 | 12/12 vs 6/12 | — | — |
 | Si20 | anneal P vs anneal P v2 | 10,866 vs 9,230 | 12/12 vs 12/12 | 0.98 | 1 |
 | Si20 | anneal G vs anneal G v2 | 9,662 vs 8,207 | 12/12 vs 12/12 | 0.89 | 1 |
 | Si20 | anneal P vs anneal R | 10,866 vs 8,956 | 12/12 vs 12/12 | 1 | 1 |
 | Si20 | anneal G vs anneal R | 9,662 vs 8,956 | 12/12 vs 12/12 | 0.93 | 1 |
-| Si20 | anneal R vs GMIN 1e-6 | 8,956 vs 20,931 | 12/12 vs 12/12 | 0.061 | 1 |
-| Si20 | anneal P vs GMIN 1e-6 | 10,866 vs 20,931 | 12/12 vs 12/12 | 0.14 | 1 |
-| Si20 | anneal G vs GMIN 1e-6 | 9,662 vs 20,931 | 12/12 vs 12/12 | 0.069 | 1 |
-| Si20 | anneal R 5e-3 vs GMIN 5e-3 | 3,266 vs 12,573 | 12/12 vs 12/12 | 0.061 | 1 |
-| Si20 | anneal P 5e-3 vs GMIN 5e-3 | 7,831 vs 12,573 | 12/12 vs 12/12 | 0.67 | 1 |
-| Si20 | anneal G 5e-3 vs GMIN 5e-3 | 8,674 vs 12,573 | 12/12 vs 12/12 | 0.31 | 1 |
-| Si20 | anneal P vs ASE BH | 10,866 vs 400,000 | 12/12 vs 0/12 | 1e-05 | 7.4e-07 |
-| Si20 | anneal G vs ASE BH | 9,662 vs 400,000 | 12/12 vs 0/12 | 1e-05 | 7.4e-07 |
+| Si20 | anneal R vs GMIN 1e-6 | 8,956 vs 20,931 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal P vs GMIN 1e-6 | 10,866 vs 20,931 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal G vs GMIN 1e-6 | 9,662 vs 20,931 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal R 5e-3 vs GMIN 5e-3 | 3,266 vs 12,573 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal P 5e-3 vs GMIN 5e-3 | 7,831 vs 12,573 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal G 5e-3 vs GMIN 5e-3 | 8,674 vs 12,573 | 12/12 vs 12/12 | — | — |
+| Si20 | anneal P vs ASE BH | 10,866 vs 400,000 | 12/12 vs 0/12 | — | — |
+| Si20 | anneal G vs ASE BH | 9,662 vs 400,000 | 12/12 vs 0/12 | — | — |
 | C10 | anneal P vs anneal P v2 | 15,038 vs 13,788 | 12/12 vs 12/12 | 0.37 | 1 |
 | C10 | anneal G vs anneal G v2 | 11,256 vs 15,504 | 12/12 vs 12/12 | 0.54 | 1 |
 | C10 | anneal P vs anneal R | 15,038 vs 27,496 | 12/12 vs 12/12 | 0.13 | 1 |
 | C10 | anneal G vs anneal R | 11,256 vs 27,496 | 12/12 vs 12/12 | 0.035 | 1 |
-| C10 | anneal R vs GMIN 1e-6 | 27,496 vs 100,000 | 12/12 vs 5/12 | 0.0078 | 0.0046 |
-| C10 | anneal P vs GMIN 1e-6 | 15,038 vs 100,000 | 12/12 vs 5/12 | 0.0018 | 0.0046 |
-| C10 | anneal G vs GMIN 1e-6 | 11,256 vs 100,000 | 12/12 vs 5/12 | 0.00041 | 0.0046 |
-| C10 | anneal P vs ASE BH | 15,038 vs 100,000 | 12/12 vs 2/12 | 0.00023 | 6.7e-05 |
-| C10 | anneal G vs ASE BH | 11,256 vs 100,000 | 12/12 vs 2/12 | 0.00011 | 6.7e-05 |
+| C10 | anneal R vs GMIN 1e-6 | 27,496 vs 100,000 | 12/12 vs 5/12 | — | — |
+| C10 | anneal P vs GMIN 1e-6 | 15,038 vs 100,000 | 12/12 vs 5/12 | — | — |
+| C10 | anneal G vs GMIN 1e-6 | 11,256 vs 100,000 | 12/12 vs 5/12 | — | — |
+| C10 | anneal P vs ASE BH | 15,038 vs 100,000 | 12/12 vs 2/12 | — | — |
+| C10 | anneal G vs ASE BH | 11,256 vs 100,000 | 12/12 vs 2/12 | — | — |
 | C20 | anneal P vs anneal P v2 | 400,000 vs 400,000 | 5/12 vs 4/12 | 0.57 | 1 |
 | C20 | anneal G vs anneal G v2 | 400,000 vs 400,000 | 4/12 vs 3/12 | 0.86 | 1 |
 | C20 | anneal P vs anneal R | 400,000 vs 400,000 | 5/12 vs 0/12 | 0.016 | 0.037 |
 | C20 | anneal G vs anneal R | 400,000 vs 400,000 | 4/12 vs 0/12 | 0.037 | 0.093 |
-| C20 | anneal R vs GMIN 1e-6 | 400,000 vs 400,000 | 0/12 vs 0/12 | tied | 1 |
-| C20 | anneal P vs GMIN 1e-6 | 400,000 vs 400,000 | 5/12 vs 0/12 | 0.016 | 0.037 |
-| C20 | anneal G vs GMIN 1e-6 | 400,000 vs 400,000 | 4/12 vs 0/12 | 0.037 | 0.093 |
-| C20 | anneal P vs ASE BH | 400,000 vs 400,000 | 5/12 vs 0/12 | 0.016 | 0.037 |
-| C20 | anneal G vs ASE BH | 400,000 vs 400,000 | 4/12 vs 0/12 | 0.037 | 0.093 |
+| C20 | anneal R vs GMIN 1e-6 | 400,000 vs 400,000 | 0/12 vs 0/12 | — | — |
+| C20 | anneal P vs GMIN 1e-6 | 400,000 vs 400,000 | 5/12 vs 0/12 | — | — |
+| C20 | anneal G vs GMIN 1e-6 | 400,000 vs 400,000 | 4/12 vs 0/12 | — | — |
+| C20 | anneal P vs ASE BH | 400,000 vs 400,000 | 5/12 vs 0/12 | — | — |
+| C20 | anneal G vs ASE BH | 400,000 vs 400,000 | 4/12 vs 0/12 | — | — |
 
 ### Findings
 
 - Si10: P goes from 1,782 calls to 734 and G from 1,599 to 990 (p = 0.089
   and 0.13 against v2). Against R's 597, p is 0.51 for P and 0.31 for G,
   where the second panel had p = 0.019 for both. At 5e-3, P takes 502 calls
-  and G 472, against 567 for R and 550 for GMIN (p ≥ 0.50).
+  and G 472, against 567 for R. GMIN's median is 550. The call units differ, so there is no paired test.
 - Si13: P takes 640 calls and G 658, against 1,006 and 1,016 in v2 (p =
   0.03 and 0.11) and 769 for R (p = 0.14 and 0.37). GMIN takes 1,164 at
   1e-6 and 784 at 5e-3.
@@ -604,13 +602,12 @@ The protocol is that of the second panel, with these changes:
   ASE hits 0 of 12.
 - C10: every anneal arm hits 12/12. G takes 11.3k calls against R's 27.5k
   (p = 0.035), and P takes 15.0k (p = 0.13). GMIN hits 5/12 at 1e-6 and
-  4/12 at 5e-3, and ASE 2/12. Against GMIN at 1e-6, R, P and G have
-  Fisher p = 0.0046.
+  4/12 at 5e-3, and ASE 2/12. The call units differ, so there is no paired test.
 - C20: P reaches the bowl, -120.698891 eV, in 5 of 12 runs, and G in 4,
   against 4 and 3 in v2 (p = 1). R, both GMIN codes and ASE go 0/12. The
   best energy per code is R -119.306982, GMIN 5e-3 -118.064758, GMIN 1e-6
-  -119.153594 and ASE -115.532884 eV. Against R, GMIN 1e-6 and ASE, the
-  Fisher p is 0.037 for P and 0.093 for G.
+  -119.153594 and ASE -115.532884 eV. Against R, the Fisher p is 0.037 for P and
+  0.093 for G. GMIN and ASE do not share that stop, so there is no paired test.
 
 ### Exploration
 
@@ -634,7 +631,7 @@ only; the numbers are not from the timed panel.
   scale to P did not help it.
 - A budget window counted in hops instead of calls gave no gain on Si10 and
   was worse on Si20 and C10. A bias-corrected barrier average hurt C10 P
-  (p = 0.046) and helped nowhere significantly. Neither is in.
+  and helped nowhere significantly. Neither is in.
 - C20 at 48 seeds: P and G both reach the bowl in 15 of 48 runs. The misses
   end at -120.131 and -120.107 eV. None of the following raised the hit
   rate significantly, so none is in: a temperature multiplier, pair
@@ -706,16 +703,13 @@ seed 2009, which made no call.
 - Si10, with the anneal rows of `seeds.csv` (the paper's Si10 number,
   from the anneal rerun beside CREST, is below): anneal stops at the
   reference or at 1e5 and the row is 12 of 12. CREST stops at the end of
-  its run. On seeds 2000-2003 anneal takes 620, 505, 520 and 2,581
-  calls, and CREST 108,264, 96,365, 102,236 and 94,277. On seeds
-  2004-2011 CREST takes 103,294, 93,076, 98,677, 94,481, 100,309,
-  103,479 and 92,415 calls, and seed 2009 is dropped. On seed 2009 xtb's SCC does not converge on
+  its run. Seed 2009 is dropped. On seed 2009 xtb's SCC does not converge on
   the start, with 250 or 1000 iterations, so the optimisation before
   CREST stops and CREST makes no call (`gfn2/summaries.csv`). The stops
-  differ, and there is no paired test. Anneal's calls cost more inside xtb, 58 ms
-  against 27 ms, because its quenches start from random clusters where
+  differ, and there is no paired test. Anneal's inside time on these calls is 58 ms
+  and CREST's inside time is 27 ms. Anneal's quenches start from random clusters where
   the SCC struggles.
-- C10: anneal reaches the ring on 11 of 12 seeds and CREST on 4. The stops differ, and there is no paired test. Seven CREST runs end in a compact
+- C10: On C10, anneal's hit count is 11 of 12 at its own stop. CREST's hit count is 4 of 12 at the end of its run. The stops differ, and there is no paired test. Seven CREST runs end in a compact
   cage with four three-coordinated atoms at -566.877 eV, and its eighth
   miss, seed 2004, in the linear chain at -568.818 eV. Anneal's one miss,
   seed 2003 at the full 1e5 calls, ends in a bicyclic ring with two
@@ -799,7 +793,7 @@ that are identical byte for byte.
 - Si10: anneal hits 12 of 12 and stops at the reference or at 1e5.
   CREST stops at the end of its run. The zero-call seed is dropped.
   The stops differ, and there is no paired test. On seeds 2000-2003 anneal takes 619, 563, 520 and 2,611 calls.
-- C10: anneal reaches the ring on 12 of 12 seeds and CREST on 4. The
+- C10: On C10, anneal's hit count is 12 of 12 at its own stop. CREST's hit count is 4 of 12 at the end of its run. The
   stops differ, and there is no paired test. Seed 2003, the miss of the first
   table, takes 3,123 calls. There its refused calls were the screen and
   the quench each starting from a trial with a pair at 0.6-0.8 Å, drawn

@@ -15,7 +15,7 @@ GMIN is Wales revision `aac1548a8aec13b53ad12a8d6904625081685d2e`, built without
 | LJ104 | anneal | 3/6 | 221.714 | 221.714 | 0.862 | 0.871 | 0.770 | 20.64 | 45.09 |
 | LJ104 | gmin | 2/6 | 191.076 | 191.076 | 0.862 | 0.871 | 0.770 |  |  |
 
-The harness stops at the first hit, so a hit's `wall_s` is the time to solution and a miss is censored at the budget wall. `tts_s` in the CSV is that value. Its type-7 median is the median wall. A miss never reaches the target. When both hit, the smaller time wins.
+A run stops at the first hit, so a hit's `wall_s` is the time to solution and a miss is censored at the budget wall. `tts_s` in the CSV is that value. Its type-7 median is the median wall. A miss never reaches the target. When both hit, the note records each arm's time.
 
 | Session | Size | Anneal first | GMIN first | Neither |
 | --- | --- | --- | --- | --- |
@@ -28,7 +28,7 @@ The harness stops at the first hit, so a hit's `wall_s` is the time to solution 
 | v7 | LJ98 | 4/6 | 0/6 | 2/6 |
 | v7 | LJ104 | 2/6 | 2/6 | 2/6 |
 
-The pairing is the same as v4 through v6. At LJ98 anneal is first on every seed it hits, and GMIN hits none. At LJ104 each arm is first on two seeds: anneal on 2001 and 2002, GMIN on 2003 and on 2004, where both hit and GMIN's 69 s beats anneal's 129 s. Seeds 2000 and 2005 are misses for both.
+The pairing is the same as v4 through v6. At LJ98 anneal's hit count is the count in the table and GMIN's hit count is 0. At LJ104 each arm is first on two seeds: anneal on 2001 and 2002, GMIN on 2003 and on 2004, where both hit. On 2004 GMIN's time is 69 s and anneal's is 129 s. Seeds 2000 and 2005 are misses for both.
 
 GMIN's per-evaluation time, type 7 of `us_per_eval` on the six seeds, is the same binary across sessions. It rose through v6 and came back down in this one. The wall ratio moves with it.
 

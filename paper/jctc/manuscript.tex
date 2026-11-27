@@ -37,9 +37,9 @@ Indian Institute of Technology Kanpur, Kanpur, India}
 \begin{abstract}
 We present a template-free basin-hopping search for funneled atomic and
 rigid-molecular landscapes.
-At arm-specific work definitions, the search reaches minima of large
-Lennard-Jones, short-ranged Morse, and rigid water clusters on which a
-reference basin-hopping program at one documented input hits no seed.
+On large Lennard-Jones, short-ranged Morse, and rigid water clusters, this
+search and a reference basin-hopping program are each reported at that arm's
+own numeric ceiling.
 Removing the former structure templates costs hits on a short-ranged Morse
 cluster.
 The anneal octamer rows record no target, tolerance, budget, or stop.
@@ -88,7 +88,7 @@ The method here combines structural moves with feedback from quenched
 outcomes, basin-level memory, and explicit stall exits.
 Section~\ref{sec:search} gives the mechanism and its design rationale.
 Section~\ref{sec:evidence} then organizes the benchmark evidence by claim:
-that the template-free search reaches funnel-trapped minima, that removing
+that each arm is reported at its own stopping rule, that removing
 the former templates costs hits, and that two other adaptations show no
 detectable effect at 12 seeds.
 Comparisons use GMIN, the Atomic Simulation Environment, and CREST as
@@ -627,8 +627,8 @@ draw 75 (pooled McNemar \(p=0.85\), interval \(-\)0.13 to 0.09).
 \label{sec:gmin}
 GMIN is the Wales-group basin-hopping program and provides a reference walk
 on these landscapes \cite{wales1997,oakley2013,walesGmin}.
-Table~\ref{tab:gmin} tests whether the template-free search reaches minima
-that trap that walk, on Lennard-Jones, Morse, and Gupta clusters.
+Table~\ref{tab:gmin} reports this code and GMIN, each at its own numeric
+ceiling, on Lennard-Jones, Morse, and Gupta clusters.
 Each block runs both arms of each cluster on seeds 2000--2011 in
 alternating order, at the numeric ceiling in the table, from the start this code
 writes for the seed.
@@ -651,16 +651,17 @@ combined energy-and-gradient pass for this code and one
 \texttt{GRADT=false}. The committed GMIN rows do not separate entries by
 gradient request, so no conversion or cross-arm hit, work, or wall test is
 reported.
-At those arm-specific ceilings, this code hits 7 of 12 seeds on
-LJ\(_{98}\) and 5 of 12 on LJ\(_{75}\), while GMIN hits neither; on
-LJ\(_{38}\), the counts are 12 and 7.
-On LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\), the hit
-counts are 6 against 5, 6 against 3, 5 against 6, and 8 against 9.
+At this code's ceiling the hit counts are 7 of 12 on
+LJ\(_{98}\) and 5 of 12 on LJ\(_{75}\).
+At GMIN's ceiling on those two clusters the hit counts are 0 of 12 and 0 of 12.
+On LJ\(_{38}\) the hit count is 12 of 12 at this code's ceiling and 7 of 12 at GMIN's ceiling.
+On LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\), this code's hit
+counts are 6, 6, 5, and 8 of 12.
+GMIN's hit counts on those four clusters are 5, 3, 6, and 9 of 12.
 Both arms hit LJ\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed.
-The median wall of a run is lower for this code on all nine clusters, ranging
-from 0.052~s on LJ\(_{55}\) to 107.1~s on LJ\(_{104}\).
-These arm-specific wall medians are descriptive and are not tested across
-arms.
+This code's median wall on these nine clusters runs from 0.052~s on LJ\(_{55}\) to 107.1~s on LJ\(_{104}\).
+Each wall in the table is that arm's own median.
+These walls are not compared across arms.
 At the submitted revision, the hit counts for this code and GMIN are 9 and
 0 on M\(_{55}\) at \(\rho=14\), 6 and 0 on M\(_{80}\) at \(\rho=14\),
 and 4 and 1 on Au\(_{55}\).
@@ -677,7 +678,7 @@ from 4 to 12 of 12 seeds.
 
 % gmin-panel table: start
 \begin{table}
-\caption{Paired outcomes and reported work for this code against GMIN.
+\caption{Each arm at its own numeric ceiling for this code and GMIN.
 The Supporting Information gives the configurations, inputs, revisions, hosts, build
 recipe, and row provenance. Both arms start from the same geometry and run in alternating
 order on seeds 2000--2011.
@@ -685,13 +686,11 @@ This code uses its recommended atomic-cluster preset, with every atom labeled go
 on Au\(_{55}\).
 Every printed Lennard-Jones row runs the Wales-group LJ\(_{38}\)
 introduction file with no symmetrization keyword.
-Eval. is a combined energy-and-gradient pass for this code and every
-\texttt{POTENTIAL} entry for GMIN, including \texttt{GRADT=false}; these counts are
-different operations. The numeric ceiling is applied separately in each arm's unit
-and is not an equal-work budget, so no cross-arm hit, work, or wall test is reported.
-The column Only counts the seeds that arm alone hits, and Both and Neither the seeds
-both arms and neither arm hit.
-Eval. and IQR are the median and interquartile range of the arm's reported count to
+Passes are combined energy-and-gradient evaluations of this code.
+Entries are \texttt{POTENTIAL} calls of GMIN, including \texttt{GRADT=false}.
+These counts are different operations. The numeric ceiling is applied separately in each arm's unit and is not an equal-work budget,
+so no cross-arm hit, work, or wall test is reported.
+The count and IQR are the median and interquartile range of that arm's count to
 the minimum, with a miss at its full budget.
 Wall, In and Out are the median seconds of the run, inside the
 potential and outside it.}
@@ -699,51 +698,62 @@ potential and outside it.}
 \centering
 \scriptsize
 \setlength{\tabcolsep}{2pt}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{@{}lrlrrrrrrrrr@{}}
+\setlength{\arraystretch}{0.88}
+\begin{tabular}{@{}lrlrrrrrr@{}}
 \toprule
-Cluster & Ceiling & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out \\
+\multicolumn{9}{@{}l}{\emph{This code, energy-and-gradient passes}} \\
+Cluster & Ceiling & Arm & Hits & Passes & IQR & Wall & In & Out \\
 \midrule
-\multicolumn{12}{@{}l}{\emph{Template-free predecessor}} \\
-LJ\(_{38}\) & \(4\times 10^{5}\) & this work & 12/12 & 5 & 7 & 0 & 127839.5 & 139245.25 & 0.640 & 0.303 & 0.337 \\
- &  & GMIN & 7/12 & 0 &  &  & 389399 & 173127.75 & 3.427 & 2.507 & 0.916 \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 5722 & 5372.5 & 0.052 & 0.026 & 0.027 \\
- &  & GMIN & 12/12 & 0 &  &  & 12764.5 & 12435.75 & 0.209 & 0.170 & 0.039 \\
-LJ\(_{75}\) & \(4\times 10^{6}\) & this work & 5/12 & 5 & 0 & 7 & 4000000 & 962776.75 & 61.077 & 34.192 & 26.727 \\
- &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 117.7 & 101.2 & 16.559 \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & this work & 7/12 & 7 & 0 & 5 & 3166811.5 & 2726730.25 & 82.514 & 50.013 & 32.396 \\
- &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 177.3 & 157.6 & 19.771 \\
-LJ\(_{102}\) & \(4\times 10^{6}\) & this work & 6/12 & 4 & 2 & 3 & 3256052.5 & 2043827.25 & 83.435 & 51.809 & 31.506 \\
- &  & GMIN & 5/12 & 3 &  &  & 4000000 & 2463305.5 & 185.2 & 165.1 & 19.959 \\
-LJ\(_{103}\) & \(4\times 10^{6}\) & this work & 6/12 & 4 & 2 & 5 & 3905072.5 & 3160779.25 & 103.0 & 64.209 & 38.610 \\
- &  & GMIN & 3/12 & 1 &  &  & 4000000 & 239453.25 & 191.4 & 171.0 & 20.319 \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & this work & 5/12 & 3 & 2 & 3 & 4000000 & 2271734 & 107.1 & 66.409 & 40.127 \\
- &  & GMIN & 6/12 & 4 &  &  & 3696118 & 1285122.25 & 183.7 & 164.3 & 19.310 \\
-LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 8/12 & 1 & 7 & 2 & 1129381.5 & 3842161.25 & 66.725 & 42.128 & 24.597 \\
- &  & GMIN & 9/12 & 2 &  &  & 3129518.5 & 3240050.5 & 341.6 & 316.8 & 24.713 \\
-M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 62677 & 575467.75 & 2.456 & 1.812 & 0.653 \\
- &  & GMIN & 12/12 & 0 &  &  & 268934 & 268091.5 & 9.977 & 8.943 & 1.033 \\
+\multicolumn{9}{@{}l}{\emph{Template-free predecessor}} \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & this work & 12/12 & 127839.5 & 139245.25 & 0.640 & 0.303 & 0.337 \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & this work & 12/12 & 5722 & 5372.5 & 0.052 & 0.026 & 0.027 \\
+LJ\(_{75}\) & \(4\times 10^{6}\) & this work & 5/12 & 4000000 & 962776.75 & 61.077 & 34.192 & 26.727 \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & this work & 7/12 & 3166811.5 & 2726730.25 & 82.514 & 50.013 & 32.396 \\
+LJ\(_{102}\) & \(4\times 10^{6}\) & this work & 6/12 & 3256052.5 & 2043827.25 & 83.435 & 51.809 & 31.506 \\
+LJ\(_{103}\) & \(4\times 10^{6}\) & this work & 6/12 & 3905072.5 & 3160779.25 & 103.0 & 64.209 & 38.610 \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & this work & 5/12 & 4000000 & 2271734 & 107.1 & 66.409 & 40.127 \\
+LJ\(_{150}\) & \(4\times 10^{6}\) & this work & 8/12 & 1129381.5 & 3842161.25 & 66.725 & 42.128 & 24.597 \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 62677 & 575467.75 & 2.456 & 1.812 & 0.653 \\
 \midrule
-\multicolumn{12}{@{}l}{\emph{Submitted revision}} \\
-Au\(_{55}\) & \(1\times 10^{6}\) & this work & 4/12 & 4 & 0 & 7 & 1000000 & 736743.75 & 36.578 & 27.155 & 9.462 \\
- &  & GMIN & 1/12 & 1 &  &  & 1000000 & 0 & 62.055 & 58.738 & 3.317 \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 22596 & 51763.75 & 0.409 & 0.287 & 0.122 \\
- &  & GMIN & 12/12 & 0 &  &  & 37047.5 & 37358.75 & 0.677 & 0.574 & 0.103 \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & 9/12 & 9 & 0 & 3 & 451561.5 & 773925.5 & 7.444 & 5.699 & 1.745 \\
- &  & GMIN & 0/12 & 0 &  &  & 1000000 & 0 & 17.967 & 15.508 & 2.461 \\
-M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 0 & 12 & 0 & 62677 & 575467.75 & 2.417 & 1.777 & 0.640 \\
- &  & GMIN & 12/12 & 0 &  &  & 268934 & 268091.5 & 10.632 & 9.523 & 1.109 \\
-M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 6/12 & 6 & 0 & 6 & 3901429 & 1446773 & 145.0 & 107.5 & 37.389 \\
- &  & GMIN & 0/12 & 0 &  &  & 4000000 & 0 & 148.9 & 134.9 & 14.081 \\
+\multicolumn{9}{@{}l}{\emph{Submitted revision}} \\
+Au\(_{55}\) & \(1\times 10^{6}\) & this work & 4/12 & 1000000 & 736743.75 & 36.578 & 27.155 & 9.462 \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & this work & 12/12 & 22596 & 51763.75 & 0.409 & 0.287 & 0.122 \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & this work & 9/12 & 451561.5 & 773925.5 & 7.444 & 5.699 & 1.745 \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & this work & 12/12 & 62677 & 575467.75 & 2.417 & 1.777 & 0.640 \\
+M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & this work & 6/12 & 3901429 & 1446773 & 145.0 & 107.5 & 37.389 \\
 \bottomrule
 \end{tabular}
-}
+\vspace{0.6em}
+\begin{tabular}{@{}lrlrrrrrr@{}}
+\toprule
+\multicolumn{9}{@{}l}{\emph{GMIN, potential entries}} \\
+Cluster & Ceiling & Arm & Hits & Entries & IQR & Wall & In & Out \\
+\midrule
+\multicolumn{9}{@{}l}{\emph{Template-free predecessor}} \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & GMIN & 7/12 & 389399 & 173127.75 & 3.427 & 2.507 & 0.916 \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & GMIN & 12/12 & 12764.5 & 12435.75 & 0.209 & 0.170 & 0.039 \\
+LJ\(_{75}\) & \(4\times 10^{6}\) & GMIN & 0/12 & 4000000 & 0 & 117.7 & 101.2 & 16.559 \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & GMIN & 0/12 & 4000000 & 0 & 177.3 & 157.6 & 19.771 \\
+LJ\(_{102}\) & \(4\times 10^{6}\) & GMIN & 5/12 & 4000000 & 2463305.5 & 185.2 & 165.1 & 19.959 \\
+LJ\(_{103}\) & \(4\times 10^{6}\) & GMIN & 3/12 & 4000000 & 239453.25 & 191.4 & 171.0 & 20.319 \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & GMIN & 6/12 & 3696118 & 1285122.25 & 183.7 & 164.3 & 19.310 \\
+LJ\(_{150}\) & \(4\times 10^{6}\) & GMIN & 9/12 & 3129518.5 & 3240050.5 & 341.6 & 316.8 & 24.713 \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & GMIN & 12/12 & 268934 & 268091.5 & 9.977 & 8.943 & 1.033 \\
+\midrule
+\multicolumn{9}{@{}l}{\emph{Submitted revision}} \\
+Au\(_{55}\) & \(1\times 10^{6}\) & GMIN & 1/12 & 1000000 & 0 & 62.055 & 58.738 & 3.317 \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & GMIN & 12/12 & 37047.5 & 37358.75 & 0.677 & 0.574 & 0.103 \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & GMIN & 0/12 & 1000000 & 0 & 17.967 & 15.508 & 2.461 \\
+M\(_{80}\), \(\rho=6\) & \(4\times 10^{6}\) & GMIN & 12/12 & 268934 & 268091.5 & 10.632 & 9.523 & 1.109 \\
+M\(_{80}\), \(\rho=14\) & \(4\times 10^{6}\) & GMIN & 0/12 & 4000000 & 0 & 148.9 & 134.9 & 14.081 \\
+\bottomrule
+\end{tabular}
 \end{table}
 % gmin-panel table: end
 
 \subsection{Rigid-water evidence for the same claim}
 \label{sec:transfer}
-Table~\ref{tab:tip4p-gmin} puts the template-free search against GMIN on
+Table~\ref{tab:tip4p-gmin} reports this code and GMIN on
 rigid TIP4P clusters of 8, 15, 20, 21, and 25 molecules, at
 \(2\times 10^{6}\) arm-specific evaluations on seeds 2000--2011, both arms
 from the same start on each seed in alternating order.
@@ -752,47 +762,52 @@ fixed steps of 0.40 and 0.51.
 The budget counts combined energy-and-gradient passes for this code and
 \texttt{POTENTIAL} entries for GMIN, so no cross-arm test is reported.
 (H\(_2\)O)\(_{25}\) has no Cambridge Cluster Database reference and is not
-scored; the lowest energy of this code there is \(-1113.035\)~kJ/mol and that
-of GMIN \(-1087.334\)~kJ/mol.
+scored.
+At this code's ceiling the lowest energy there is \(-1113.035\)~kJ/mol.
+At GMIN's ceiling the lowest energy there is \(-1087.334\)~kJ/mol.
 
 % tip4p-gmin table: start
 \begin{table}
-\caption{This code against GMIN on rigid TIP4P water clusters, paired by seed.
+\caption{This code and GMIN on rigid TIP4P water clusters, each at its own numeric ceiling.
 This code uses its recommended template-free rigid-water preset.
 Seeds 2000--2011, \(2\times 10^{6}\) arm-specific evaluations, both arms from the same start on each
 seed, in alternating order.
-GMIN hits 0 of 12 on (H\(_2\)O)\(_{20}\).
+GMIN's hit count is 0 of 12 on (H\(_2\)O)\(_{20}\).
 The budget of this code counts one call per combined energy and gradient pass, and GMIN's budget counts
 every \texttt{POTENTIAL} entry, including \texttt{GRADT=false}.
 The numeric ceiling is applied separately in each arm's unit and is not an equal-work budget;
 no cross-arm hit, work, or wall test is reported.
-(H\(_2\)O)\(_{25}\) has no Cambridge Cluster Database reference and is not scored; its row gives
-the lowest and the median best energy of each arm in kJ/mol. The Supporting Information gives the
+(H\(_2\)O)\(_{25}\) has no Cambridge Cluster Database reference and is not scored.
+Its rows give each arm's own lowest and median best energy in kJ/mol.
+The Supporting Information gives the
 input, revision,
 host, driver, and row record.}
 \label{tab:tip4p-gmin}
 \centering
 \footnotesize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrr@{}}
+\begin{tabular}{@{}llr@{}}
 \toprule
-Cluster & This work & GMIN & Only, this work & Only, GMIN \\
+Cluster & Arm & Result \\
 \midrule
-(H\(_2\)O)\(_{8}\) & 12/12 & 8/12 & 4 & 0 \\
-(H\(_2\)O)\(_{15}\) & 7/12 & 0/12 & 7 & 0 \\
-(H\(_2\)O)\(_{20}\) & 6/12 & 0/12 & 6 & 0 \\
-(H\(_2\)O)\(_{21}\) & 0/12 & 0/12 & 0 & 0 \\
-(H\(_2\)O)\(_{25}\) & \multicolumn{4}{l}{this work \(-1113.035\), median \(-1103.345\); GMIN \(-1087.334\), median \(-1082.127\)} \\
+(H\(_2\)O)\(_{8}\) & this work & 12/12 \\
+ & GMIN & 8/12 \\
+(H\(_2\)O)\(_{15}\) & this work & 7/12 \\
+ & GMIN & 0/12 \\
+(H\(_2\)O)\(_{20}\) & this work & 6/12 \\
+ & GMIN & 0/12 \\
+(H\(_2\)O)\(_{21}\) & this work & 0/12 \\
+ & GMIN & 0/12 \\
+(H\(_2\)O)\(_{25}\) & this work & lowest \(-1113.035\), median \(-1103.345\) \\
+ & GMIN & lowest \(-1087.334\), median \(-1082.127\) \\
 \bottomrule
 \end{tabular}
 \end{table}
 % tip4p-gmin table: end
 
-\subsection{Independent starts under shared wall caps}
+\subsection{Independent starts under recorded stops}
 \label{sec:ase}
-Under independent starts and shared wall caps, the search reaches four of
-five atomic and all four Morse references, while the two Atomic Simulation
-Environment optimizers reach one Lennard-Jones minimum, once.
+Under independent starts, each arm is reported at the stop that arm recorded.
 The Atomic Simulation Environment provides a basin-hopping optimizer and a
 minima-hopping optimizer \cite{larsenAse2017,goedecker2004}.
 At its constructor defaults ASE basin hopping displaces every atom at random,
@@ -804,17 +819,21 @@ Table~\ref{tab:ase} runs the submitted revision on four Lennard-Jones
 clusters and Au\(_{55}\), and Table~\ref{tab:ase-morse} runs an ancestor of
 that revision on four Morse clusters.
 ASE minima hopping is wall-capped: every one of its runs in both tables
-ended at the cap with fewer calls than the budget.
+ended at the cap with the call count still under the budget.
 Basin hopping reached the cap on 35 of the 60 runs of Table~\ref{tab:ase}
 and on every run of Table~\ref{tab:ase-morse}, and no run of this code
 reached it.
-Under that policy this code hits LJ\(_{38}\) and LJ\(_{55}\) on 12 of 12,
-LJ\(_{98}\) on 7 of 12, and LJ\(_{104}\) on 5 of 12, while ASE basin hopping
-hits LJ\(_{55}\) on 1 of 12 and no other cluster, and ASE minima hopping hits
-none; no arm hits Au\(_{55}\).
-On the Morse clusters this code hits M\(_{38}\) and M\(_{55}\) at
-\(\rho=6\) on 12 of 12 and at \(\rho=14\) on 9 and 8 of 12, and neither ASE
-arm hits any.
+Under that policy this code's hit counts are 12 of 12 on LJ\(_{38}\) and LJ\(_{55}\),
+7 of 12 on LJ\(_{98}\), and 5 of 12 on LJ\(_{104}\).
+ASE basin hopping's hit count is 1 of 12 on LJ\(_{55}\) and 0 of 12 on each other atomic cluster in the table.
+ASE minima hopping's hit count is 0 of 12 on each of those clusters.
+No arm hits Au\(_{55}\).
+On the Morse clusters this code's hit counts are 12 of 12 on M\(_{38}\) and M\(_{55}\) at
+\(\rho=6\), and 9 and 8 of 12 at \(\rho=14\).
+ASE basin hopping's hit count is 0 of 12 on each Morse cluster.
+ASE minima hopping's hit count is 0 of 12 on each Morse cluster.
+Every Morse basin-hopping run and every minima-hopping run stopped at the wall cap.
+The cap is three times the slowest wall of this code on that cluster.
 
 % ase-panel table: start
 \begin{table}
@@ -827,9 +846,10 @@ Seeds 2000--2011.
 The budget of this code counts one call per combined energy and gradient pass.
 Cap is the wall in seconds after which a run stops at its next check, three times
 the slowest wall of the cluster preset of this code on that cluster.
-Stops counts the BH and MH runs that ended at the cap; those runs
-are misses with fewer calls than the budget, and no run of this code ended at the cap.
-Wall is the median over the 12 runs of the seconds each run took;
+Stop names the rule that ended the runs of that arm.
+A wall cap on 12 means every run of that arm ended at the cap; those runs
+are misses with the call count still under the budget, and no run of this code ended at the cap.
+Wall is the median over the 12 runs of the seconds that arm took;
 a BH or MH run that ended at the cap is counted at its wall.
 No cross-arm test is reported: starts differ; every arm has the same numeric call
 ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.
@@ -838,17 +858,26 @@ The Supporting Information gives the revisions, drivers, and row records.}
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrrrrrr@{}}
+\setlength{\arraystretch}{0.92}
+\begin{tabular}{@{}llrllll@{}}
 \toprule
- & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} \\
-\cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
-Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH \\
+Cluster & Budget & Cap & Arm & Stop & Hits & Wall (s) \\
 \midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.605 & 4.645 & 4.858 \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & 12/12 & 1/12 & 0/12 & 11 & 12 & 0.051 & 4.220 & 4.442 \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 & 78.919 & 123.0 & 299.2 \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & 5/12 & 0/12 & 0/12 & 0 & 12 & 101.7 & 128.5 & 305.2 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & 0/12 & 0/12 & 0/12 & 12 & 12 & 36.000 & 107.9 & 110.3 \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & This code & hit or budget & 12/12 & 0.605 \\
+ &  &  & BH & wall cap on 12 & 0/12 & 4.645 \\
+ &  &  & MH & wall cap on 12 & 0/12 & 4.858 \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & This code & hit or budget & 12/12 & 0.051 \\
+ &  &  & BH & wall cap on 11 & 1/12 & 4.220 \\
+ &  &  & MH & wall cap on 12 & 0/12 & 4.442 \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & This code & hit or budget & 7/12 & 78.919 \\
+ &  &  & BH & wall cap on 0 & 0/12 & 123.0 \\
+ &  &  & MH & wall cap on 12 & 0/12 & 299.2 \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & This code & hit or budget & 5/12 & 101.7 \\
+ &  &  & BH & wall cap on 0 & 0/12 & 128.5 \\
+ &  &  & MH & wall cap on 12 & 0/12 & 305.2 \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & This code & hit or budget & 0/12 & 36.000 \\
+ &  &  & BH & wall cap on 12 & 0/12 & 107.9 \\
+ &  &  & MH & wall cap on 12 & 0/12 & 110.3 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -863,9 +892,10 @@ Seeds 2000--2011.
 The budget of this code counts one call per combined energy and gradient pass.
 Cap is the wall in seconds after which a run stops at its next check, three times
 the slowest wall of the cluster preset of this code on that cluster.
-Stops counts the BH and MH runs that ended at the cap; those runs
-are misses with fewer calls than the budget, and no run of this code ended at the cap.
-Wall is the median over the 12 runs of the seconds each run took;
+Stop names the rule that ended the runs of that arm.
+A wall cap on 12 means every run of that arm ended at the cap; those runs
+are misses with the call count still under the budget, and no run of this code ended at the cap.
+Wall is the median over the 12 runs of the seconds that arm took;
 a BH or MH run that ended at the cap is counted at its wall.
 No cross-arm test is reported: starts differ; every arm has the same numeric call
 ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.
@@ -874,16 +904,23 @@ The Supporting Information gives the revision, driver, and row record.}
 \centering
 \scriptsize
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}lrrrrrrrrrr@{}}
+\setlength{\arraystretch}{0.92}
+\begin{tabular}{@{}llrllll@{}}
 \toprule
- & & & \multicolumn{3}{c}{Hits} & \multicolumn{2}{c}{Stops} & \multicolumn{3}{c}{Wall (s)} \\
-\cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-11}
-Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH \\
+Cluster & Budget & Cap & Arm & Stop & Hits & Wall (s) \\
 \midrule
-M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.186 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.502 & 10.186 & 10.188 \\
-M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.516 & 9/12 & 0/12 & 0/12 & 12 & 12 & 2.136 & 9.517 & 9.518 \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.637 & 12/12 & 0/12 & 0/12 & 12 & 12 & 0.226 & 15.638 & 15.642 \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 12 & 12 & 11.333 & 47.553 & 47.556 \\
+M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.186 & This code & hit or budget & 12/12 & 0.502 \\
+ &  &  & BH & wall cap on 12 & 0/12 & 10.186 \\
+ &  &  & MH & wall cap on 12 & 0/12 & 10.188 \\
+M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.516 & This code & hit or budget & 9/12 & 2.136 \\
+ &  &  & BH & wall cap on 12 & 0/12 & 9.517 \\
+ &  &  & MH & wall cap on 12 & 0/12 & 9.518 \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.637 & This code & hit or budget & 12/12 & 0.226 \\
+ &  &  & BH & wall cap on 12 & 0/12 & 15.638 \\
+ &  &  & MH & wall cap on 12 & 0/12 & 15.642 \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & This code & hit or budget & 8/12 & 11.333 \\
+ &  &  & BH & wall cap on 12 & 0/12 & 47.553 \\
+ &  &  & MH & wall cap on 12 & 0/12 & 47.556 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -906,7 +943,7 @@ Seeds 17000, 17002, and 17006 store 151538, 142740, and 139177.
 anneal's rows do not record the CREST target or budget.
 There is no paired test, and the Holm family for CREST is empty.
 The ammonia, carbon, and silicon arms are in the Supporting Information,
-each under its own stop, with no paired test.
+each at the stop recorded for that arm, with no paired test.
 On C\(_{10}\) the target is the lowest energy any run reached.
 The Supporting Information gives the settings, revisions, and records, and
 the CREST arms that the budget rule removes.
@@ -919,7 +956,7 @@ The CREST driver stops at a budget of 151738 calls.
 anneal's rows do not record the CREST target or budget.
 There is no paired test.
 The Holm family for CREST is empty.
-The Supporting Information reports the other clusters under their own stops.}
+The Supporting Information reports the other clusters at the stop recorded for each arm.}
 \label{tab:crest}
 \centering
 \footnotesize
@@ -934,10 +971,10 @@ Cluster & anneal stop & CREST stop \\
 % crest table: end
 
 \section{Conclusions}
-At arm-specific work definitions this code reaches funnel-trapped references on
-LJ\(_{98}\), M\(_{55}\) and M\(_{80}\) at \(\rho=14\), and rigid
-(H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\), where the corresponding GMIN
-arms at one documented input hit no seed.
+These are funneled cluster landscapes.
+At each arm's own numeric ceiling, hit counts are reported for
+LJ\(_{98}\), M\(_{55}\) and M\(_{80}\) at \(\rho=14\), and for rigid
+(H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\).
 The anneal octamer rows record no target, tolerance, budget, or stop.
 anneal's rows do not record the CREST target or budget.
 There is no paired test, and the Holm family for CREST is empty.

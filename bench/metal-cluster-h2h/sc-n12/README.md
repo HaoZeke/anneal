@@ -16,23 +16,23 @@ They also remain on `origin/fix/sc-shelf-waypoint` and
 
 | System | Arm | Code revision | Hits | Calls median | Fisher p | Mann-Whitney p calls |
 |---|---|---|---|---|---|---|
-| sc126-38 | anneal | 61fa67cf | 11/12 | 50658.5 | 1 | 0.930987 |
+| sc126-38 | anneal | 61fa67cf | 11/12 | 50658.5 | — | — |
 | sc126-38 | gmin | 9cbec1a4 | 12/12 | 42469.5 |  |  |
-| sc126-55 | anneal | 61fa67cf | 12/12 | 25529 | 1 | 0.260236 |
+| sc126-55 | anneal | 61fa67cf | 12/12 | 25529 | — | — |
 | sc126-55 | gmin | 9cbec1a4 | 12/12 | 43404.5 |  |  |
-| sc126-80 | anneal | 61fa67cf | 4/12 | 1000000 | 0.0931677 | 0.0366874 |
+| sc126-80 | anneal | 61fa67cf | 4/12 | 1000000 | — | — |
 | sc126-80 | gmin | 9cbec1a4 | 0/12 | 1000000 |  |  |
-| sc108-38 | anneal | 61fa67cf | 9/12 | 270247.5 | 0.0391257 | 0.00956056 |
+| sc108-38 | anneal | 61fa67cf | 9/12 | 270247.5 | — | — |
 | sc108-38 | gmin | 9cbec1a4 | 3/12 | 400000 |  |  |
-| sc108-55 | anneal | 61fa67cf | 7/12 | 707416.5 | 0.0271907 | 0.0109168 |
+| sc108-55 | anneal | 61fa67cf | 7/12 | 707416.5 | — | — |
 | sc108-55 | gmin | 9cbec1a4 | 1/12 | 1000000 |  |  |
-| sc108-80 | anneal | 61fa67cf | 0/12 | 1000000 | 1 | 1 |
+| sc108-80 | anneal | 61fa67cf | 0/12 | 1000000 | — | — |
 | sc108-80 | gmin | 9cbec1a4 | 0/12 | 1000000 |  |  |
-| sc96-38 | anneal | 61fa67cf | 12/12 | 20236 | 1 | 0.665006 |
+| sc96-38 | anneal | 61fa67cf | 12/12 | 20236 | — | — |
 | sc96-38 | gmin | 9cbec1a4 | 12/12 | 37616.5 |  |  |
-| sc96-55 | anneal | 61fa67cf | 12/12 | 28040 | 1 | 0.97697 |
+| sc96-55 | anneal | 61fa67cf | 12/12 | 28040 | — | — |
 | sc96-55 | gmin | 9cbec1a4 | 12/12 | 28021 |  |  |
-| sc96-80 | anneal | 61fa67cf | 6/12 | 993354.5 | 0.0686499 | 0.0283629 |
+| sc96-80 | anneal | 61fa67cf | 6/12 | 993354.5 | — | — |
 | sc96-80 | gmin | 9cbec1a4 | 1/12 | 1000000 |  |  |
 
 The rows file is blob `8e6d73ea528b6c68ecf7be18b49d15254c42b83a`.
@@ -119,23 +119,19 @@ The c89653df rows need more calls on sc108-80 than the e3ed7dad rows, at Mann-Wh
 
 On sc96-55, seeds 2000-2011, the median calls move from 17280 at e3ed7dad to 28767 at c89653df, Mann-Whitney p 0.237. `sc96-55-seeds.csv` has seeds 2012-2059 under both builds from the same starts. There e3ed7dad hits 48 of 48 at a median of 24011.5 calls and c89653df hits 48 of 48 at a median of 23506.5, Mann-Whitney p 0.58; c89653df charges more calls on 19 of 48 seeds. The move on seeds 2000-2011 does not recur on these seeds, so no develop commit was bisected. Their calls are the calls charged; both builds stop at the hit, and the e3ed7dad build prints the budget for the calls to some hits.
 
-Each rerun is tested against the c89653df anneal rows of its system. The wall ratio is the GMIN median wall over the anneal median wall. On calls and wall the code ahead is the one lower in more of the 144 seed pairs, the direction of the Mann-Whitney test; on hits it is the one with more hits. n.s. marks a lead at p >= 0.05.
+Anneal and GMIN do not share a call unit, so these notes state each arm's hits and do not print a test.
 
 | System | Anneal harness | GMIN harness | Fisher p | Mann-Whitney p calls | Mann-Whitney p wall | Wall ratio | Hits ahead | Calls ahead | Wall ahead |
 |---|---|---|---|---|---|---|---|---|---|
-| sc126-38 | c89653df | f9d1ac05 | 1 | 0.00111 | 0.285 | 1.139 | tie | anneal | anneal, n.s. |
-| sc108-38 | c89653df | f9d1ac05 | 7.40e-07 | 1.03e-05 | 3.66e-05 | 10.087 | anneal | anneal | anneal |
-| sc96-38 | c89653df | 9149d1b0 | 1 | 0.000592 | 0.341 | 1.223 | tie | anneal | anneal, n.s. |
-| sc126-55 | c89653df | a50f4b02 | 1 | 0.285 | 0.000592 | 0.179 | tie | GMIN, n.s. | GMIN |
-| sc108-55 | c89653df | a50f4b02 | 0.193 | 0.0424 | 1 | 0.644 | anneal, n.s. | anneal | tie |
-| sc96-55 | c89653df | a50f4b02 | 1 | 0.507 | 0.0141 | 0.349 | tie | anneal, n.s. | GMIN |
-| sc126-80 | c89653df | a50f4b02 | 0.0137 | 0.00705 | 0.0404 | 0.363 | anneal | anneal | GMIN |
-| sc108-80 | c89653df | a50f4b02 | 1 | 1 | 3.66e-05 | 0.335 | tie | tie | GMIN |
-| sc96-80 | c89653df | a50f4b02 | 0.00458 | 0.00286 | 0.000592 | 0.318 | anneal | anneal | GMIN |
-
-GMIN ties anneal on hits on sc126-38, sc96-38, sc126-55, sc96-55 and sc108-80. Anneal hits more seeds than GMIN on sc108-38, sc126-80 and sc96-80 at Fisher p < 0.05, and on sc108-55 not significantly.
-
-GMIN beats anneal on wall time on sc126-55, sc96-55 and sc108-80, at Mann-Whitney p < 0.05. Anneal's lead on wall time on sc126-38 and sc96-38 is not significant. GMIN's lead on calls on sc126-55 is not significant. Anneal beats GMIN on calls on sc126-38 and sc96-38, at Mann-Whitney p < 0.05. Anneal's lead on calls on sc96-55 is not significant. On sc108-55, sc126-80 and sc96-80 GMIN's median wall is lower while it hits fewer seeds, and its median calls are the full budget.
+| sc126-38 | c89653df | f9d1ac05 | — | — | — | — | — | — | — |
+| sc108-38 | c89653df | f9d1ac05 | — | — | — | — | — | — | — |
+| sc96-38 | c89653df | 9149d1b0 | — | — | — | — | — | — | — |
+| sc126-55 | c89653df | a50f4b02 | — | — | — | — | — | — | — |
+| sc108-55 | c89653df | a50f4b02 | — | — | — | — | — | — | — |
+| sc96-55 | c89653df | a50f4b02 | — | — | — | — | — | — | — |
+| sc126-80 | c89653df | a50f4b02 | — | — | — | — | — | — | — |
+| sc108-80 | c89653df | a50f4b02 | — | — | — | — | — | — | — |
+| sc96-80 | c89653df | a50f4b02 | — | — | — | — | — | — | — |
 
 On sc108-38 every f9d1ac05 GMIN seed ends at -10108.5598. On sc126-80 the a50f4b02 GMIN seeds end between -78402.0224 and -78238.3887, against -78414.6271. On sc108-80 the a50f4b02 GMIN seeds end between -21811.8772 and -21799.3447, against -21819.9952. On sc96-80 the a50f4b02 GMIN seeds end between -19560.0322 and -19531.9554, against -19560.8966.
 

@@ -299,21 +299,6 @@ UNVERIFIABLE = [
     ('bench/growpal-h2h-v2/README.md',
      '| LJ55 | yes | 104093769 | 104.1 | 3409.8 | 614.6 | 2795.2 | 5.90 | 26.85 |',
      ('2b46484da27f', '621761ec8e4e'), WHY_OLD),
-    ('bench/occat-h2h/README.md',
-     '| cu38 | anneal | 12/12 | 7426.500000 | 0.155761 | 0.124461 | 0.033680 | 1.000000 |',
-     ('6eda862e2e5f', '7536aeb6656b'), WHY_OLD),
-    ('bench/occat-h2h/README.md',
-     '| cu38 | occat | 0/12 | 400000.000000 | 370.751968 | 179.488185 | 191.263784 | 2380.261866 |',
-     ('6eda862e2e5f',), WHY_OLD),
-    ('bench/occat-h2h/README.md',
-     '| cu38 | gmin | 0/12 | 400000.000000 | 11.972000 | 11.006452 | 0.952224 | 76.861345 |',
-     ('6eda862e2e5f',), WHY_OLD),
-    ('bench/occat-h2h/README.md',
-     '| cu55 | anneal | 1/1 | 2341.000000 | 0.108601 | 0.076119 | 0.032482 | 1.000000 |',
-     ('6eda862e2e5f',), WHY_OLD),
-    ('bench/occat-h2h/README.md',
-     '| cu38 | 12 | 12 | 0 | 0 | 7.39602e-07 | 7.39602e-07 | 1.02689e-05 | 3.65846e-05 | 3.65846e-05 | 3.65846e-05 | 1.02689e-05 | 3.65846e-05 | 3.65846e-05 | 3.65846e-05 |',
-     ('6eda862e2e5f', '7536aeb6656b'), WHY_OLD),
     ('bench/template-free2-r7/README.md',
      '| 2000-2011 (r5 record) | 9/12 | 8/12 | 1.0 | 3 | 2 | 1.0 |',
      ('795737db3e80',), WHY_OLD),
@@ -400,33 +385,6 @@ UNVERIFIABLE = [
      ('c89653df',), WHY_SC),
     ('bench/metal-cluster-h2h/sc-n12/README.md',
      '| sc96-80 | e3ed7dad | c89653df | 7/12 | 7/12 | 1 | 773712.5 | 981181 | 0.59 |',
-     ('c89653df',), WHY_SC),
-    ('bench/metal-cluster-h2h/sc-n12/README.md',
-     '| sc126-38 | c89653df | f9d1ac05 | 1 | 0.00111 | 0.285 | 1.139 | tie | anneal | anneal, n.s. |',
-     ('c89653df',), WHY_SC),
-    ('bench/metal-cluster-h2h/sc-n12/README.md',
-     '| sc108-38 | c89653df | f9d1ac05 | 7.40e-07 | 1.03e-05 | 3.66e-05 | 10.087 | anneal | anneal | anneal |',
-     ('c89653df',), WHY_SC),
-    ('bench/metal-cluster-h2h/sc-n12/README.md',
-     '| sc96-38 | c89653df | 9149d1b0 | 1 | 0.000592 | 0.341 | 1.223 | tie | anneal | anneal, n.s. |',
-     ('c89653df',), WHY_SC),
-    ('bench/metal-cluster-h2h/sc-n12/README.md',
-     '| sc126-55 | c89653df | a50f4b02 | 1 | 0.285 | 0.000592 | 0.179 | tie | GMIN, n.s. | GMIN |',
-     ('c89653df',), WHY_SC),
-    ('bench/metal-cluster-h2h/sc-n12/README.md',
-     '| sc108-55 | c89653df | a50f4b02 | 0.193 | 0.0424 | 1 | 0.644 | anneal, n.s. | anneal | tie |',
-     ('c89653df',), WHY_SC),
-    ('bench/metal-cluster-h2h/sc-n12/README.md',
-     '| sc96-55 | c89653df | a50f4b02 | 1 | 0.507 | 0.0141 | 0.349 | tie | anneal, n.s. | GMIN |',
-     ('c89653df',), WHY_SC),
-    ('bench/metal-cluster-h2h/sc-n12/README.md',
-     '| sc126-80 | c89653df | a50f4b02 | 0.0137 | 0.00705 | 0.0404 | 0.363 | anneal | anneal | GMIN |',
-     ('c89653df',), WHY_SC),
-    ('bench/metal-cluster-h2h/sc-n12/README.md',
-     '| sc108-80 | c89653df | a50f4b02 | 1 | 1 | 3.66e-05 | 0.335 | tie | tie | GMIN |',
-     ('c89653df',), WHY_SC),
-    ('bench/metal-cluster-h2h/sc-n12/README.md',
-     '| sc96-80 | c89653df | a50f4b02 | 0.00458 | 0.00286 | 0.000592 | 0.318 | anneal | anneal | GMIN |',
      ('c89653df',), WHY_SC),
     ('bench/metal-cluster-h2h/sc-n12/README.md',
      '| sc126-38 | anneal | c89653df | 0.414 | 0.385 | 0.030 | 33.61 | 2.86 |',
@@ -607,9 +565,13 @@ def tex_without_comments(text: str) -> str:
     literal_environments = ("verbatim", "lstlisting")
     active: str | None = None
     cleaned = []
+    pending_join = False
     for line in text.splitlines(keepends=True):
         body = line.rstrip("\r\n")
         ending = line[len(body):]
+        if pending_join and active is None:
+            body = body.lstrip(" \t")
+            pending_join = False
         if active is not None:
             cleaned.append(line)
             if f"\\end{{{active}}}" in body:
@@ -629,7 +591,16 @@ def tex_without_comments(text: str) -> str:
                 comment = index
                 break
         visible = body[:comment]
-        cleaned.append(visible + (ending if comment == len(body) else ""))
+        commented = comment < len(body)
+        # A TeX % comment consumes the rest of the line and the line break,
+        # and the next line's leading spaces are ignored, so a wrapped
+        # number joins the previous token.
+        if commented:
+            cleaned.append(visible)
+            pending_join = True
+        else:
+            cleaned.append(visible + ending)
+            pending_join = False
         for environment in literal_environments:
             if f"\\begin{{{environment}}}" in visible and f"\\end{{{environment}}}" not in visible:
                 active = environment
@@ -1031,10 +1002,9 @@ def gmin_panel_summary(audit: Audit, panel: object, groups: dict) -> None:
 
 
 def gmin_panel_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
-                    budget: int) -> None:
-    """One table line: Budget, Arm, Hits, Median calls, IQR, Wall, Inside, Outside, Fisher p, MW p calls, MW p wall."""
+                    budget: int) -> None:  # noqa: ARG001
+    """One table line: Budget, Arm, Hits, Median calls, IQR, Wall, Inside, Outside."""
     group = groups[(system, arm)]
-    other = groups[(system, "gmin" if arm == "anneal" else "anneal")]
 
     def col(rows: list[dict[str, str]], key: str) -> list[float]:
         return [float(r[key]) for r in rows]
@@ -1045,26 +1015,10 @@ def gmin_panel_line(audit: Audit, where: str, cells: list[str], groups: dict, sy
     audit.cell(where, "wall median", cells[5], median(col(group, "wall_s")))
     audit.cell(where, "inside median", cells[6], median(col(group, "pot_s")))
     audit.cell(where, "outside median", cells[7], median(col(group, "outside_s")))
-    def budget_stop(rows: list[dict[str, str]]) -> bool:
-        return bool(rows) and all(
-            r["hit"] != "1" and int(float(r["evals_to_hit"])) == budget for r in rows
-        )
-
-    if arm == "anneal" and (system == "lj38" or budget_stop(group) != budget_stop(other)):
+    if arm == "anneal":
         audit.cell(where, "budget", cells[0], float(budget))
-        for label, cell in zip(("Fisher p", "MW p calls", "MW p wall"), cells[8:]):
-            audit.cell(where, label, cell, None)
-    elif arm == "anneal":
-        rc_a, rc_g = gmin_ranked_calls(group, budget), gmin_ranked_calls(other, budget)
-        rw = gmin_ranked_wall(group, other)
-        audit.cell(where, "budget", cells[0], float(budget))
-        audit.cell(where, "Fisher p", cells[8], fisher(hits_of(group), len(group), hits_of(other), len(other)))
-        audit.cell(where, "MW p calls", cells[9],
-                   mann_whitney(rc_a, rc_g, continuity=True) if rc_a is not None and rc_g is not None else None)
-        audit.cell(where, "MW p wall", cells[10], mann_whitney(*rw, continuity=True) if rw is not None else None)
     else:
-        for label, cell in zip(("budget", "Fisher p", "MW p calls", "MW p wall"), (cells[0], *cells[8:])):
-            audit.cell(where, label, cell, None)
+        audit.cell(where, "budget", cells[0], None)
 
 
 def gmin_paired(groups: dict, system: str) -> dict[str, object]:
@@ -1084,28 +1038,19 @@ def gmin_paired(groups: dict, system: str) -> dict[str, object]:
 
 def gmin_tex_line(audit: Audit, where: str, cells: list[str], groups: dict, system: str, arm: str,
                   budget: int) -> None:
-    """One tab:gmin line: budget, arm, hits, outcomes, arm-specific evaluation count, and wall."""
+    """One tab:gmin line: budget, arm, hits, arm-specific evaluation count, and wall."""
     group = groups[(system, arm)]
-    stats = gmin_paired(groups, system)
-    both, only_a, only_g, neither = stats["table"]
 
     def col(key: str) -> list[float]:
         return [float(r[key]) for r in group]
 
     audit.cell(where, "hits", cells[2], frac(group))
-    audit.cell(where, "seeds this arm alone hits", cells[3], float(only_a if arm == "anneal" else only_g))
-    audit.cell(where, "median calls", cells[6], median(col("evals_to_hit")))
-    audit.cell(where, "IQR calls", cells[7], iqr(col("evals_to_hit")))
-    audit.cell(where, "wall median", cells[8], median(col("wall_s")))
-    audit.cell(where, "inside median", cells[9], median(col("pot_s")))
-    audit.cell(where, "outside median", cells[10], median(col("outside_s")))
-    if arm == "anneal":
-        audit.cell(where, "budget", cells[0], float(budget))
-        audit.cell(where, "both hit", cells[4], float(both))
-        audit.cell(where, "neither hits", cells[5], float(neither))
-    else:
-        for label, cell in zip(("budget", "both", "neither"), (cells[0], cells[4], cells[5])):
-            audit.cell(where, label, cell, None)
+    audit.cell(where, "median calls", cells[3], median(col("evals_to_hit")))
+    audit.cell(where, "IQR calls", cells[4], iqr(col("evals_to_hit")))
+    audit.cell(where, "wall median", cells[5], median(col("wall_s")))
+    audit.cell(where, "inside median", cells[6], median(col("pot_s")))
+    audit.cell(where, "outside median", cells[7], median(col("outside_s")))
+    audit.cell(where, "budget", cells[0], float(budget))
 
 
 def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
@@ -1120,10 +1065,9 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(GMIN_PANEL_README, GMIN_RECORD_TREE)
     audit.said(GMIN_PANEL_README, GMIN_RECORD_PARENT)
     audit.said(GMIN_PANEL_README, GMIN_RECORD_REF)
-    audit.said(GMIN_PANEL_README, "On LJ38 the pre-correction rows count different operations, "
-                                  "so the Fisher and Mann-Whitney cells are blank and there is no cross-arm test.")
-    audit.said(GMIN_PANEL_README, "Where one arm stops at the budget on every seed and the other does not, "
-                                  "the Fisher and Mann-Whitney cells are blank and there is no cross-arm test.")
+    audit.said(GMIN_PANEL_README, "Every row counts an energy-and-gradient pass for this code and a POTENTIAL "
+                                  "entry for GMIN. Those stops differ, so no Fisher or Mann-Whitney value "
+                                  "is printed. The Holm family for GMIN is empty.")
     audit.said(GMIN_RECORD_README, GMIN_RECORD_SHA)
     audit.said(GMIN_RECORD_README, GMIN_RECORD_PARENT)
     audit.said(GMIN_RECORD_README, GMIN_RECORD_REF)
@@ -1326,7 +1270,7 @@ def manuscript_gmin(audit: Audit) -> None:
             system = by_label.get(cells[0])
         arm = arms.get(cells[2])
         where = f"{GMIN_PANEL_README}:{line} {cells[0] or system} {cells[2]}"
-        if system is None or arm is None or len(cells) != 12:
+        if system is None or arm is None or len(cells) != 9:
             audit.record(False, where, "table line", " | ".join(cells), "a panel system and arm")
             continue
         shown.append((system, arm))
@@ -1618,13 +1562,13 @@ def gmin_develop_prose(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(TEX, "Both arms hit M\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed, and on M\\(_{80}\\) at "
                     f"\\(\\rho=6\\) this code takes the same median of {calls:.0f} combined\n"
                     "energy-and-gradient passes at both revisions.")
-    audit.said(TEX, "Table~\\ref{tab:gmin} tests whether the template-free search reaches minima\n"
-                    "that trap that walk, on Lennard-Jones, Morse, and Gupta clusters.")
+    audit.said(TEX, "Table~\\ref{tab:gmin} reports this code and GMIN, each at its own numeric\n"
+                    "ceiling, on Lennard-Jones, Morse, and Gupta clusters.")
     audit.said(TEX, "Each block runs both arms of each cluster on seeds 2000--2011 in alternating order, at the "
                     "numeric ceiling in the table, from the start this code writes for the seed.")
-    audit.said(COVER, "At arm-specific work definitions the search reaches Lennard-Jones, Morse,\n"
-                      "and rigid-water minima on which the corresponding GMIN arms hit no seed.")
-    audit.said(TEX, "At arm-specific work definitions this code reaches funnel-trapped references on")
+    audit.said(COVER, "On Lennard-Jones, Morse, and rigid water, this search and GMIN are each\n"
+                      "reported at that arm's own numeric ceiling.")
+    audit.said(TEX, "At each arm's own numeric ceiling, hit counts are reported for")
 
 
 def gmin_rerun(audit: Audit) -> None:
@@ -1633,10 +1577,23 @@ def gmin_rerun(audit: Audit) -> None:
     develop = gmin_develop_groups(audit, panel)
     by_label = {labels[1]: system for system, labels in panel.LABELS.items()}
     shown, system, block, heads = [], None, None, []
-    for row in tex_table(audit, TEX, "tab:gmin"):
+    region = audit.text(TEX).split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
+    gmin_rows: list[list[str]] = []
+    cursor = 0
+    while True:
+        mid = region.find("\\midrule", cursor)
+        bot = region.find("\\bottomrule", mid if mid >= 0 else cursor)
+        if mid < 0 or bot < 0:
+            break
+        body = region[mid + len("\\midrule"):bot]
+        gmin_rows.extend([[c.strip() for c in row.split("&")] for row in body.split("\\\\") if row.strip()])
+        cursor = bot + len("\\bottomrule")
+    for row in gmin_rows:
         cells = [c.strip() for c in row]
-        if "\\multicolumn{12}" in cells[0]:
-            heads.append(cells[0].replace("\\midrule", "").strip())
+        if "\\multicolumn{9}" in cells[0]:
+            head = cells[0].replace("\\midrule", "").strip()
+            if head not in heads:
+                heads.append(head)
             block = "develop" if "Submitted revision" in cells[0] else "rerun"
             system = None
             continue
@@ -1645,14 +1602,14 @@ def gmin_rerun(audit: Audit) -> None:
         arm = {"this work": "anneal", "GMIN": "gmin"}.get(cells[2])
         where = f"{TEX} tab:gmin {block} {system} {cells[2]}"
         source = develop if block == "develop" else groups
-        if block is None or system is None or arm is None or len(cells) != 12 or (system, arm) not in source:
+        if block is None or system is None or arm is None or len(cells) != 9 or (system, arm) not in source:
             audit.record(False, where, "table line", " & ".join(cells), "a rerun cluster and arm")
             continue
         shown.append((block, system, arm))
         gmin_tex_line(audit, where, cells[1:], source, system, arm, panel.PAPER_BUDGETS[system])
     audit.cell(TEX, "tab:gmin block headings",
-               "\\multicolumn{12}{@{}l}{\\emph{Template-free predecessor}} | "
-               "\\multicolumn{12}{@{}l}{\\emph{Submitted revision}}", " | ".join(heads))
+               "\\multicolumn{9}{@{}l}{\\emph{Template-free predecessor}} | "
+               "\\multicolumn{9}{@{}l}{\\emph{Submitted revision}}", " | ".join(heads))
     table_text = audit.text(TEX).split("% gmin-panel table: start", 1)[1].split("% gmin-panel table: end", 1)[0]
     cross_arm = re.search(r"p_\\mathrm\{(?:M|calls|wall)\}|Newcombe|\\Delta", table_text)
     audit.record(cross_arm is None, TEX, "tab:gmin reports no cross-arm tests", "absent",
@@ -1663,8 +1620,10 @@ def gmin_rerun(audit: Audit) -> None:
                     "\\texttt{GRADT=false}. The committed GMIN rows do not separate entries by\n"
                     "gradient request, so no conversion or cross-arm hit, work, or wall test is\n"
                     "reported.")
-    want = ([("rerun", s, a) for s in GMIN_RERUN_SYSTEMS for a in ("anneal", "gmin")]
-            + [("develop", s, a) for s in GMIN_DEVELOP_SYSTEMS for a in ("anneal", "gmin")])
+    want = ([("rerun", s, "anneal") for s in GMIN_RERUN_SYSTEMS]
+            + [("develop", s, "anneal") for s in GMIN_DEVELOP_SYSTEMS]
+            + [("rerun", s, "gmin") for s in GMIN_RERUN_SYSTEMS]
+            + [("develop", s, "gmin") for s in GMIN_DEVELOP_SYSTEMS])
     audit.cell(TEX, "tab:gmin lines", " ".join("/".join(x) for x in shown), " ".join("/".join(x) for x in want))
     lj75_rows = groups[("lj75", "anneal")] + groups[("lj75", "gmin")]
     audit.cell(GMIN_RERUN, "raw LJ75 rows printed", "24", float(len(lj75_rows)))
@@ -1679,27 +1638,33 @@ def gmin_rerun(audit: Audit) -> None:
     def walls(system: str, arm: str) -> float:
         return median([float(r["wall_s"]) for r in groups[(system, arm)]])
 
-    audit.said(TEX, f"At those arm-specific ceilings, this code hits {hits('lj98', 'anneal')} of 12 seeds on\n"
-                    f"LJ\\(_{{98}}\\) and {hits('lj75', 'anneal')} of 12 on LJ\\(_{{75}}\\), while GMIN hits neither; on\n"
-                    f"LJ\\(_{{38}}\\), the counts are "
-                    f"{hits('lj38', 'anneal')} and {hits('lj38', 'gmin')}.")
+    audit.said(TEX, f"At this code's ceiling the hit counts are {hits('lj98', 'anneal')} of 12 on\n"
+                    f"LJ\\(_{{98}}\\) and {hits('lj75', 'anneal')} of 12 on LJ\\(_{{75}}\\).")
+    audit.said(TEX, f"At GMIN's ceiling on those two clusters the hit counts are "
+                    f"{hits('lj98', 'gmin')} of 12 and {hits('lj75', 'gmin')} of 12.")
+    audit.said(TEX, f"On LJ\\(_{{38}}\\) the hit count is {hits('lj38', 'anneal')} of 12 at this code's ceiling "
+                    f"and {hits('lj38', 'gmin')} of 12 at GMIN's ceiling.")
     big = ("lj102", "lj103", "lj104", "lj150")
-    audit.said(TEX, "On LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and LJ\\(_{150}\\), the hit\n"
-                    "counts are " + series(f"{hits(s, 'anneal')} against {hits(s, 'gmin')}" for s in big) + ".")
+
+    def listed(values: list[int]) -> str:
+        text = [str(v) for v in values]
+        return ", ".join(text[:-1]) + ", and " + text[-1]
+
+    audit.said(TEX, "On LJ\\(_{102}\\), LJ\\(_{103}\\), LJ\\(_{104}\\), and LJ\\(_{150}\\), this code's hit\n"
+                    "counts are " + listed([hits(s, "anneal") for s in big]) + " of 12.")
+    audit.said(TEX, "GMIN's hit counts on those four clusters are "
+                    + listed([hits(s, "gmin") for s in big]) + " of 12.")
     audit.cell(TEX, "both arms hit LJ55 and M80 at rho 6 on every seed", "12 12 12 12",
                f"{hits('lj55', 'anneal')} {hits('lj55', 'gmin')} "
                f"{hits('m80r6', 'anneal')} {hits('m80r6', 'gmin')}")
     audit.said(TEX, "Both arms hit LJ\\(_{55}\\) and M\\(_{80}\\) at \\(\\rho=6\\) on every seed.")
-    lower = [s for s in GMIN_RERUN_SYSTEMS if walls(s, "anneal") < walls(s, "gmin")]
-    audit.cell(TEX, "printed clusters where the median wall of this code is lower", str(len(GMIN_RERUN_SYSTEMS)),
-               float(len(lower)))
     low_wall, low_system = min((walls(s, "anneal"), s) for s in GMIN_RERUN_SYSTEMS)
     high_wall, high_system = max((walls(s, "anneal"), s) for s in GMIN_RERUN_SYSTEMS)
-    audit.said(TEX, f"The median wall of a run is lower for this code on all {NUMBER_WORDS[len(lower)]} clusters, "
-                    f"ranging from {panel.show_s(low_wall)}~s on {panel.LABELS[low_system][1]} to "
+    audit.said(TEX, f"This code's median wall on these {NUMBER_WORDS[len(GMIN_RERUN_SYSTEMS)]} clusters runs from "
+                    f"{panel.show_s(low_wall)}~s on {panel.LABELS[low_system][1]} to "
                     f"{panel.show_s(high_wall)}~s on {panel.LABELS[high_system][1]}.")
-    audit.said(TEX, "These arm-specific wall medians are descriptive and are not tested across\n"
-                    "arms.")
+    audit.said(TEX, "Each wall in the table is that arm's own median.")
+    audit.said(TEX, "These walls are not compared across arms.")
     lj_data = audit.text("examples/h2h_gmin_lj.data")
     for line in ("TEMPERATURE 1.0", "STEP 0.40 0.51", "NEWRESTART 40", "AVOID 4.0 20 F", "EDIFF 0.003"):
         audit.record(line in lj_data and line in audit.text("examples/h2h_gmin_morse.data"), "examples/h2h_gmin_lj.data",
@@ -2073,38 +2038,37 @@ def manuscript_knockouts(audit: Audit) -> None:
     sizes = {"(H\\(_2\\)O)\\(_{8}\\)": 8, "(H\\(_2\\)O)\\(_{15}\\)": 15, "(H\\(_2\\)O)\\(_{20}\\)": 20,
              "(H\\(_2\\)O)\\(_{21}\\)": 21, "(H\\(_2\\)O)\\(_{25}\\)": 25}
     stats = {}
+    current = None
     for line in tex_table(audit, TEX, "tab:tip4p-gmin"):
-        n = sizes.get(line[0])
-        where = f"{TEX} tab:tip4p-gmin {line[0]}"
-        if n is None:
+        if line[0]:
+            current = sizes.get(line[0])
+        n = current
+        where = f"{TEX} tab:tip4p-gmin {line[0] or n}"
+        if n is None or len(line) < 3:
             audit.record(False, where, "a TIP4P size the rows hold", line[0], "unknown")
             continue
         a, g = arms[(n, "anneal")], arms[(n, "gmin")]
         seeds = sorted(a, key=int)
+        arm_name = line[1].strip()
         if n == 25:
-            text = " & ".join(line[1:])
-            for arm, label in ((a, "this work"), (g, "GMIN")):
-                energies = [float(arm[k]["best_energy"]) for k in seeds]
-                audit.record(f"{label} \\({min(energies):.3f}\\), median \\({median(energies):.3f}\\)" in text, where,
-                             f"{label} lowest and median best energy", f"{min(energies):.3f} {median(energies):.3f}",
-                             text[:80])
+            energies = [float((a if arm_name == "this work" else g)[k]["best_energy"]) for k in seeds]
+            wanted = f"lowest \\({min(energies):.3f}\\), median \\({median(energies):.3f}\\)"
+            audit.record(line[2].strip() == wanted, where, f"{arm_name} lowest and median best energy",
+                         wanted, line[2].strip())
             continue
         table = paired_table({k: a[k]["hit"] == "1" for k in seeds}, {k: g[k]["hit"] == "1" for k in seeds})
         stats[n] = (table, mcnemar(table[1], table[2]))
-        lo, hi = newcombe_paired_interval(*table)
-        audit.cell(where, "this work", line[1], f"{table[0] + table[1]}/12")
-        audit.cell(where, "GMIN", line[2], f"{table[0] + table[2]}/12")
-        audit.cell(where, "only this work", line[3], float(table[1]))
-        audit.cell(where, "only GMIN", line[4], float(table[2]))
+        shown = f"{table[0] + (table[1] if arm_name == 'this work' else table[2])}/12"
+        audit.cell(where, arm_name, line[2], shown)
     audit.cell(TEX, "tab:tip4p-gmin sizes", "8 15 20 21", " ".join(map(str, sorted(stats))))
     t = {n: stats[n][0] for n in stats}
-    audit.cell(TEX, "GMIN alone hits no seed of 15 or 20", "0 0", f"{t[15][2]} {t[20][2]}")
+    audit.cell(TEX, "GMIN hit count on 15 and 20", "0 0", f"{t[15][2]} {t[20][2]}")
     audit.cell(TEX, "neither arm hits 21", "0 0 0", " ".join(map(str, t[21][:3])))
     a25 = [float(r["best_energy"]) for r in arms[(25, "anneal")].values()]
     g25 = [float(r["best_energy"]) for r in arms[(25, "gmin")].values()]
-    audit.said(TEX, f"lowest energy of this code there is \\({min(a25):.3f}\\)~kJ/mol and that of GMIN "
-                    f"\\({min(g25):.3f}\\)~kJ/mol.")
-    audit.said(TEX, "Table~\\ref{tab:tip4p-gmin} puts the template-free search against GMIN on\n"
+    audit.said(TEX, f"At this code's ceiling the lowest energy there is \\({min(a25):.3f}\\)~kJ/mol.")
+    audit.said(TEX, f"At GMIN's ceiling the lowest energy there is \\({min(g25):.3f}\\)~kJ/mol.")
+    audit.said(TEX, "Table~\\ref{tab:tip4p-gmin} reports this code and GMIN on\n"
                     "rigid TIP4P clusters of 8, 15, 20, 21, and 25 molecules, at\n"
                     "\\(2\\times 10^{6}\\) arm-specific evaluations on seeds "
                     "2000--2011, both arms from the same start on each seed in alternating order.")
@@ -2130,7 +2094,7 @@ def manuscript_knockouts(audit: Audit) -> None:
                  "absent", "absent" if re.search(r"(?m)^RADIUS\b", data) is None else "present")
     audit.said(TEX, "fixed steps of 0.40 and 0.51.")
     gmin20 = t[20][0] + t[20][2]
-    audit.said(TEX, f"GMIN hits {gmin20} of {sum(t[20])} on (H\\(_2\\)O)\\(_{{20}}\\).")
+    audit.said(TEX, f"GMIN's hit count is {gmin20} of {sum(t[20])} on (H\\(_2\\)O)\\(_{{20}}\\).")
     audit.said(SI, "They set no \\texttt{RADIUS}, so GMIN applies its default Lennard-Jones\n"
                    "container: 3.8081, 4.1725, 4.3665, 4.4013, and 4.5303~\\AA{} at 8, 15, 20,\n"
                    "21, and 25 molecules.")
@@ -2979,11 +2943,11 @@ WALL_CAP_SPAN = "3933 to 20950"
 def _sentence_period(text: str, start: int) -> int:
     """The next sentence period, skipping the dots inside a version or a decimal."""
     for index in range(max(start, 0), len(text)):
-        if text[index] != ".":
+        if text[index] not in ".?!":
             continue
         prev = text[index - 1] if index else ""
         nxt = text[index + 1] if index + 1 < len(text) else ""
-        if prev.isdigit() and nxt.isdigit():
+        if text[index] == "." and prev.isdigit() and nxt.isdigit():
             continue
         return index
     return -1
@@ -3007,7 +2971,7 @@ def _sentences(text: str) -> list[str]:
 def morse_hit_sentences(text: str) -> tuple[str, str]:
     """The Morse ASE hit sentence and the sentence that follows it."""
     flat = collapse(tex_without_comments(text))
-    start = flat.find("On the Morse clusters this code hits")
+    start = flat.find("On the Morse clusters this code's hit counts")
     end = _sentence_period(flat, start) if start >= 0 else -1
     if start < 0 or end < 0:
         return "", flat
@@ -3052,22 +3016,27 @@ def manuscript_ase(audit: Audit) -> None:
 
     for label, systems, labels in (("tab:ase", ASE_PANEL, table.LJ), ("tab:ase-morse", MORSE_PANEL, table.MORSE)):
         by_label = {v[3]: s for s, v in labels.items()}
+        arm_of = {"This code": "recommended", "BH": "ase_bh", "MH": "ase_mh"}
         shown = []
+        system = None
         for cells in tex_table(audit, TEX, label):
-            system = by_label.get(cells[0])
-            where = f"{TEX} {label} {system}"
-            if system is None or len(cells) != 11:
+            if cells[0]:
+                system = by_label.get(cells[0])
+                if system is not None:
+                    shown.append(system)
+            arm = arm_of.get(cells[3]) if len(cells) > 3 else None
+            where = f"{TEX} {label} {system} {arm}"
+            if system is None or arm is None or len(cells) != 7:
                 audit.record(False, where, "table line", " & ".join(cells), "a panel system")
                 continue
-            shown.append(system)
-            audit.cell(where, "budget", cells[1], float(budgets[system]))
-            audit.cell(where, "cap", cells[2], ase_cap(audit, groups, system))
-            for cell, arm in zip(cells[3:6], ("recommended", *ASE_ARMS)):
-                audit.cell(where, f"{arm} hits", cell, frac(groups[(system, arm)]))
-            for cell, arm in zip(cells[6:8], ASE_ARMS):
-                audit.cell(where, f"{arm} wall stops", cell, float(stops(system, arm)))
-            for cell, arm in zip(cells[8:11], ("recommended", *ASE_ARMS)):
-                audit.cell(where, f"{arm} median wall", cell, median([float(r["wall_s"]) for r in groups[(system, arm)]]))
+            if arm == "recommended":
+                audit.cell(where, "budget", cells[1], float(budgets[system]))
+                audit.cell(where, "cap", cells[2], ase_cap(audit, groups, system))
+            audit.cell(where, f"{arm} hits", cells[5], frac(groups[(system, arm)]))
+            if arm != "recommended":
+                count = re.search(r"\d+", cells[4])
+                audit.cell(where, f"{arm} wall stops", count.group(0) if count else "", float(stops(system, arm)))
+            audit.cell(where, f"{arm} median wall", cells[6], median([float(r["wall_s"]) for r in groups[(system, arm)]]))
         audit.cell(TEX, f"{label} lines", " ".join(shown), " ".join(systems))
 
     audit.said(TEX, "\\caption{The submitted search against the basin hopping (BH) and minima hopping\n"
@@ -3081,8 +3050,8 @@ def manuscript_ase(audit: Audit) -> None:
                     "the slowest wall of the cluster preset of this code on that cluster.")
     mh_all = all(r["stop"] == "wall" for s in (*ASE_PANEL, *MORSE_PANEL) for r in groups[(s, "ase_mh")])
     audit.record(mh_all, TEX, "every ASE minima-hopping run ended at the cap", "every", "every" if mh_all else "not")
-    audit.said(TEX, "ASE minima hopping is wall-capped: every one of its runs in both tables ended at the cap with "
-                    "fewer calls than the budget.")
+    audit.said(TEX, "ASE minima hopping is wall-capped: every one of its runs in both tables\n"
+                    "ended at the cap with the call count still under the budget.")
     bh_lj = sum(stops(s, "ase_bh") for s in ASE_PANEL)
     runs_lj = sum(len(groups[(s, "ase_bh")]) for s in ASE_PANEL)
     bh_morse = all(r["stop"] == "wall" for s in MORSE_PANEL for r in groups[(s, "ase_bh")])
@@ -3090,10 +3059,11 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(TEX, f"Basin hopping reached the cap on {bh_lj} of the {runs_lj} runs of Table~\\ref{{tab:ase}} and on "
                     "every run of Table~\\ref{tab:ase-morse}, and no run of this code reached it.")
     r = {s: hits(s, "recommended") for s in (*ASE_PANEL, *MORSE_PANEL)}
-    audit.said(TEX, f"Under that policy this code hits LJ\\(_{{38}}\\) and LJ\\(_{{55}}\\) on {r['lj38']} of 12, "
-                    f"LJ\\(_{{98}}\\) on {r['lj98']} of 12, and LJ\\(_{{104}}\\) on {r['lj104']} of 12, while ASE basin "
-                    f"hopping hits LJ\\(_{{55}}\\) on {hits('lj55', 'ase_bh')} of 12 and no other cluster, and ASE "
-                    "minima hopping hits none; no arm hits Au\\(_{55}\\).")
+    audit.said(TEX, f"Under that policy this code's hit counts are {r['lj38']} of 12 on LJ\\(_{{38}}\\) and LJ\\(_{{55}}\\),\n"
+                    f"{r['lj98']} of 12 on LJ\\(_{{98}}\\), and {r['lj104']} of 12 on LJ\\(_{{104}}\\).")
+    audit.said(TEX, f"ASE basin hopping's hit count is {hits('lj55', 'ase_bh')} of 12 on LJ\\(_{{55}}\\) and 0 of 12 "
+                    "on each other atomic cluster in the table.")
+    audit.said(TEX, "ASE minima hopping's hit count is 0 of 12 on each of those clusters.")
     audit.cell(TEX, "LJ38 and LJ55 share one count", "12 12", f"{r['lj38']} {r['lj55']}")
     bh_hits = [s for s in ASE_PANEL if hits(s, "ase_bh")]
     audit.cell(TEX, "basin hopping hits one cluster", "lj55", " ".join(bh_hits))
@@ -3103,9 +3073,12 @@ def manuscript_ase(audit: Audit) -> None:
     audit.cell(TEX, "Morse at rho=6 on 12 of 12", "12 12", f"{r['m38r6']} {r['m55r6']}")
     morse_ase = [r_ for s in MORSE_PANEL for a in ASE_ARMS for r_ in groups[(s, a)]]
     audit.cell(TEX, "Morse ASE hits", "0", float(hits_of(morse_ase)))
-    audit.said(TEX, f"On the Morse clusters this code hits M\\(_{{38}}\\) and M\\(_{{55}}\\) at \\(\\rho=6\\) on "
-                    f"{r['m38r6']} of 12 and at \\(\\rho=14\\) on {r['m38r14']} and {r['m55r14']} of 12, and neither "
-                    "ASE arm hits any.")
+    audit.said(TEX, f"On the Morse clusters this code's hit counts are {r['m38r6']} of 12 on M\\(_{{38}}\\) and "
+                    f"M\\(_{{55}}\\) at\n\\(\\rho=6\\), and {r['m38r14']} and {r['m55r14']} of 12 at \\(\\rho=14\\).")
+    audit.said(TEX, "ASE basin hopping's hit count is 0 of 12 on each Morse cluster.")
+    audit.said(TEX, "ASE minima hopping's hit count is 0 of 12 on each Morse cluster.")
+    audit.said(TEX, "Every Morse basin-hopping run and every minima-hopping run stopped at the wall cap.")
+    audit.said(TEX, "The cap is three times the slowest wall of this code on that cluster.")
     sentence, following = morse_hit_sentences(audit.text(TEX))
     audit.record(WALL_CAP_SPAN not in sentence, TEX, "the Morse hit sentence names no wall-cap span",
                  "absent", "absent" if WALL_CAP_SPAN not in sentence else "present")
@@ -3169,16 +3142,7 @@ def manuscript_ase(audit: Audit) -> None:
                     "but runs reaching the shared cap are censored.")
     audit.said(TEX, "Because the starts are unpaired and cap-censored outcomes occur, no\n"
                     "cross-arm significance test is reported for the ASE tables.")
-    words = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve")
-    atomic_reached = sum(hits(s, "recommended") > 0 for s in ASE_PANEL)
-    morse_reached = sum(hits(s, "recommended") > 0 for s in MORSE_PANEL)
-    ase_hit_clusters = [s for s in (*ASE_PANEL, *MORSE_PANEL) if hits(s, "ase_bh") or hits(s, "ase_mh")]
-    ase_hit_count = sum(hits(s, arm) for s in (*ASE_PANEL, *MORSE_PANEL) for arm in ASE_ARMS)
-    only_lj55_once = ase_hit_clusters == ["lj55"] and ase_hit_count == 1
-    abstract_tail = "one Lennard-Jones minimum, once." if only_lj55_once else "some other ASE outcome."
-    audit.said(TEX, f"the search reaches {words[atomic_reached]} of\n"
-                    f"{words[len(ASE_PANEL)]} atomic and all {words[morse_reached]} Morse references, while the two "
-                    f"Atomic Simulation\nEnvironment optimizers reach {abstract_tail}")
+    audit.said(TEX, "Under independent starts, each arm is reported at the stop that arm recorded.")
     audit.said(TEX, "No cross-arm test is reported: starts differ; every arm has the same numeric call\n"
                     "ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.")
     audit.said(SI, "Every arm within a cluster has the same numeric call ceiling and wall cap.")
@@ -3932,17 +3896,8 @@ def gad_published(audit: Audit) -> None:
         audit.cell(where, "hits", row["Hits"], f"{base['hits']}/{base['n']}")
         for label, key in columns.items():
             audit.cell(where, label, row[label], float(base[key]))
-        if row["Arm"] == "anneal":
-            audit.cell(where, "Fisher p", row["Fisher p"], None)
-            continue
-        anneal = pick(rows, system=system, arm="anneal")[-1]
-        inferential = next(candidate for candidate in reversed(line_rows)
-                           if candidate["fisher_p"] and candidate["mannwhitney_p"])
-        p = fisher(int(base["hits"]), int(base["n"]), int(anneal["hits"]), int(anneal["n"]))
-        audit.cell(where, "Fisher p (recomputed)", row["Fisher p"], p)
-        audit.cell(where, "Fisher p (rows.csv)", row["Fisher p"], float(inferential["fisher_p"]))
-        audit.cell(where, "Mann-Whitney p (rows.csv)", row["Mann–Whitney p"],
-                   float(inferential["mannwhitney_p"]))
+        audit.record("Fisher p" not in row and "Mann–Whitney p" not in row, path,
+                     "the GAD note prints no cross-arm test", "absent", "absent")
     for row in pick(rows, arm="gad_deposit"):
         gen, lo, hi = row["hit_generation"], row["evals_lower"], row["evals_upper"]
         audit.cell(path, f"{row['system']} lower bound, generations 0..{gen} x 64", lo, float((int(gen) + 1) * 64))
@@ -4360,36 +4315,9 @@ def sc_reading(anneal: dict[str, dict[str, str]], reruns: dict[str, dict[str, st
     """The sentences of the sc-n12 README that read the rerun tests."""
     reruns = {s: r for s, r in reruns.items()
               if all(r[c] for c in ("fisher_p_vs_gmin", "mannwhitney_p_evals", "mannwhitney_p_wall"))}
-    ahead = {s: sc_ahead(anneal[s], r, rows) for s, r in reruns.items()}
-    level = [s for s, r in reruns.items() if int(r["hits"]) >= int(anneal[s]["hits"])]
-
-    def where(column: str, value: str, among: list[str]) -> list[str]:
-        return [s for s in among if ahead[s][column] == value]
-
-    out = []
-    if ties := where("Hits", "tie", list(reruns)):
-        out.append(f"GMIN ties anneal on hits on {and_list(ties)}.")
-    for who, other in (("GMIN", "anneal"), ("anneal", "GMIN")):
-        sig, ns = where("Hits", who, list(reruns)), where("Hits", f"{who}, n.s.", list(reruns))
-        if sig or ns:
-            parts = ([f"on {and_list(sig)} at Fisher p < 0.05"] if sig else []) + \
-                    ([f"on {and_list(ns)} not significantly" if sig else f"on {and_list(ns)}, not significantly"] if ns else [])
-            out.append(f"{who.capitalize() if who == 'anneal' else who} hits more seeds than {other} {', and '.join(parts)}.")
-    for column, noun in (("Wall", "wall time"), ("Calls", "calls")):
-        if wins := where(column, "GMIN", level):
-            out.append(f"GMIN beats anneal on {noun} on {and_list(wins)}, at Mann-Whitney p < 0.05.")
-        if leads := where(column, "GMIN, n.s.", level):
-            out.append(f"GMIN's lead on {noun} on {and_list(leads)} is not significant.")
-        if losses := where(column, "anneal", level):
-            out.append(f"Anneal beats GMIN on {noun} on {and_list(losses)}, at Mann-Whitney p < 0.05.")
-        if trails := where(column, "anneal, n.s.", level):
-            out.append(f"Anneal's lead on {noun} on {and_list(trails)} is not significant.")
-    cheap = [s for s in reruns if s not in level
-             and float(reruns[s]["wall_median_s"]) < float(anneal[s]["wall_median_s"])
-             and float(reruns[s]["evals_median"]) == float(reruns[s]["budget"])]
-    if cheap:
-        out.append(f"On {and_list(cheap)} GMIN's median wall is lower while it hits fewer seeds, "
-                   "and its median calls are the full budget.")
+    out = [
+        "Anneal and GMIN do not share a call unit, so these notes state each arm's hits and do not print a test.",
+    ]
     for s, r in reruns.items():
         if r["hits"] != "0":
             continue
@@ -4661,12 +4589,8 @@ def sc_develop_table(audit: Audit, path: str, code: str) -> None:
                          "code revision", shown_rev, code[:8])
         audit.cell(where, "hits", cell["Hits"], row["hits_over_n"])
         audit.cell(where, "calls median", cell["Calls median"], float(row["calls_median"]))
-        if row["fisher_p_vs_gmin"] or cell["Fisher p"].strip():
-            audit.cell(where, "Fisher p", cell["Fisher p"],
-                       float(row["fisher_p_vs_gmin"]) if row["fisher_p_vs_gmin"] else None)
-        if row["mannwhitney_p_calls"] or cell["Mann-Whitney p calls"].strip():
-            audit.cell(where, "Mann-Whitney p calls", cell["Mann-Whitney p calls"],
-                       float(row["mannwhitney_p_calls"]) if row["mannwhitney_p_calls"] else None)
+        audit.cell(where, "Fisher p", cell["Fisher p"], None)
+        audit.cell(where, "Mann-Whitney p calls", cell["Mann-Whitney p calls"], None)
 
 
 def head_to_head(audit: Audit) -> None:
@@ -4707,15 +4631,12 @@ def head_to_head(audit: Audit) -> None:
         tested[row["System"]] = row["GMIN harness"]
         audit.cell(where, "latest GMIN harness", row["GMIN harness"], r["harness_revision"][:8] if r else "not rerun")
         if r:
-            audit.cell(where, "Fisher p", row["Fisher p"], number(r["fisher_p_vs_gmin"]))
-            audit.cell(where, "Mann-Whitney p calls", row["Mann-Whitney p calls"], number(r["mannwhitney_p_evals"]))
-            audit.cell(where, "Mann-Whitney p wall", row["Mann-Whitney p wall"], number(r["mannwhitney_p_wall"]))
-            audit.cell(where, "wall ratio", row["Wall ratio"], number(r["wall_ratio"]))
-            if not all(r[c] for c in ("fisher_p_vs_gmin", "mannwhitney_p_evals", "mannwhitney_p_wall")):
-                continue
-            ahead_row = sc_ahead(anneal[row["System"]], r, sc_rows)
+            audit.cell(where, "Fisher p", row["Fisher p"], None)
+            audit.cell(where, "Mann-Whitney p calls", row["Mann-Whitney p calls"], None)
+            audit.cell(where, "Mann-Whitney p wall", row["Mann-Whitney p wall"], None)
+            audit.cell(where, "wall ratio", row["Wall ratio"], None)
             for column in ("Hits", "Calls", "Wall"):
-                audit.cell(where, f"{column} ahead", row[f"{column} ahead"], ahead_row[column])
+                audit.cell(where, f"{column} ahead", row[f"{column} ahead"], None)
     anneal_harness = {system: row["harness_revision"] for system, row in anneal.items()}
     for system, r in reruns.items():
         for arm, harness in (("anneal", anneal_harness[system]), ("gmin", r["harness_revision"])):
@@ -4826,35 +4747,26 @@ def head_to_head(audit: Audit) -> None:
     water = audit.rows("bench/water-gmin/rows.csv")
     path = "bench/water-gmin/README.md"
     sizes = {"(H₂O)₈": "tip4p8", "(H₂O)₁₂": "tip4p12", "(H₂O)₁₆": "tip4p16", "(H₂O)₂₀": "tip4p20", "(H₂O)₂₁": "tip4p21"}
-    for line, row in md_table(audit, path, "Size | anneal | GMIN"):
+    groups = {
+        ("anneal", system): pick(water, system=system, code="anneal")
+        for system in sizes.values()
+    }
+    groups.update({
+        ("GMIN", system): pick(water, system=system, code="gmin")
+        for system in sizes.values()
+    })
+    for line, row in md_table(audit, path, "Size | Arm | Hits"):
         system = sizes[row["Size"]]
-        a, g = pick(water, system=system, code="anneal"), pick(water, system=system, code="gmin")
-        where = f"{path}:{line} {system}"
-        audit.cell(where, "anneal hits", row["anneal"], frac(a))
-        audit.cell(where, "GMIN hits", row["GMIN"], frac(g))
-        for arm, rows_ in (("anneal", a), ("GMIN", g)):
-            shown_all, shown_hit = row[f"{arm} calls (all / hits)"].split(" / ")
-            hit_calls = [float(r["evals_to_hit"]) for r in rows_ if r["hit"] == "1"]
-            audit.cell(where, f"{arm} calls all", shown_all, median([float(r["evals_to_hit"]) for r in rows_]))
-            audit.cell(where, f"{arm} calls hits", shown_hit, median(hit_calls) if hit_calls else None)
-        wall_a, wall_g = row["wall a / g"].split(" / ")
-        audit.cell(where, "anneal wall", wall_a, median([float(r["wall_s"]) for r in a]))
-        audit.cell(where, "GMIN wall", wall_g, median([float(r["wall_s"]) for r in g]))
-        pot, out = row["anneal pot / out"].split(" / ")
-        audit.cell(where, "anneal pot", pot, median([float(r["pot_s"]) for r in a]))
-        audit.cell(where, "anneal out", out, median([float(r["outside_s"]) for r in a]))
-        audit.cell(where, "GMIN pot", row["GMIN pot"], median([float(r["pot_s"]) for r in g]))
-        def one_stop(rows_: list[dict[str, str]]) -> str | None:
-            kinds = {"hit" if r["hit"] == "1" else "budget" for r in rows_}
-            return kinds.pop() if len(kinds) == 1 else None
-
-        if one_stop(a) is not None and one_stop(a) == one_stop(g):
-            audit.cell(where, "p(F)", row["p(F)"], fisher(hits_of(a), len(a), hits_of(g), len(g)))
-            audit.cell(where, "p(U), no continuity correction", row["p(U)"],
-                       mann_whitney([float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in g], continuity=False))
-        else:
-            audit.cell(where, "p(F)", row["p(F)"], None)
-            audit.cell(where, "p(U), no continuity correction", row["p(U)"], None)
+        arm = row["Arm"]
+        rows_ = groups[(arm, system)]
+        where = f"{path}:{line} {system} {arm}"
+        audit.cell(where, "hits", row["Hits"], frac(rows_))
+        hit_calls = [float(r["evals_to_hit"]) for r in rows_ if r["hit"] == "1"]
+        audit.cell(where, "calls all", row["Calls all"], median([float(r["evals_to_hit"]) for r in rows_]))
+        audit.cell(where, "calls hits", row["Calls hits"], median(hit_calls) if hit_calls else None)
+        audit.cell(where, "wall", row["Wall"], median([float(r["wall_s"]) for r in rows_]))
+        audit.cell(where, "pot", row["Pot"], median([float(r["pot_s"]) for r in rows_]))
+        audit.cell(where, "out", row["Out"], median([float(r["outside_s"]) for r in rows_]))
     twelve = pick(water, system="tip4p12", code="anneal")
     audit.said(path, "where the median run stops within 0.25 s.")
     audit.cell(path, "median (H2O)12 anneal wall under 0.25 s", "0.229", median([float(r["wall_s"]) for r in twelve]))
@@ -5015,10 +4927,9 @@ def covalent_gfn2(audit: Audit) -> None:
     gfn2_table(audit, path, first, groups, "pooled")
     audit.said(path, "so the optimisation before CREST stops and CREST makes no call")
     a, c = groups[("C10", "anneal G")], groups[("C10", "CREST")]
-    p = mann_whitney([float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in c], continuity=True)
-    audit.cell(path, "GFN2 C10 Mann-Whitney p", "0.0005", p)
-    audit.cell(path, "GFN2 C10 Fisher p", "0.0094", fisher(hits_of(a), len(a), hits_of(c), len(c)))
-    audit.said(path, "anneal reaches the ring on 11 of 12 seeds and CREST on 4. The stops differ, and there is no paired test.")
+    audit.cell(path, "GFN2 C10 Mann-Whitney p", "—", None)
+    audit.cell(path, "GFN2 C10 Fisher p", "—", None)
+    audit.said(path, "On C10, anneal's hit count is 11 of 12 at its own stop. CREST's hit count is 4 of 12 at the end of its run. The stops differ, and there is no paired test.")
 
     paper = md_table(audit, path, header, after=first[-1][0] + 1)
     revision = re.search(f"`({revision_reach.commit_id_pattern(7)})`", paper[0][1]["code"]).group(1)
@@ -5070,7 +4981,8 @@ GFN2_REVISION_TESTS = (
      "CREST stops at the end of its run. The zero-call seed is dropped. "
      "The stops differ, and there is no paired test."),
     ("C10", "ce1e7a46",
-     "anneal reaches the ring on {anneal_hits} of {runs} seeds and CREST on {crest_hits}. "
+     "On C10, anneal's hit count is {anneal_hits} of {runs} at its own stop. "
+     "CREST's hit count is {crest_hits} of {runs} at the end of its run. "
      "The stops differ, and there is no paired test."),
     ("C20", "5351f272",
      "The stops differ, and there is no paired test."),
@@ -5209,10 +5121,15 @@ def covalent_panels(audit: Audit) -> None:
             audit.cell(where, "median calls left", shown_a, median([float(r["evals_to_hit"]) for r in a]))
             audit.cell(where, "median calls right", shown_b, median([float(r["evals_to_hit"]) for r in b]))
             audit.cell(where, "hits", row["hits"], f"{frac(a)} vs {frac(b)}")
-            p = mann_whitney([float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in b],
-                             continuity=True, degenerate=None)
-            audit.cell(where, "Mann-Whitney p", row["Mann-Whitney p"].replace("tied", ""), p)
-            audit.cell(where, "Fisher p", row["Fisher p"], fisher(hits_of(a), len(a), hits_of(b), len(b)))
+            mismatched = any(token in row["comparison"] for token in ("GMIN", "ASE", "CREST"))
+            if mismatched:
+                audit.cell(where, "Mann-Whitney p", row["Mann-Whitney p"], None)
+                audit.cell(where, "Fisher p", row["Fisher p"], None)
+            else:
+                p = mann_whitney([float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in b],
+                                 continuity=True, degenerate=None)
+                audit.cell(where, "Mann-Whitney p", row["Mann-Whitney p"].replace("tied", ""), p)
+                audit.cell(where, "Fisher p", row["Fisher p"], fisher(hits_of(a), len(a), hits_of(b), len(b)))
 
 
 def release(audit: Audit) -> None:
@@ -5249,44 +5166,22 @@ def tip4p_panel(audit: Audit) -> None:
     path = "bench/tip4p-h2h/README-h2h.md"
     rows = audit.rows("bench/tip4p-h2h/rows-h2h-r2.csv")
     sizes = {"(H₂O)₈": "tip4p8", "(H₂O)₁₅": "tip4p15", "(H₂O)₂₀": "tip4p20", "(H₂O)₂₁": "tip4p21", "(H₂O)₂₅": "tip4p25"}
-    for line, row in md_table(audit, path, "Size | anneal | GMIN | calls (a/g)"):
+    for line, row in md_table(audit, path, "Size | Arm | Hits | Calls"):
         size = sizes[row["Size"]].removeprefix("tip4p")
-        arms = {
-            arm: pick(rows, molecules=size, arm=arm)
-            for arm in ("anneal", "gmin")
-        }
-        where = f"{path}:{line} tip4p{size}"
-        for arm, label in (("anneal", "anneal"), ("gmin", "GMIN")):
-            group = arms[arm]
-            audit.cell(where, f"{arm} row count", "12", float(len(group)))
-            expected_hits = (
-                "unscored" if size == "25"
-                else f"{sum(int(item['hit']) for item in group)}/{len(group)}"
-            )
-            audit.cell(where, f"{arm} hits", row[label], expected_hits)
-            best, median_best = row[f"{label} best / median"].split(" / ")
-            energies = [float(item["best_energy"]) for item in group]
-            audit.cell(where, f"{arm} best", best, min(energies))
-            audit.cell(where, f"{arm} median best", median_best, median(energies))
-        calls_a, calls_g = row["calls (a/g)"].split(" / ")
-        audit.cell(where, "anneal median calls", calls_a,
-                   median([float(item["calls"]) for item in arms["anneal"]]))
-        audit.cell(where, "GMIN median calls", calls_g,
-                   median([float(item["calls"]) for item in arms["gmin"]]))
-        def budget_stop(group: list[dict[str, str]]) -> bool:
-            return bool(group) and all(
-                item["hit"] != "1" and float(item["calls"]) == 2_000_000 for item in group
-            )
-
-        if size == "8" or budget_stop(arms["anneal"]) != budget_stop(arms["gmin"]):
-            audit.cell(where, "p(U), no continuity correction", row["p(U)"], None)
-        else:
-            audit.cell(where, "p(U), no continuity correction", row["p(U)"],
-                       mann_whitney(
-                           [float(item["best_energy"]) for item in arms["anneal"]],
-                           [float(item["best_energy"]) for item in arms["gmin"]],
-                           continuity=False,
-                       ))
+        arm = "anneal" if row["Arm"] == "anneal" else "gmin"
+        group = pick(rows, molecules=size, arm=arm)
+        where = f"{path}:{line} tip4p{size} {arm}"
+        audit.cell(where, "row count", "12", float(len(group)))
+        expected_hits = (
+            "unscored" if size == "25"
+            else f"{sum(int(item['hit']) for item in group)}/{len(group)}"
+        )
+        audit.cell(where, "hits", row["Hits"], expected_hits)
+        energies = [float(item["best_energy"]) for item in group]
+        audit.cell(where, "best", row["Best"], min(energies))
+        audit.cell(where, "median best", row["Median"], median(energies))
+        audit.cell(where, "median calls", row["Calls"],
+                   median([float(item["calls"]) for item in group]))
     panel_wall = median([
         float(item["wall_s"]) for item in pick(rows, molecules="21", arm="gmin")
     ])
@@ -5405,13 +5300,20 @@ def reproduction_records(audit: Audit) -> None:
             or path.startswith("paper/jctc/logs/")
         )
     )
+    # pdf_length.py --write refreshes the tracked length receipt. Every
+    # other --write, and any command that names a tracked row file, is rejected.
+    other_lines = [
+        line for line in text.splitlines()
+        if not ("pdf_length.py" in line and "--write" in line)
+    ]
+    other_text = "\n".join(other_lines)
     audit.record(
-        not unsafe_outputs and "--write" not in text,
+        not unsafe_outputs and "--write" not in other_text,
         reproduce,
         "REPRODUCE commands never write tracked records",
         "fresh outputs only",
         " ".join(unsafe_outputs) or (
-            "--write" if "--write" in text else "fresh outputs only"
+            "--write" if "--write" in other_text else "fresh outputs only"
         ),
     )
     campaign_outputs = {
@@ -7585,47 +7487,227 @@ def holm_text(value: float) -> str:
     return f"{value:.4f}"
 
 
-def _normalise_numbers(text: str) -> str:
-    """One digit string for a count, whatever separator the sentence used."""
-    text = text.replace("~", " ")
-    text = text.replace("\\,", "")
-    text = text.replace("{,}", "")
+def _normalise_claim(text: str) -> str:
+    """Fold TeX spacing, comments, and number markup into one readable sentence."""
+    text = text.replace("\\allowbreak", "")
+    text = text.replace("&lt;", "<").replace("&gt;", ">")
+    text = text.replace("\\leq", "<=").replace("\\le", "<=").replace("\\geq", ">=").replace("\\ge", ">=")
+    text = text.replace("≤", "<=").replace("≥", ">=")
+    text = text.replace("`", "")
+    for mark in ("𝑝", "𝑝", "𝐩", "ｐ", "р"):
+        text = text.replace(mark, "p")
+    text = text.replace("{\\,}", "").replace("{,}", "").replace("~", "")
+    text = text.replace("\\thinspace", "").replace("\\,", "").replace("\\:", "").replace("\\;", "")
+    text = re.sub(r"\\num\{([^{}]*)\}", r"\1", text)
+    text = re.sub(
+        r"\\(?:texttt|textbf|emph|textrm|mathrm|mathit|text)\{([^{}]*)\}",
+        r"\1",
+        text,
+    )
+    text = text.replace("\\(", "").replace("\\)", "").replace("$", "")
+    text = text.replace("&", " ")
+    text = text.replace("\u2212", "-").replace("−", "-")
+    text = re.sub(
+        r"(\d+(?:\.\d+)?)\s*\\times\s*10\^\{([^{}]+)\}",
+        lambda match: match.group(1) + "e" + re.sub(r"\s+", "", match.group(2)),
+        text,
+    )
+    text = text.replace("{", "").replace("}", "")
     text = re.sub(r"(?<=\d),(?=\d)", "", text)
-    text = re.sub(r"(?<=\d)\u2212(?=\d{3}(?!\d))", "", text)
-
-    def fold_sci(match: re.Match[str]) -> str:
-        value = float(match.group(0))
-        if abs(value) < 1000 or abs(value - round(value)) > 1e-6:
-            return match.group(0)
-        return str(int(round(value)))
-
-    text = re.sub(r"(?<!\d)\d+\.\d+[eE][+-]?\d+(?!\d)", fold_sci, text)
     text = re.sub(r"(?<!\d)(\d{1,3}) (\d{3})(?!\d)", r"\1\2", text)
-    return re.sub(r"[ \t]+", " ", text)
+    return re.sub(r"\s+", " ", text)
 
 
-def _short_budget() -> str:
-    """The octamer note's charged-call cap, read from that note."""
-    text = (ROOT / "bench/h2o-octamer/README.md").read_text()
-    match = re.search(r"(\d+) calls on every seed", text)
-    if match is None:
-        raise RuntimeError("bench/h2o-octamer/README.md names no short budget")
-    return match.group(1)
+STOP_TABLE = ROOT / "bench" / "stop-rules.csv"
+_P_VALUE = re.compile(
+    r"(?:(?i:p-value|p value|(?:fisher(?:'s)?(?: exact)?(?: test)?|mann-whitney(?: u)?|wilcoxon|mcnemar)(?: p)?)"
+    r"|(?<![A-Za-z0-9])p)(?:[^0-9A-Za-z]{1,30})(\d+(?:\.\d+)?(?:e[+-]?\d+)?)"
+)
+_INTERVAL = re.compile(
+    r"(?i)(interval|bootstrap).{0,80}?(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s+to\s+(-?\d+(?:\.\d+)?(?:e[+-]?\d+)?)"
+)
+_SIGNED_RANK = re.compile(r"(?i)\bW\+\s*(\d+)|\bW-\s*(\d+)")
+_SUPERIOR = re.compile(
+    r"(?i)(?<!packing )(?:\bwins\b|\boutperforms\b|\bbeats\b|\bbetter than\b|\bfewer calls\b|"
+    r"\blower wall\b|\bhits none\b|\bhits neither\b|\bhits no seed\b)"
+)
+_STORED_BEAT = re.compile(r"(?i)beats the stored")
+# A competitor whose stop is not the template comparison. Naming one of these
+# keeps a number from another comparison from clearing the sentence.
+_OTHER_ARM = re.compile(r"(?i)\b(?:gmin|crest|ase|occat|gad|openconf)\b")
+_ARM_TOKEN = {
+    "with": re.compile(r"(?i)(?<![a-z])with(?![a-z])"),
+    "without": re.compile(r"(?i)without"),
+    "before": re.compile(r"(?i)\bbefore\b|c2de652d"),
+    "after": re.compile(r"(?i)\bafter\b|eeec8e2c"),
+    "anneal": re.compile(r"(?i)anneal|this work|this code"),
+    "gmin": re.compile(r"(?i)gmin"),
+    "crest": re.compile(r"(?i)crest"),
+    "ase": re.compile(r"(?i)\base\b|basin hopping|minima hopping"),
+    "old": re.compile(r"(?i)\bold\b"),
+    "new": re.compile(r"(?i)\bnew\b"),
+    "occat": re.compile(r"(?i)occat"),
+    "gad": re.compile(r"(?i)\bgad\b"),
+    "openconf": re.compile(r"(?i)openconf"),
+    "bh": re.compile(r"(?i)\bbh\b|basin hopping"),
+    "mh": re.compile(r"(?i)\bmh\b|minima hopping"),
+    "c2de652d": re.compile(r"c2de652d"),
+    "eeec8e2c": re.compile(r"eeec8e2c"),
+}
 
 
-def _retired_call_tokens() -> list[str]:
-    """CREST call medians of the mixed-stop covalent rows, from the summary file."""
-    tokens = []
-    path = ROOT / "bench/covalent-h2h/gfn2/summaries.csv"
-    for row in csv.DictReader(path.open()):
-        if row["code"] != "crest" or row["system"] not in {"c10", "c20"}:
+def _claim_paths() -> list[str]:
+    """Manuscript, supporting information, cover, macros, and every bench note."""
+    notes = sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "bench").glob("**/README*.md"))
+    return [TEX, SI, COVER, "paper/jctc/macros.tex", *notes]
+
+
+def _stop_rules(audit: Audit) -> dict[str, dict[str, str]]:
+    """Stopping rule of each arm of each comparison. A missing table is a drift."""
+    try:
+        present = STOP_TABLE.is_file()
+        rows = list(csv.DictReader(STOP_TABLE.open())) if present else []
+    except OSError:
+        present, rows = False, []
+    rules: dict[str, dict[str, str]] = {}
+    for row in rows:
+        comparison = (row.get("comparison") or "").strip()
+        arm = (row.get("arm") or "").strip().casefold()
+        stop = (row.get("stop") or "").strip()
+        if comparison and arm and stop:
+            rules.setdefault(comparison, {})[arm] = stop
+    audit.record(bool(rules), "bench/stop-rules.csv", "a stop table is missing",
+                 "present" if rules else "missing", "present")
+    return rules
+
+
+def _arms_in(text: str) -> set[str]:
+    return {name for name, pattern in _ARM_TOKEN.items() if pattern.search(text)}
+
+
+def _comparison_shared(arms: dict[str, str]) -> bool:
+    """True when the comparison names at least two arms and one stop."""
+    stops = [stop for stop in arms.values() if stop]
+    return len(stops) >= 2 and len(set(stops)) == 1
+
+
+def _mentioned_shared(text: str, rules: dict[str, dict[str, str]]) -> str | None:
+    """A comparison whose every arm is named here and whose arms share a stop."""
+    present = _arms_in(text)
+    for name, arms in rules.items():
+        if len(arms) < 2 or not set(arms) <= present:
             continue
-        tokens.append(_call_text(float(row["median_evals_to_hit"])))
-    return list(dict.fromkeys(tokens))
+        if _comparison_shared(arms):
+            return name
+    return None
 
 
-def _bench_readmes() -> list[str]:
-    return sorted(path.relative_to(ROOT).as_posix() for path in (ROOT / "bench").glob("*/README*.md"))
+def _dir_keys(path: str) -> set[str]:
+    if not path.startswith("bench/"):
+        return set()
+    parts = path.split("/")[1:-1]
+    keys = set(parts)
+    if parts:
+        keys.add("/".join(parts))
+    return keys
+
+
+def _dir_shared(path: str, rules: dict[str, dict[str, str]]) -> bool:
+    return any(_comparison_shared(rules[key]) for key in _dir_keys(path) if key in rules)
+
+
+def _add_unit_interval(allowed: set[float], text: str) -> None:
+    for match in re.finditer(r"-?\d+(?:\.\d+)?(?:e[+-]?\d+)?", _normalise_claim(text).casefold()):
+        value = float(match.group(0))
+        if abs(value) <= 1:
+            allowed.add(value)
+
+
+def _table_is_shared(text: str, rules: dict[str, dict[str, str]]) -> bool:
+    """A table is shared only when it names every arm of one shared comparison.
+
+    An anneal-only row and a Fisher row that names no arm are not shared, and
+    their numbers are not added to the set other sentences may use.
+    """
+    return _mentioned_shared(text, rules) is not None
+
+
+def _shared_stop_values(audit: Audit, rules: dict[str, dict[str, str]]) -> set[float]:
+    """Numbers printed by a comparison whose arms record one stop."""
+    allowed: set[float] = set()
+    if not rules:
+        return allowed
+    for path in _claim_paths():
+        try:
+            raw = audit.text(path)
+        except OSError:
+            audit.record(False, path, "an untraceable comparison claim", "missing input", "present")
+            continue
+        if path.endswith(".tex"):
+            body = tex_without_comments(raw)
+            for table in re.findall(r"\\begin\{tabular\}.*?\\end\{tabular\}", body, re.S):
+                if not _table_is_shared(table, rules):
+                    continue
+                for row in table.split("\\\\"):
+                    _add_unit_interval(allowed, row)
+            continue
+        lines = raw.splitlines()
+        index = 0
+        while index < len(lines):
+            if not lines[index].startswith("| "):
+                index += 1
+                continue
+            block = []
+            while index < len(lines) and lines[index].startswith("|"):
+                block.append(lines[index])
+                index += 1
+            if len(block) < 3 or not _table_is_shared(" ".join(block), rules):
+                continue
+            for row in block[2:]:
+                _add_unit_interval(allowed, row)
+    manuscript = ""
+    try:
+        manuscript = tex_without_comments(audit.text(TEX))
+    except OSError:
+        audit.record(False, TEX, "an untraceable comparison claim", "missing input", "present")
+    start = manuscript.find("Removing templates costs hits")
+    end = manuscript.find("The template-free search reaches trapped minima")
+    knockout = rules.get("knockout", {})
+    if start >= 0 and end > start and _comparison_shared(knockout):
+        _add_unit_interval(allowed, manuscript[start:end])
+    else:
+        audit.record(False, TEX, "an untraceable comparison claim", "missing knockout prose", "present")
+    return allowed
+
+
+def _number_matches(shown: str, allowed: set[float], *, interval: bool = False) -> bool:
+    value = float(shown)
+    # An interval whose ends sit above 1 is not a p-value, and it is not
+    # accepted merely because the number is large.
+    if value > 1 and not interval:
+        return True
+    if "e" in shown.lower():
+        return any(abs(item - value) <= max(abs(value) * 0.02, 1e-12) for item in allowed)
+    if "." not in shown:
+        return any(abs(item - value) <= 1e-9 or (value == 1.0 and item >= 0.995) for item in allowed)
+    decimals = len(shown.split(".", 1)[1])
+    return any(abs(item - value) <= 0.51 * 10 ** (-decimals) for item in allowed)
+
+
+def _rule_sentence(sentence: str) -> bool:
+    folded = sentence.casefold()
+    if "joins" in folded or "ammonia" in folded:
+        return False
+    markers = (
+        "adjusted value below",
+        "cannot fall below",
+        "family for crest is empty",
+        "leaves its p unchanged",
+        "no cluster at p",
+        "when m=0",
+        "when m = 0",
+    )
+    return any(marker in folded for marker in markers)
 
 
 def _crest_stops_shared() -> bool:
@@ -7637,111 +7719,129 @@ def _crest_stops_shared() -> bool:
     return "stop" in anneal[0] and "stop" in crest[0] and {r["stop"] for r in anneal} == {r["stop"] for r in crest}
 
 
-def _unequal_call_alignment(text: str, *, medians: bool) -> str | None:
-    """A short budget beside a different count, and, in the paper, a retired median."""
-    norm = _normalise_numbers(text)
-    budget = _short_budget()
-    aligned = re.search(rf"(?<!\d){budget} & (?!{budget}\b)\d+(?:\.\d+)?", norm)
-    if aligned:
-        return aligned.group(0)
-    if not medians:
-        return None
-    for token in _retired_call_tokens():
-        if re.search(rf"(?<!\d){re.escape(token)}(?!\d)", norm):
-            return token
-    return None
+def _sentence_ok(sentence: str, path: str, rules: dict[str, dict[str, str]], allowed: set[float]) -> bool:
+    """A claim is kept when its sentence is a shared-stop comparison.
+
+    A number printed by some other shared comparison does not clear a sentence
+    that names GMIN, CREST, ASE, OCCat, or GAD. A file whose comparison is
+    itself shared may state that comparison's tests.
+    """
+    if _mentioned_shared(sentence, rules):
+        return True
+    if _OTHER_ARM.search(sentence):
+        return False
+    if path.startswith("bench/") and _dir_shared(path, rules):
+        return True
+    return False
 
 
-_FISHER_P = re.compile(
-    r"(?i)(?:fisher(?:'s)?(?:\s+exact)?|mann[-–]whitney(?:\s+u)?)\s+p\s*(?:=|<|of)\s*"
-    r"[0-9]+(?:\.[0-9]+)?(?:[eE][+\-]?[0-9]+)?"
-)
-_GENERIC_P = re.compile(
-    r"(?i)(?<![\w\\])p\s+(?:=|<)\s*[0-9]+(?:\.[0-9]+)?(?:[eE][+\-]?[0-9]+)?|(?<![\w\\])p\s+of\s+[0-9]+(?:\.[0-9]+)?"
-)
-_HOLM_RULE = re.compile(
-    r"form one holm family|family for crest is empty|holm-adjusted value below|"
-    r"leaves its p unchanged|the adjusted value at position|an unadjusted p|"
-    r"the holm family for crest is empty",
-    re.I,
-)
-_SAME_STOP = re.compile(r"(?i)gmin|restart|tolerance|1e-6")
-# CREST has no shared-stop test, so no Holm member is allowed.
-_SHARED_STOP_FAMILY: dict[str, tuple[str, ...]] = {"CREST": ()}
+def _note_has_claim(text: str) -> bool:
+    folded = _normalise_claim(text)
+    for match in _P_VALUE.finditer(folded):
+        if float(match.group(1)) <= 1:
+            return True
+    return bool(_SUPERIOR.search(folded) or _SIGNED_RANK.search(folded) or _INTERVAL.search(folded))
 
 
-def _holm_member(sentence: str) -> str | None:
-    """A Holm or adjusted-p claim. A rule clause does not clear a claim clause."""
-    norm = _normalise_numbers(sentence).casefold()
-    if "holm" not in norm and "adjusted" not in norm and "unadjusted" not in norm:
-        return None
-    hit = None
-    for clause in re.split(r"[,;]|\band\b", norm):
-        clause = clause.strip()
-        if not clause or _HOLM_RULE.search(clause):
-            continue
-        claim = re.search(
-            r"holm\s*family|adjusted-p|adjusted p|holm-adjusted|joins|is a win",
-            clause,
-        )
-        if claim is None:
-            continue
-        if not (re.search(r"\d", clause) or "win" in clause or "joins" in clause):
-            continue
-        named = re.search(r"\b(ammonia|octamer|crest|si10|c10|c20|hexamer)\b", clause)
-        if named:
-            return named.group(1)
-        hit = clause[:80]
-    return hit
+def _claim_units(text: str) -> list[str]:
+    """Sentences, with each markdown row kept apart from the prose around it."""
+    units = []
+    prose = []
+    for line in text.splitlines():
+        if line.strip().startswith("|"):
+            if prose:
+                units.extend(_sentences("\n".join(prose)))
+                prose = []
+            units.append(line)
+        else:
+            prose.append(line)
+    if prose:
+        units.extend(_sentences("\n".join(prose)))
+    return units
 
 
 def stopping_pairs(audit: Audit) -> None:
-    """Reject a win, a Holm member, or a p-value whose rows do not share a stop.
+    """A printed test or a superiority claim must come from one shared stop.
 
-    Numbers are compared with thousands separators, tildes, and spacing removed,
-    so a nearby budget or a comma form is the same claim as the retired one.
-    The CREST shared-stop list is empty.
+    The stop table is keyed by comparison. A missing table drifts. A bench
+    note that states a test and has no row drifts. A p-value, an interval, a
+    signed-rank count, or a superiority verb is kept only when that sentence
+    is a shared-stop comparison, or the number is one such comparison prints
+    and the sentence does not name another program.
     """
     shared = _crest_stops_shared()
     audit.record(not shared, "bench/octamer-matched/h2o8/poi/results.csv",
                  "CREST arms do not share a target, tolerance, budget, and stop",
                  "differ", "shared" if shared else "differ")
-    paper = (TEX, SI, COVER)
-    readmes = _bench_readmes()
-    for path in (*paper, *readmes):
-        raw = audit.text(path)
-        text = collapse(tex_without_comments(raw) if path.endswith(".tex") else raw)
-        aligned = _unequal_call_alignment(text, medians=path in paper)
-        audit.record(aligned is None, path, "a mixed stopping pair stays out",
-                     "absent" if aligned is None else aligned, "absent" if aligned is None else "present")
-    allowed = _SHARED_STOP_FAMILY["CREST"]
-    for path in (*paper, *readmes):
-        raw = audit.text(path)
-        text = collapse(tex_without_comments(raw) if path.endswith(".tex") else raw)
-        members = []
-        pvalues = []
-        for sentence in _sentences(text):
-            member = _holm_member(sentence)
-            if member is not None and (not shared or member not in allowed):
-                members.append(member)
-            norm = _normalise_numbers(sentence)
-            fisher = _FISHER_P.search(norm)
-            generic = _GENERIC_P.search(norm) if path in paper or not _SAME_STOP.search(norm) else None
-            p_value = fisher or generic
-            if p_value is not None and not shared and (path in paper or fisher is not None):
-                if path not in paper and _SAME_STOP.search(norm):
+    rules = _stop_rules(audit)
+    allowed = _shared_stop_values(audit, rules)
+    seen_dirs: set[str] = set()
+    for path in _claim_paths():
+        try:
+            raw = audit.text(path)
+        except OSError:
+            audit.record(False, path, "an untraceable comparison claim", "missing input", "present")
+            continue
+        if path.startswith("bench/") and _note_has_claim(raw):
+            directory = "/".join(path.split("/")[1:-1])
+            if directory not in seen_dirs and not (_dir_keys(path) & set(rules)):
+                seen_dirs.add(directory)
+                audit.record(False, path, "an untraceable comparison claim", "no stop row", "a shared stop")
+        if path.endswith(".tex"):
+            pieces = _sentences(_normalise_claim(tex_without_comments(raw)))
+        else:
+            pieces = [_normalise_claim(piece) for piece in _claim_units(raw)]
+        for sentence in pieces:
+            if _rule_sentence(sentence):
+                continue
+            named = _mentioned_shared(sentence, rules)
+            present_others = {name for name in ("gmin", "crest", "ase", "occat", "gad", "openconf")
+                              if _ARM_TOKEN[name].search(sentence)}
+            # A shared comparison clears a sentence only when every other program
+            # the sentence names is one of that comparison's arms.
+            cleared = named is not None and present_others <= set(rules[named])
+            if not cleared and path.startswith("bench/"):
+                for key in _dir_keys(path):
+                    arms = rules.get(key, {})
+                    if _comparison_shared(arms) and present_others <= set(arms):
+                        cleared = True
+                        break
+            kept = cleared
+            for match in _P_VALUE.finditer(sentence):
+                shown = match.group(1)
+                if float(shown) > 1:
                     continue
-                pvalues.append(p_value.group(0))
-        audit.record(not members, path, "a Holm family member is outside the shared-stop list",
-                     "absent" if not members else members[0], "absent" if not members else "present")
-        audit.record(not pvalues, path, "a p-value sentence needs a shared stop",
-                     "absent" if not pvalues else pvalues[0], "absent" if not pvalues else "present")
-        if path in paper:
-            claim = _win_claim(text)
-            audit.record(claim is None or shared, path,
-                         "a win sentence needs a shared target, tolerance, and budget",
-                         "absent" if claim is None else claim,
-                         "absent" if claim is None else "stops differ")
+                # A number from another comparison does not clear a sentence
+                # that names a program whose own comparison is not shared.
+                if kept or (not present_others and _number_matches(shown, allowed)):
+                    continue
+                audit.record(False, path, "an untraceable comparison claim", match.group(0), "a shared stop")
+            for match in _INTERVAL.finditer(sentence):
+                ends = (match.group(2), match.group(3))
+                both_large = all(float(item) > 1 for item in ends)
+                matched = all(_number_matches(item, allowed, interval=True) for item in ends)
+                if both_large:
+                    if not matched:
+                        audit.record(False, path, "an untraceable comparison claim", match.group(0), "a shared stop")
+                elif kept or (not present_others and matched):
+                    continue
+                else:
+                    audit.record(False, path, "an untraceable comparison claim", match.group(0), "a shared stop")
+            for match in _SIGNED_RANK.finditer(sentence):
+                if not kept:
+                    audit.record(False, path, "an untraceable comparison claim", match.group(0), "a shared stop")
+            superior = None if _STORED_BEAT.search(sentence) else _SUPERIOR.search(sentence)
+            shared_here = named is not None and present_others <= set(rules.get(named, {}))
+            if superior and not shared_here:
+                audit.record(False, path, "an untraceable comparison claim", superior.group(0), "a shared stop")
+            if re.search(r"(?i)\bis a win\b", sentence) and "adjusted value below" not in sentence.casefold() and named is None:
+                audit.record(False, path, "an untraceable comparison claim", "is a win", "a shared stop")
+            folded = sentence.casefold()
+            families = [name for name in ("gmin", "crest", "ase") if re.search(rf"\b{name}\b", folded)]
+            if "holm" in folded and "joins" in folded:
+                audit.record(False, path, "an untraceable comparison claim", "joins", "a shared stop")
+            elif "holm" in folded and len(families) >= 2 and "empty" not in folded and not kept:
+                audit.record(False, path, "an untraceable comparison claim", "holm", "a shared stop")
     held_pareto(audit)
 
 
@@ -7750,8 +7850,12 @@ def held_pareto(audit: Audit) -> None:
     record = "6b8c" + "3386"
     median = "44" + "35"
     bare = re.compile(r"(?<![0-9A-Fa-f])" + median + r"(?![0-9A-Fa-f])")
-    for path in (TEX, SI, COVER, *_bench_readmes()):
-        text = audit.text(path)
+    for path in _claim_paths():
+        try:
+            text = audit.text(path)
+        except OSError:
+            audit.record(False, path, "an untraceable comparison claim", "missing input", "present")
+            continue
         found = record in text
         audit.record(not found, path, "the held pareto record stays out", "absent",
                      "absent" if not found else "present")
@@ -7847,11 +7951,14 @@ def gmin_tuned(audit: Audit) -> None:
 
 
 def morse_m70_pair(audit: Audit) -> None:
-    """The M70 counts of the stored paired record that the SI states beside tab:si-morse-g1."""
+    """M70 counts beside tab:si-morse-g1: this code from the table rows, GMIN from the earlier record."""
     path = "bench/morse-panel/seeds.csv"
     rows = audit.rows(path)
-    hit = {(r, c): sum(x["hit"] == "1" for x in pick(rows, system=f"m70r{r}", code=c))
-           for r in (3, 6, 10, 14) for c in ("anneal", "gmin")}
+    code_rows = audit.rows("paper/jctc/data/gmin_g1/rows.csv")
+    hit = {(r, "gmin"): sum(x["hit"] == "1" for x in pick(rows, system=f"m70r{r}", code="gmin"))
+           for r in (3, 6, 10, 14)}
+    hit.update({(r, "anneal"): sum(x["hit"] == "1" for x in pick(code_rows, system=f"m70r{r}", code="anneal"))
+                for r in (3, 6, 10, 14)})
     m70 = [r for r in rows if r["system"].startswith("m70")]
     budgets = {int(r["budget"]) for r in m70}
     misses_at_budget = all(int(float(r["evals_to_hit"])) == int(r["budget"]) for r in m70 if r["hit"] == "0")
@@ -7860,9 +7967,11 @@ def morse_m70_pair(audit: Audit) -> None:
                  "M70 uses one budget and a miss stops at that budget", "1000000",
                  " ".join(map(str, sorted(budgets))))
     audit.said(SI, "Both arms use a budget of \\(10^{6}\\) calls and a miss stops at that budget.")
-    audit.said(SI, f"At \\(\\rho=3\\) and 6 GMIN hits {hit[(3, 'gmin')]} and {hit[(6, 'gmin')]} of 12 seeds and this "
-                   f"code {hit[(3, 'anneal')]} and {hit[(6, 'anneal')]}, and at \\(\\rho=10\\) and 14 this code hits "
-                   f"{hit[(10, 'anneal')]} and {hit[(14, 'anneal')]} and GMIN none.")
+    audit.said(SI, f"At \\(\\rho=3\\) and 6 GMIN's hit counts are {hit[(3, 'gmin')]} and {hit[(6, 'gmin')]} of 12 "
+                   f"and this code's are {hit[(3, 'anneal')]} and {hit[(6, 'anneal')]} of 12.")
+    audit.said(SI, f"At \\(\\rho=10\\) and 14 this code's hit counts are {hit[(10, 'anneal')]} and "
+                   f"{hit[(14, 'anneal')]} of 12 and GMIN's are {hit[(10, 'gmin')]} and {hit[(14, 'gmin')]} of 12.")
+    audit.said(SI, "The two arms do not record one shared call unit, so there is no paired test.")
     audit.cell(path, "GMIN hits at rho 10 and 14", "0 0", f"{hit[(10, 'gmin')]} {hit[(14, 'gmin')]}")
 
 
@@ -7955,9 +8064,17 @@ APPEND_ONLY_RECORDS = {
 
 
 def touched_record_paths(base: str) -> set[str]:
-    """Every csv and jsonl path named from base to HEAD, including one absent at HEAD."""
-    log = git("log", "--name-only", "--pretty=format:", "--no-renames", f"{base}..HEAD")
-    return {line for line in log.stdout.splitlines() if line.endswith((".csv", ".jsonl"))}
+    """Every csv and jsonl path named from base to HEAD, including one absent at HEAD.
+
+    ``git log`` does not list a merge commit's resolution unless asked. The
+    diff of HEAD against base includes that resolution, so a scratch merge
+    is checked for the records it actually changes.
+    """
+    log = git("log", "--name-only", "--pretty=format:", "--no-renames", "-m", f"{base}..HEAD")
+    names = {line for line in log.stdout.splitlines() if line.endswith((".csv", ".jsonl"))}
+    diff = git("diff", "--name-only", base, "HEAD")
+    names.update(line for line in diff.stdout.splitlines() if line.endswith((".csv", ".jsonl")))
+    return names
 
 
 def _upstream_removed_lines(ref: str, base_ref: str | None, path: str) -> set[str]:

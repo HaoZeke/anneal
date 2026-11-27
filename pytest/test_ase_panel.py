@@ -55,7 +55,8 @@ def test_reports_compare_hits_by_fisher_alone():
     assert not [column for column in header if "mann" in column]
     rows = {row.split(",", 1)[0]: dict(zip(header, row.split(","))) for row in summary.splitlines()[1:]}
     assert rows["recommended"]["fisher_p_bh"] == "7.39602e-07"
-    assert "| recommended against basin hopping | 12/12 vs 0/12 | — |" in report
+    assert "| recommended against basin hopping |" not in report
+    assert "median wall ratio" not in report
     assert "7.39602e-07" not in report
     assert "6.73038e-05" not in report
     assert "The stops differ, and there is no paired test." in report

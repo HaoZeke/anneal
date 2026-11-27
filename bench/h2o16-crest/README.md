@@ -15,10 +15,8 @@ The rerun row is the one under hostname bench, from develop 8b4a2592.
 The hygienic panel uses that rerun in place of the original row.
 The other five seeds were already under hostname bench.
 
-The hygienic gap, anneal minus CREST, has W+ 0 and W- 21, median -0.003035313706 Eh.
+The hygienic median gap, anneal minus CREST, is -0.003035313706 Eh.
 The CREST rows do not record the anneal budget of 280305, so there is no paired test.
-The bootstrap of 10000 medians, seed 20261110, runs from -0.006444978869
-to -0.002255136597 Eh.
 Literature hits are 0/6 on both arms.
 The original panel, which still contains the first seed 15000 row, is not a paired test.
 

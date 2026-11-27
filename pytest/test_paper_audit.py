@@ -468,7 +468,7 @@ def test_the_sc_h2h_harness_is_pushed_through_its_record_ref(tmp_path, monkeypat
 def test_a_drifted_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "this work & 12/12 & 0 & 12 & 0 & 5722 & 5372.5"
+    old = "this work & 12/12 & 5722 & 5372.5"
     assert old in tex
     audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("5722", "5723"))
     audit_mod.manuscript_gmin(audit)
@@ -510,9 +510,9 @@ def test_a_drifted_ase_table_cell_is_reported(monkeypatch):
     withhold(monkeypatch, ASE_COMMIT)
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 289.0 & 7/12 & 0/12 & 0/12 & 0 & 12 &"
+    old = "& 289.0 & This code & hit or budget & 7/12 & 78.919"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 289.0 & 8/12 & 0/12 & 0/12 & 0 & 12 &")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 289.0 & This code & hit or budget & 8/12 & 78.919")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
     assert sorted(r[2] for r in audit.drifts()) == ["recommended hits", "tab:ase is the summariser's block"]
@@ -521,9 +521,9 @@ def test_a_drifted_ase_table_cell_is_reported(monkeypatch):
 def test_a_drifted_morse_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 11.333 & 47.553 & 47.556 \\\\"
+    old = "wall cap on 12 & 0/12 & 47.556 \\\\"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 11.333 & 47.553 & 47.557 \\\\")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "wall cap on 12 & 0/12 & 47.557 \\\\")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
     assert sorted(r[2] for r in audit.drifts()) == ["ase_mh median wall", "tab:ase-morse is the summariser's block"]
@@ -876,9 +876,8 @@ def test_a_cross_arm_work_p_value_in_the_gmin_table_is_reported():
 def test_a_cross_arm_hit_p_value_in_the_gmin_prose_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = ("At those arm-specific ceilings, this code hits 7 of 12 seeds on\n"
-           "LJ\\(_{98}\\) and 5 of 12 on LJ\\(_{75}\\), while GMIN hits neither; on\n"
-           "LJ\\(_{38}\\), the counts are 12 and 7.")
+    old = ("At this code's ceiling the hit counts are 7 of 12 on\n"
+           "LJ\\(_{98}\\) and 5 of 12 on LJ\\(_{75}\\).")
     assert tex.count(old) == 1
     audit.text_cache[audit_mod.TEX] = tex.replace(old, old + "\nThe paired result is \\(p=0.016\\).")
     audit_mod.manuscript_gmin(audit)
@@ -1096,11 +1095,11 @@ def test_a_gmin_interval_in_the_table_is_reported():
 def test_a_paired_count_that_drifts_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "this work & 12/12 & 5 & 7 & 0 &"
+    old = "LJ\\(_{75}\\) & \\(4\\times 10^{6}\\) & this work & 5/12 & 4000000 & 962776.75"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "this work & 12/12 & 4 & 8 & 0 &")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("5/12", "4/12"))
     audit_mod.manuscript_gmin(audit)
-    assert sorted(r[2] for r in audit.drifts()) == ["both hit", "seeds this arm alone hits"]
+    assert [r[2] for r in audit.drifts()] == ["hits"]
 
 
 def test_a_drifted_develop_morse_count_is_reported():
@@ -1118,9 +1117,9 @@ def test_a_drifted_develop_morse_count_is_reported():
 def test_a_develop_gmin_cell_that_drifts_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "this work & 9/12 & 9 & 0 & 3 &"
+    old = "this work & 9/12 & 451561.5"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "this work & 7/12 & 9 & 0 & 3 &")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "this work & 7/12 & 451561.5")
     audit_mod.manuscript_gmin(audit)
     assert [(r[1], r[2]) for r in audit.drifts()] == [
         (f"{audit_mod.TEX} tab:gmin develop m55r14 this work", "hits")]
@@ -1431,13 +1430,10 @@ def test_an_sc_n12_gmin_rerun_without_its_seed_rows_is_reported():
     readme = "bench/metal-cluster-h2h/sc-n12/README.md"
     assert sorted((r[1], r[2], r[3], r[4]) for r in audit.drifts()) == sorted([
         ("bench/metal-cluster-h2h/sc-n12/results.csv sc96-55 gmin 00000000", "per-seed rows", "12", "0"),
-            ("bench/metal-cluster-h2h/sc-n12/pvalues.csv sc96-55", "per-seed rows", "12", "12 0"),
+        ("bench/metal-cluster-h2h/sc-n12/pvalues.csv sc96-55", "per-seed rows", "12", "12 0"),
         (f"{readme}:131 sc96-55 a50f4b02", "latest GMIN harness", "a50f4b02", "00000000"),
-        (f"{readme}:131 sc96-55 a50f4b02", "Calls ahead", "anneal, n.s.", "tie"),
-        (f"{readme}:131 sc96-55 a50f4b02", "Wall ahead", "GMIN", "tie"),
         (readme, "table row sc96-55 gmin 00000000", "missing", "shown"),
         (readme, "test row sc96-55", "a50f4b02", "00000000"),
-        (readme, "prose", "GMIN beats anneal on wall time on sc126-55 and sc108-80, at Mann-Whitney p < 0.05.", "present"),
     ])
 
 
@@ -1447,7 +1443,7 @@ def test_a_rerun_without_its_tests_is_reported():
     row = next(r for r in summary if r["system"] == "sc126-38" and r["arm"] == "anneal")
     row["fisher_p_vs_gmin"] = ""
     audit_mod.head_to_head(audit)
-    assert ("Fisher p", "1") in [(r[2], r[3]) for r in audit.drifts()]
+    assert ("fisher_p_vs_gmin", "") in [(r[2], r[3]) for r in audit.drifts()]
 
 
 SC_RERUN_ROWS = "bench/paper-rerun/sc-h2h/rows.csv"
@@ -1553,8 +1549,8 @@ def test_a_gmin_lead_in_the_earlier_harness_rows_must_be_stated_as_the_rows_give
     audit = audit_mod.Audit()
     text = audit.text(SC_N12)
     audit.text_cache[SC_N12] = text.replace(
-        "| 0.349 | tie | anneal, n.s. | GMIN |",
-        "| 0.349 | tie | anneal, n.s. | anneal |",
+        "| sc96-55 | c89653df | a50f4b02 | — | — | — | — | — | — | — |",
+        "| sc96-55 | c89653df | a50f4b02 | — | — | — | — | — | — | anneal |",
     )
     audit_mod.head_to_head(audit)
     assert [r[2] for r in audit.drifts()] == ["Wall ahead"]
@@ -2523,14 +2519,19 @@ def test_the_rendered_abstract_counts_pdftotext_tokens():
         "body has 7001 words, outside 5000-7000"]
 
 
-def test_a_mixed_stopping_pair_is_reported():
-    """Putting a fixed budget back beside a full-run median is a drift."""
+def test_a_shared_stop_pvalue_is_kept():
+    """A value from the template comparison stays. The old checker flags that same value."""
     audit = audit_mod.Audit()
-    path = audit_mod.TEX
-    audit.text_cache[path] = audit.text(path) + "\n4000 & 3055\n"
+    note = "bench/h2o-octamer/README.md"
+    audit.text_cache[note] = audit.text(note) + "\nDone. Fisher p = 0.30.\nDone. The Gupta parameter is p = 10.229.\n"
+    audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX) + (
+        "\nDone. The knockout row has \\(p=7.8\\times 10^{-3}\\)."
+        "\n% p = 0.00942 stays in a comment.\n"
+    )
     audit_mod.stopping_pairs(audit)
-    assert [row for row in audit.drifts() if row[2] == "a mixed stopping pair stays out" and row[3] == "4000 & 3055"] == [
-        ("DRIFT", path, "a mixed stopping pair stays out", "4000 & 3055", "present")]
+    claimed = [row[3] for row in audit.drifts()
+               if row[2] in {"an untraceable comparison claim", "a p-value sentence needs a shared stop"}]
+    assert not any("0.30" in item or "10.229" in item or "7.8" in item or "0.00942" in item for item in claimed)
 
 
 def test_a_missed_printed_definition_is_a_drift():
@@ -3931,9 +3932,9 @@ def test_a_process_note_in_the_cover_letter_is_reported():
 def test_a_drifted_ase_hit_sentence_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "and neither ASE arm hits any"
-    assert old in audit_mod.collapse(tex)
-    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, "and neither ASE arm hits all")
+    old = "ASE basin hopping's hit count is 0 of 12 on each Morse cluster."
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, old.replace("each Morse cluster", "each Morse system"), 1)
     audit_mod.manuscript_ase(audit)
     assert [r[2] for r in audit.drifts()] == ["prose"]
 
@@ -3942,139 +3943,152 @@ def test_a_wall_cap_span_in_the_following_sentence_is_reported():
     """A wall-cap span inside the ASE caption, after the version, is still the next sentence."""
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "(MH) of ASE 3.29.0 at its constructor defaults"
+    old = "ASE basin hopping's hit count is 0 of 12 on each Morse cluster."
     assert old in tex
-    added = "(MH) of ASE 3.29.0 after 3933 to 20950 calls at its constructor defaults"
+    added = "ASE basin hopping's hit count is 0 of 12 on each Morse cluster after 3933 to 20950 calls."
     audit.text_cache[audit_mod.TEX] = tex.replace(old, added, 1)
     audit_mod.manuscript_ase(audit)
     assert [row for row in audit.drifts() if row[2] == "the following sentence names no wall-cap span"] == [
         ("DRIFT", audit_mod.TEX, "the following sentence names no wall-cap span", "absent", "present")]
 
 
-def test_a_shifted_budget_pair_is_reported():
+def _claim_hits(extra, path, token):
     audit = audit_mod.Audit()
-    path = audit_mod.TEX
-    audit.text_cache[path] = audit.text(path) + "\n4000 & 3056\n"
+    audit.text_cache[path] = audit.text(path) + "\nDone. " + extra + "\n"
     audit_mod.stopping_pairs(audit)
-    assert [row for row in audit.drifts() if row[2] == "a mixed stopping pair stays out"] == [
-        ("DRIFT", path, "a mixed stopping pair stays out", "4000 & 3056", "present")]
+    hits = [row for row in audit.drifts()
+            if row[1] == path and row[2] == "an untraceable comparison claim" and token in row[3]]
+    assert hits, extra
+    return hits
 
 
-def test_a_tilde_budget_pair_is_reported():
+def test_tex_p_spellings_are_reported():
+    """Markup the old pattern skipped is still a p-value when the number is not shared."""
+    path = "paper/jctc/macros.tex"
+    plants = (
+        (r"\(p=0.00942\).", "0.00942"),
+        (r"$p=0.00942$.", "0.00942"),
+        ("p<0.00942.", "0.00942"),
+        ("P-value 0.00942.", "0.00942"),
+        ("p-value 0.00942.", "0.00942"),
+        (r"p \le 0.00942.", "0.00942"),
+        (r"p = \num{0.00942}.", "0.00942"),
+        ("p 0.00942.", "0.00942"),
+        (r"p\allowbreak=\allowbreak0.00942.", "0.00942"),
+        (r"p = 0.00{\,}942.", "0.00942"),
+        (r"p = 0.00\thinspace942.", "0.00942"),
+        (r"p = 0.00\:942.", "0.00942"),
+        (r"p = 0.00\;942.", "0.00942"),
+        ("p&0.00942.", "0.00942"),
+        (r"p = 4.2\times10^{-6}.", "4.2e-6"),
+        ("p = 4.2e-6.", "4.2e-6"),
+        ("p = 0.009%\n42.", "0.00942"),
+        ("p = 0.009%\n    42.", "0.00942"),
+        ("`p = 0.00942`.", "0.00942"),
+        ("𝑝 = 0.00942.", "0.00942"),
+        ("p<=0.00942.", "0.00942"),
+        (r"\texttt{p = 0.00942}.", "0.00942"),
+        ("That change is not significant (p = 0.00942).", "0.00942"),
+        ("The bootstrap interval runs from 2.5 to 9.5.", "2.5 to 9.5"),
+        ("The signed rank is W+ 4.", "W+"),
+        ("A win is a Holm-adjusted value below 0.05? p = 0.00942.", "0.00942"),
+    )
+    for plant, token in plants:
+        _claim_hits(plant, path, token)
+
+
+def test_a_holm_clause_is_reported():
+    path = audit_mod.TEX
+    _claim_hits("The ammonia comparison joins that Holm family for CREST is empty.", path, "joins")
+    _claim_hits("The GMIN comparison enters the Holm family used for CREST.", path, "holm")
+
+
+def test_each_comparison_keeps_its_own_stop():
     audit = audit_mod.Audit()
-    path = audit_mod.TEX
-    audit.text_cache[path] = audit.text(path) + "\n4000~&~3055\n"
-    audit_mod.stopping_pairs(audit)
-    assert [row for row in audit.drifts() if row[2] == "a mixed stopping pair stays out"] == [
-        ("DRIFT", path, "a mixed stopping pair stays out", "4000 & 3055", "present")]
+    rules = audit_mod._stop_rules(audit)
+    assert rules["gmin-panel"]["anneal"] == "energy-gradient hit-or-ceiling"
+    assert rules["knockout"]["with"] == "energy-gradient hit-or-budget"
+    assert rules["gmin-panel"]["anneal"] != rules["knockout"]["with"]
 
 
-def test_a_comma_median_is_reported():
-    path = audit_mod.TEX
-    for fragment, shown in (("78,367", "78367"), ("78,581.5", "78581.5")):
-        audit = audit_mod.Audit()
-        audit.text_cache[path] = audit.text(path) + "\n" + fragment + "\n"
-        audit_mod.stopping_pairs(audit)
-        assert [row for row in audit.drifts() if row[2] == "a mixed stopping pair stays out"] == [
-            ("DRIFT", path, "a mixed stopping pair stays out", shown, "present")]
-
-
-def test_an_ammonia_holm_win_is_reported():
+def test_a_shared_anneal_pair_keeps_its_claim():
+    path = "bench/metal-cluster-h2h/sc-n12/README.md"
     audit = audit_mod.Audit()
-    path = audit_mod.TEX
     audit.text_cache[path] = audit.text(path) + (
-        "\nThe ammonia comparison joins that Holm family, and it is a win.\n"
+        "\nThe new build outperforms the old build. The signed rank on that pair is W+ 4.\n"
     )
     audit_mod.stopping_pairs(audit)
-    assert [row for row in audit.drifts() if row[2] == "a Holm family member is outside the shared-stop list"] == [
-        ("DRIFT", path, "a Holm family member is outside the shared-stop list", "ammonia", "present")]
+    shown = " ".join(row[3] for row in audit.drifts() if row[1] == path)
+    assert "outperforms" not in shown
+    assert "W+" not in shown
 
 
-def test_a_fisher_pvalue_dodge_is_reported():
-    audit = audit_mod.Audit()
-    path = audit_mod.TEX
-    audit.text_cache[path] = audit.text(path) + "\nFisher p = 0.0094\n"
-    audit_mod.stopping_pairs(audit)
-    assert [row for row in audit.drifts() if row[2] == "a p-value sentence needs a shared stop"] == [
-        ("DRIFT", path, "a p-value sentence needs a shared stop", "Fisher p = 0.0094", "present")]
-
-
-def test_a_mixed_stop_win_is_reported():
-    audit = audit_mod.Audit()
-    path = audit_mod.TEX
-    audit.text_cache[path] = audit.text(path) + "\nThe octamer wins.\n"
-    audit_mod.stopping_pairs(audit)
-    assert [row for row in audit.drifts() if row[2] == "a win sentence needs a shared target, tolerance, and budget"] == [
-        ("DRIFT", path, "a win sentence needs a shared target, tolerance, and budget", "wins", "stops differ")]
-
-
-def test_formatted_retired_medians_are_reported():
-    path = audit_mod.TEX
-    plants = (
-        "78\\,367",
-        "78{,}367",
-        "$78,367$",
-        "\\(78,367\\)",
-        "7.8367e4",
-        "78 367",
-        "78\u2212367",
+def test_an_anneal_only_row_does_not_clear_a_gmin_sentence():
+    probe = ROOT / "bench/zz-probe/nested/README.md"
+    probe.parent.mkdir(parents=True, exist_ok=True)
+    probe.write_text(
+        "# Probe\n\n| comparison | test |\n| --- | --- |\n"
+        "| fixed-stop anneal versus the full run | Fisher p = 0.00942 |\n"
     )
-    for fragment in plants:
+    try:
         audit = audit_mod.Audit()
-        audit.text_cache[path] = audit.text(path) + "\n" + fragment + "\n"
         audit_mod.stopping_pairs(audit)
-        shown = [row for row in audit.drifts() if row[2] == "a mixed stopping pair stays out"]
-        assert shown == [("DRIFT", path, "a mixed stopping pair stays out", "78367", "present")], fragment
-
-
-def test_holm_phrasings_are_reported():
-    path = audit_mod.TEX
-    plants = (
-        "The ammonia comparison joins that Holm~family.",
-        "The ammonia adjusted-p is 0.01.",
-        "the ammonia comparison joins that holm family.",
-        "An unadjusted comparison is a win.",
-    )
-    for fragment in plants:
+        assert any(row[1] == "bench/zz-probe/nested/README.md" for row in audit.drifts())
         audit = audit_mod.Audit()
-        audit.text_cache[path] = audit.text(path) + "\n" + fragment + "\n"
+        audit.text_cache[audit_mod.TEX] = audit.text(audit_mod.TEX) + "\nGMIN gives Fisher p = 0.00942.\n"
         audit_mod.stopping_pairs(audit)
-        shown = [row for row in audit.drifts() if row[2] == "a Holm family member is outside the shared-stop list"]
-        assert shown and shown[0][1] == path, fragment
+        assert any("0.00942" in row[3] and row[1] == audit_mod.TEX for row in audit.drifts())
+    finally:
+        probe.unlink()
+        probe.parent.rmdir()
+        probe.parent.parent.rmdir()
 
 
-def test_fisher_pvalue_variants_are_reported():
-    path = audit_mod.TEX
-    plants = (
-        "\\(p = 0.0094\\)",
-        "Fisher p < 0.05",
-        "Fisher p~=~0.0094",
-        "Fisher p of 0.0094",
-        "Fisher's exact p = 0.0094",
+def test_a_readme_superiority_verb_is_reported():
+    path = "bench/metal-cluster-h2h/sc-n12/README.md"
+    for plant, token in (
+        ("The search outperforms GMIN.", "outperforms"),
+        ("The search beats ASE.", "beats"),
+        ("The search is better than CREST.", "better than"),
+        ("The search wins.", "wins"),
+    ):
+        _claim_hits(plant, path, token)
+
+
+def test_a_same_stop_keyword_does_not_hide_a_pvalue():
+    path = "bench/h2o-octamer/README.md"
+    _claim_hits(
+        "At the GMIN restart tolerance 1e-6 the result is (Fisher p 0.00942).",
+        path,
+        "0.00942",
     )
-    for fragment in plants:
+
+
+def test_a_missing_stop_table_is_a_drift(monkeypatch, tmp_path):
+    monkeypatch.setattr(audit_mod, "STOP_TABLE", tmp_path / "absent.csv")
+    audit = audit_mod.Audit()
+    audit_mod.stopping_pairs(audit)
+    assert ("DRIFT", "bench/stop-rules.csv", "a stop table is missing", "missing", "present") in audit.drifts()
+
+
+def test_a_missing_claim_file_is_a_drift(monkeypatch):
+    paths = audit_mod._claim_paths()
+    monkeypatch.setattr(audit_mod, "_claim_paths", lambda: [*paths, "bench/no-such-note/README.md"])
+    audit = audit_mod.Audit()
+    audit_mod.stopping_pairs(audit)
+    assert ("DRIFT", "bench/no-such-note/README.md", "an untraceable comparison claim", "missing input", "present") in audit.drifts()
+
+
+def test_a_missing_octamer_phrase_does_not_raise():
+    note = ROOT / "bench/h2o-octamer/README.md"
+    original = note.read_text()
+    assert "calls on every seed" in original
+    try:
+        note.write_text(original.replace("calls on every seed", "calls on each seed"))
         audit = audit_mod.Audit()
-        audit.text_cache[path] = audit.text(path) + "\n" + fragment + "\n"
         audit_mod.stopping_pairs(audit)
-        shown = [row for row in audit.drifts() if row[2] == "a p-value sentence needs a shared stop"]
-        assert shown and shown[0][1] == path, fragment
-
-
-def test_a_readme_fisher_pvalue_without_crest_is_reported():
-    audit = audit_mod.Audit()
-    path = "bench/crest-equal/README.md"
-    audit.text_cache[path] = audit.text(path) + "\nFisher p = 0.0094.\n"
-    audit_mod.stopping_pairs(audit)
-    assert [row for row in audit.drifts() if row[1] == path and row[2] == "a p-value sentence needs a shared stop"] == [
-        ("DRIFT", path, "a p-value sentence needs a shared stop", "Fisher p = 0.0094", "present")]
-
-
-def test_a_readme_own_median_is_not_a_mixed_pair():
-    audit = audit_mod.Audit()
-    path = "bench/covalent-h2h/README.md"
-    audit.text_cache[path] = audit.text(path) + "\n| 78,367 |\n"
-    audit_mod.stopping_pairs(audit)
-    assert [row for row in audit.drifts() if row[1] == path and row[2] == "a mixed stopping pair stays out"] == []
+    finally:
+        note.write_text(original)
 
 
 def test_a_drifted_newcombe_interval_is_reported():
