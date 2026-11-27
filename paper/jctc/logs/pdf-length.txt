@@ -1,3 +1,4 @@
+# abstract_words: poppler pdftotext default, abstract block only, whitespace tokens
 abstract_words=102
 abstract_numerals=4
 body_words=6957

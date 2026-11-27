@@ -13,6 +13,10 @@ a run of digits, with any decimal point or thousands comma inside it, so the
 
 --write records the counts and the sha256 of the sources in
 paper/jctc/logs/pdf-length.txt, which scripts/paper_audit.py reads.
+abstract_words is the poppler pdftotext count of the abstract block
+only: default extraction, not layout mode, from the Abstract heading
+to the Introduction heading, with the page number dropped, and words
+are whitespace-separated tokens. The receipt names that method.
 """
 from __future__ import annotations
 
@@ -86,7 +90,10 @@ def problems(counts: dict[str, int]) -> list[str]:
 
 
 def receipt_text(counts: dict[str, int], pages: int, digests: dict[str, str]) -> str:
-    lines = [f"{key}={value}" for key, value in counts.items()] + [f"pages={pages}"]
+    lines = [
+        "# abstract_words: poppler pdftotext default, abstract block only, whitespace tokens",
+    ]
+    lines += [f"{key}={value}" for key, value in counts.items()] + [f"pages={pages}"]
     lines += [f"sha256 {digest}  {path}" for path, digest in digests.items()]
     return "\n".join(lines) + "\n"
 
@@ -95,6 +102,8 @@ def read_receipt(path: Path = RECEIPT) -> tuple[dict[str, int], dict[str, str]]:
     counts: dict[str, int] = {}
     digests: dict[str, str] = {}
     for line in path.read_text().splitlines():
+        if not line or line.startswith("#"):
+            continue
         if line.startswith("sha256 "):
             digest, source = line.removeprefix("sha256 ").split("  ", 1)
             digests[source] = digest
