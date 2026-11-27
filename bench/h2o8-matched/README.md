@@ -29,4 +29,4 @@ With `--eh`, the evaluation that crosses raises the ledger stop after it has bee
 
 ## Rows
 
-`rows.csv` is written by the Snakefile after seeds 2000-2011. The hit count and the median `calls_to_hit` are filled once those rows exist.
+`rows.csv` has one row for each seed from 2000 through 2011. All 12 hit. The median `calls_to_hit` is 150172. Each hit stopped on that evaluation, so `charged` equals `calls_to_hit`. The crossing is inside the charged answer polish: `polish_calls` in the twelve logs runs from 30 to 45.
