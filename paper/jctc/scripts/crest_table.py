@@ -73,10 +73,13 @@ def water_hexamer() -> dict[str, object]:
     anneal = [r for r in rows if r["arm"] == "anneal" and r["code_revision"] == revision]
     crest = complete([r for r in rows if r["arm"] == "crest"])
     budgets = {int(r["budget"]) for r in anneal}
-    if len(budgets) != 1:
-        raise SystemExit(f"crest-equal: anneal budgets {sorted(budgets)}")
+    charged = {int(r["charged"]) for r in anneal}
+    lengths = {r["crest_len_ps"] for r in crest}
+    if len(budgets) != 1 or len(charged) != 1 or len(lengths) != 1:
+        raise SystemExit(f"crest-equal: budgets {sorted(budgets)} charges {sorted(charged)} lengths {sorted(lengths)}")
     return {"system": "(H\\(_2\\)O)\\(_6\\)", "budget": budgets.pop(), "anneal": anneal, "crest": crest,
-            "crest_calls": [float(r["charged"]) for r in crest]}
+            "crest_calls": [float(r["charged"]) for r in crest], "charge": charged.pop(),
+            "length_ps": float(lengths.pop()), "separate": True}
 
 
 def water_octamer() -> dict[str, object]:
@@ -103,8 +106,12 @@ def ammonia_octamer() -> dict[str, object]:
     crest = [r for r in read(BENCH / "nh3-octamer" / "results.csv") if r["arm"] == "crest" and r["row"] == "v4"]
     if len(anneal) != 12 or len(crest) != 6:
         raise SystemExit(f"nh3-octamer: {len(anneal)} anneal rows and {len(crest)} CREST rows")
+    targets = {int(r["calls_to_hit"]) for r in anneal if r["stop_reason"] == "target"}
+    misses = {int(r["calls_to_hit"]) for r in anneal if r["stop_reason"] == "budget"}
+    if len(targets) != 1 or misses != {next(iter(targets)) + 1}:
+        raise SystemExit(f"nh3-octamer: target counts {sorted(targets)} budget counts {sorted(misses)}")
     return {"system": "(NH\\(_3\\))\\(_8\\)", "budget": None, "anneal": anneal, "crest": crest,
-            "crest_calls": [], "hits_only": True}
+            "crest_calls": [], "hits_only": True, "separate": True, "stop_calls": next(iter(targets))}
 
 
 def covalent() -> list[dict[str, object]]:
@@ -134,7 +141,7 @@ def covalent() -> list[dict[str, object]]:
             raise SystemExit(f"{system}: anneal budgets {sorted(budgets)}")
         crest = complete(crest)
         out.append({"system": label, "budget": budgets.pop(), "anneal": counted(anneal), "crest": crest,
-                    "crest_calls": [float(r["charged"]) for r in crest]})
+                    "crest_calls": [float(r["charged"]) for r in crest], "separate": True})
     return out
 
 
@@ -181,40 +188,26 @@ def pvalue(p: float) -> str:
 
 def table() -> str:
     kept = pairs()
-    h2o8 = next(pair for pair in kept if pair.get("first_hit"))
     lines = [
         "\\begin{table}",
         "\\caption{This code against CREST 3.0.2 on GFN2-xTB clusters.",
         "Both arms count GFN2-xTB energy and gradient calls.",
-        "CREST calls is the median of the complete runs kept by the budget rule.",
-        f"The (H\\(_2\\)O)\\(_8\\) first-hit medians are {number(h2o8['anneal_median'])} and "
-        f"{number(h2o8['crest_median'])}. The row prints no budget.",
-        "The (NH\\(_3\\))\\(_8\\) row is hits only.",
-        "\\(p\\) is the two-sided Fisher exact test on the hits.",
+        "A row prints \\(p\\) only when both arms use one stopping rule.",
+        "The text names each stopping rule.",
         "The Supporting Information gives the settings, revisions, records, and the arms that",
         "the budget rule removes.}",
         "\\label{tab:crest}",
         "\\centering",
         "\\footnotesize",
-        "\\begin{tabular}{@{}lrrrrr@{}}",
+        "\\begin{tabular}{@{}lrrr@{}}",
         "\\toprule",
-        " & & & \\multicolumn{2}{c}{Hits} & \\\\",
-        "\\cmidrule(lr){4-5}",
-        "Cluster & Budget & CREST calls & This work & CREST & \\(p\\) \\\\",
+        "Cluster & This work & CREST & \\(p\\) \\\\",
         "\\midrule",
     ]
     for pair in kept:
         a, c = pair["anneal"], pair["crest"]
-        if pair.get("first_hit"):
-            lines.append(f"{pair['system']} & --- & --- & {hits(a)}/{len(a)} & {hits(c)}/{len(c)} & "
-                         f"{pair['p']:.4f} \\\\")
-            continue
-        if pair.get("hits_only"):
-            lines.append(f"{pair['system']} & --- & --- & {hits(a)}/{len(a)} & {hits(c)}/{len(c)} & "
-                         f"{pair['p']:.3f} \\\\")
-            continue
-        lines.append(f"{pair['system']} & {budget(pair['budget'])} & {number(pair['median'])} & "
-                     f"{hits(a)}/{len(a)} & {hits(c)}/{len(c)} & {pvalue(pair['p'])} \\\\")
+        shown = f"{pair['p']:.4f}" if pair.get("first_hit") else "---"
+        lines.append(f"{pair['system']} & {hits(a)}/{len(a)} & {hits(c)}/{len(c)} & {shown} \\\\")
     lines += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
     return "\n".join(lines)
 

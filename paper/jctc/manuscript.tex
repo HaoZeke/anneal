@@ -42,11 +42,12 @@ Lennard-Jones, short-ranged Morse, and rigid water clusters on which a
 reference basin-hopping program at one documented input hits no seed.
 Removing the former structure templates costs hits on a short-ranged Morse
 cluster.
-On tight-binding clusters the anneal software finds the water hexamer
-in 1 of 12 runs and the CREST conformer search in 4 of 12, a difference
-that is not significant.
-The search wins on the ten-atom carbon ring and, with the opt-in
-\texttt{polish\_on\_improve} option, on the water octamer.
+On tight-binding clusters the anneal software stops at a fixed charge of
+3021 calls and finds the water hexamer in 1 of 12 runs.
+The CREST conformer search stops at the end of its 0.90~ps run and finds
+the water hexamer in 4 of 12 runs.
+With the opt-in \texttt{polish\_on\_improve} option, both arms count
+first-hit calls and this code hits the water octamer on more seeds.
 \end{abstract}
 
 \section{Introduction}
@@ -657,9 +658,6 @@ reported.
 At those arm-specific ceilings, this code hits 7 of 12 seeds on
 LJ\(_{98}\) and 5 of 12 on LJ\(_{75}\), while GMIN hits neither; on
 LJ\(_{38}\), the counts are 12 and 7.
-On LJ\(_{38}\), this code reports a median of 127839.5 combined
-energy-and-gradient passes to the minimum, while GMIN reports 389399
-\texttt{POTENTIAL} entries; these are not the same operation.
 On LJ\(_{102}\), LJ\(_{103}\), LJ\(_{104}\), and LJ\(_{150}\), the hit
 counts are 6 against 5, 6 against 3, 5 against 6, and 8 against 9.
 Both arms hit LJ\(_{55}\) and M\(_{80}\) at \(\rho=6\) on every seed.
@@ -906,13 +904,15 @@ tight-binding Hamiltonians \cite{prachtCrestProgramExploration2024}.
 Table~\ref{tab:crest} puts this code against CREST 3.0.2 on GFN2-xTB water,
 ammonia, carbon, and silicon clusters
 \cite{bannwarthGfn2xtbanAccurateBroadly2019}.
-CREST takes no seed, so its runs are not paired with those of this code,
-and the hits are compared with the two-sided Fisher exact test.
+CREST takes no seed, so its runs are not paired with those of this code.
+The Fisher exact test is printed only where both arms use one stopping rule.
 CREST runs to its own end, so a pair is kept only when the budget of this
 code is at least the median calls of the complete CREST runs.
 An aborted CREST run is dropped from its pair.
-CREST hits the water hexamer on 4 of 12 runs and this code on 1 of 12
-(\(p=0.32\)).
+This code stops at a fixed charge of 3021 calls and hits the water hexamer
+on 1 of 12 runs.
+CREST stops at the end of its 0.90~ps run and hits the water hexamer on
+4 of 12 runs.
 On (H\(_2\)O)\(_8\), seeds 2000--2011 of this code run with the opt-in
 polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
 seeds 17000--17011.
@@ -927,12 +927,14 @@ Mann--Whitney \(U=0\) for this code against CREST, pairs with its call larger,
 is complete separation (\(p=7.4\times 10^{-7}\)):
 its runs hit in fewer calls than every CREST run.
 The median ratio is 22.87, bootstrap 95\% interval 10.35 to 34.57.
-This code hits the ammonia octamer on 10 of 12 seeds and CREST on 6 of 6
-(\(p=0.529\)).
-This code hits the C\(_{10}\) ring on 11 of 12 seeds and CREST on 4
-(\(p=9.4\times 10^{-3}\)).
-On Si\(_{10}\) the counts are 11 of 12 and 11 of 11 (\(p=1\)), and
-neither code reaches the C\(_{20}\) cage.
+This code hits the ammonia octamer on 10 of 12 seeds and stops at the target
+or at a budget of 332675 calls.
+CREST hits it on 6 of 6 full runs.
+This code stops at the reference or at \(10^{5}\) calls and hits the
+C\(_{10}\) ring on 11 of 12 seeds, Si\(_{10}\) on 11 of 12, and the
+C\(_{20}\) cage on 0 of 12.
+CREST stops at the end of its run and hits that ring on 4 of 12,
+Si\(_{10}\) on 11 of 11, and the C\(_{20}\) cage on 0 of 12.
 The Supporting Information gives the settings, revisions, and records, and
 the CREST arms that the budget rule removes.
 
@@ -940,27 +942,23 @@ the CREST arms that the budget rule removes.
 \begin{table}
 \caption{This code against CREST 3.0.2 on GFN2-xTB clusters.
 Both arms count GFN2-xTB energy and gradient calls.
-CREST calls is the median of the complete runs kept by the budget rule.
-The (H\(_2\)O)\(_8\) first-hit medians are 6193 and 141621.5. The row prints no budget.
-The (NH\(_3\))\(_8\) row is hits only.
-\(p\) is the two-sided Fisher exact test on the hits.
+A row prints \(p\) only when both arms use one stopping rule.
+The text names each stopping rule.
 The Supporting Information gives the settings, revisions, records, and the arms that
 the budget rule removes.}
 \label{tab:crest}
 \centering
 \footnotesize
-\begin{tabular}{@{}lrrrrr@{}}
+\begin{tabular}{@{}lrrr@{}}
 \toprule
- & & & \multicolumn{2}{c}{Hits} & \\
-\cmidrule(lr){4-5}
-Cluster & Budget & CREST calls & This work & CREST & \(p\) \\
+Cluster & This work & CREST & \(p\) \\
 \midrule
-(H\(_2\)O)\(_6\) & 4000 & 3055 & 1/12 & 4/12 & 0.32 \\
-(H\(_2\)O)\(_8\) & --- & --- & 12/12 & 7/12 & 0.0373 \\
-(NH\(_3\))\(_8\) & --- & --- & 10/12 & 6/6 & 0.529 \\
-C\(_{10}\) & \(1\times 10^{5}\) & 78367 & 11/12 & 4/12 & \(9.4\times 10^{-3}\) \\
-Si\(_{10}\) & \(1\times 10^{5}\) & 98677 & 11/12 & 11/11 & 1 \\
-C\(_{20}\) & \(1\times 10^{5}\) & 78581.5 & 0/12 & 0/12 & 1 \\
+(H\(_2\)O)\(_6\) & 1/12 & 4/12 & --- \\
+(H\(_2\)O)\(_8\) & 12/12 & 7/12 & 0.0373 \\
+(NH\(_3\))\(_8\) & 10/12 & 6/6 & --- \\
+C\(_{10}\) & 11/12 & 4/12 & --- \\
+Si\(_{10}\) & 11/12 & 11/11 & --- \\
+C\(_{20}\) & 0/12 & 0/12 & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -971,12 +969,16 @@ At arm-specific work definitions anneal reaches funnel-trapped references on
 LJ\(_{98}\), M\(_{55}\) and M\(_{80}\) at \(\rho=14\), and rigid
 (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\), where the corresponding GMIN
 arms at one documented input hit no seed.
-On GFN2-xTB clusters CREST hits the water hexamer on 4 of 12 runs against
-1 of 12 for this code (\(p=0.32\)).
-With the opt-in polish-on-improvement option this code hits the water octamer
-on 12 of 12 seeds and CREST on 7 of 12, and the ammonia octamer on 10 of 12
-seeds and CREST on 6 of 6 (\(p=0.529\)), while this code hits the C\(_{10}\)
-ring more often.
+On GFN2-xTB clusters this code stops at a fixed charge of 3021 calls and
+hits the water hexamer on 1 of 12 runs.
+CREST stops at the end of its 0.90~ps run and hits the water hexamer on
+4 of 12 runs.
+With the opt-in polish-on-improvement option both arms count first-hit
+calls, and this code hits the water octamer on 12 of 12 seeds and CREST on
+7 of 12.
+This code hits the ammonia octamer on 10 of 12 seeds and stops at the target
+or at a budget of 332675 calls.
+CREST hits that cluster on 6 of 6 full runs.
 
 The paired knockouts show that removing the former structure templates
 lowers M\(_{38}\) hits at \(\rho=14\) from 12 of 12 to 4.

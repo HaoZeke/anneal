@@ -846,7 +846,7 @@ def test_a_cover_sentence_off_the_abstract_is_reported():
     audit_mod.cover_letter(audit)
     assert [r[2] for r in audit.drifts()] == [
         "a cover-letter sentence with a number is a sentence of the abstract",
-        "the numbered cover-letter claim matches the one numbered abstract claim"]
+        "the numbered cover-letter claims are the numbered abstract claims"]
 
 
 def test_a_drifted_gmin_panel_summary_cell_is_reported():
@@ -2513,6 +2513,16 @@ def test_the_rendered_abstract_is_counted_without_page_numbers():
         "body has 7001 words, outside 5000-7000"]
 
 
+def test_a_mixed_stopping_pair_is_reported():
+    """Putting a fixed budget back beside a full-run median is a drift."""
+    audit = audit_mod.Audit()
+    path = audit_mod.TEX
+    audit.text_cache[path] = audit.text(path) + "\n4000 & 3055\n"
+    audit_mod.stopping_pairs(audit)
+    assert [row for row in audit.drifts() if row[2] == "a mixed stopping pair stays out" and row[3] == "4000 & 3055"] == [
+        ("DRIFT", path, "a mixed stopping pair stays out", "4000 & 3055", "present")]
+
+
 def test_a_missed_printed_definition_is_a_drift():
     """A definition pattern that no longer matches the source is a drift, not a skip."""
     audit = audit_mod.Audit()
@@ -4130,9 +4140,10 @@ def test_a_stale_gmin_single_session_claim_is_reported():
 def test_a_drifted_crest_hexamer_count_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "CREST hits the water hexamer on 4 of 12 runs and this code"
+    old = ("On GFN2-xTB clusters this code stops at a fixed charge of 3021 calls and "
+           "hits the water hexamer on 1 of 12 runs.")
     assert audit_mod.collapse(tex).count(old) == 1
-    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("4 of 12", "3 of 12"))
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("1 of 12", "3 of 12"))
     audit_mod.crest_table(audit)
     assert [r[2] for r in audit.drifts()] == ["prose"]
 
