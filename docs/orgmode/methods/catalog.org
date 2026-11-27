@@ -175,20 +175,36 @@ as an enum rather than a trait object so the generic =propose= stays
 monomorphized per call.
 
 Key types and functions: =MoveLibrary= (src/methods/cluster_hopping/moves.rs:12)
-with variants =Atomic=, =Lean=, =LeanBurst=, =Visit=, =Twin=,
-=SelfReseed=, =LearnedReseed=, =Reseed=, =GrowthAndTwin=, =Molecular=;
-its =kernels= method (moves.rs:50) composes the concrete arms. =ClusterMove=
-enum (moves.rs:176) with variants =AllPoints=, =SinglePoint=, =Visit=,
-=Burst= (composed surface relocations, one acceptance test per excursion),
-~GroupRelocate~ / ~GroupBurst~ / ~GroupShake~ (rigid molecular analogues),
-=SurfaceRelocate=, =ShellRotate=, =Symmetrise=, =Twin= (reflect across a
-dense plane), =Reseed= (regrow a local order from a template, the only
-kernel that crosses a funnel boundary in one step; see
-[[*Descriptors and identity][descriptors]] / =crate::lattice=), =Angular= (Wales-Doye worst-bound-point
-move), =Soap= (descriptor-space pullback step; see the SOAP entry below).
-~worst_bound~ / ~worst_bound_scaled~ (moves.rs:434/445) decide when a point
-is loose enough for the angular move. =connectivity_groups=
-(moves.rs:602) derives rigid molecular groups from the current bonding
+with variants =WalesDoye=, =Atomic=, =Lean=, =LeanBurst=,
+=LeanBurstHollow=, =LeanBurstFill=, =Visit=, =Twin=, =SelfReseed=,
+=LearnedReseed=, =Reseed=, =GrowthAndTwin=, =Molecular= and
+=RigidBody=; its =kernels= method (moves.rs:112) composes the concrete
+arms. =ClusterMove= enum (moves.rs:431) with variants =AllPoints=,
+=SinglePoint=, =Visit=, =Burst= (composed surface relocations, one
+acceptance test per excursion), =GroupRelocate= / =GroupBurst= /
+=GroupShake= (rigid molecular analogues), =SurfaceRelocate=,
+=HollowRelocate= / =HollowFill= (dynamic-lattice relocation and sweep),
+=EnergyLattice= (a Boltzmann-weighted exchange of a high-energy atom),
+=ShellRotate=, =Symmetrise=, =OrbitComplete= (orbit completion of the
+incumbent, as a proposal), =PointSymmetrise= (a proposal onto a
+detected point group), =SoapRepel= (a descriptor-space step away from
+packings the population already occupies), =Twin= (reflect across a
+dense plane), =Reseed= (regrow from a named packing or from the
+structure's own local order, the only kernel that crosses a funnel
+boundary in one step; see
+[[*Descriptors and identity][descriptors]] / =crate::lattice=),
+=Angular= (Wales-Doye worst-bound-point move), =SpeciesSwap= (exchange
+coordinates of unlike species), the rigid-body kernels
+=RigidTranslate=, =RigidKick=, =RigidRotate=, =RigidRelocate=,
+=RigidTranslateOne=, =RigidRotateOne=, =RigidReorient=,
+=RigidOrientAll= and =RigidReverseCycle=, the water-network kernels
+=GroupCycleReverse= and =GroupRewire=, =Plane= (rotate or reflect the
+atoms on one side of a random plane), =Soap= (descriptor-space
+pullback step; see the SOAP entry below) and =Torsion= (turn one side
+of a rotatable covalent bond).
+=worst_bound= / =worst_bound_scaled= (moves.rs:1247/1258) decide when a
+point is loose enough for the angular move. =connectivity_groups=
+(moves.rs:1490) derives rigid molecular groups from the current bonding
 rather than a fixed declaration.
 
 Constants and defaults: =LennardJonesPreset= and =MolecularPreset=
@@ -196,8 +212,8 @@ Constants and defaults: =LennardJonesPreset= and =MolecularPreset=
 coefficients (e.g. ~MERGE_RADIUS = 0.7~, ~TEMPERATURE = 0.8~,
 ~BIAS_HEIGHT = 0.25~, ~SOAP_RMSD = 0.35~, ~SOAP_CUTOFF = 3.5~,
 ~MIN_SEPARATION = 0.85~) multiplied by declared length/energy scales.
-=Config::recommended= (config.rs) selects =MoveLibrary::LeanBurst=
-with the SOAP arm and Thompson allocation over the arms. Like
+=Config::recommended= (src/methods/cluster_hopping/config.rs:1932) selects =MoveLibrary::LeanBurst=
+at every size, with the SOAP arm and Thompson allocation over the arms. Like
 =Config::communicating=, it completes the core's orbit on every new basin
 and, below 98 points, draws between the plain and the two-phase relative
 0.7 surface.
@@ -236,9 +252,9 @@ over 32-entry blocks, which allows for rounding so that the answer is
 the one the full distance gives.
 
 Key types and functions: =Bias= trait (src/bias.rs:35); =WellTemperedBias=
-(src/bias.rs:63); =BasinBias<F: Fingerprint>= (src/bias.rs:358);
-=BasinIndex<F: Fingerprint>= (src/bias.rs:381); =Fingerprint= trait
-(src/bias.rs:970); =SortedPairs= (src/bias.rs:987), the default
+(src/bias.rs:63); =BasinBias<F: Fingerprint>= (src/bias.rs:698);
+=BasinIndex<F: Fingerprint>= (src/bias.rs:895); =Fingerprint= trait
+(src/bias.rs:1589); =SortedPairs= (src/bias.rs:1606), the default
 permutation/translation/rotation-invariant fingerprint for point sets.
 
 Constants and defaults: deposit rule
@@ -353,10 +369,13 @@ stopped improving, each answering a different way of being stuck.
   normalised Laplacian as a continuous collective variable for an
   extra well-tempered bias, replacing a hand-chosen order parameter.
 
-Constants and defaults: escape trigger is
-=escape_stall_factor= times the longest quiet stretch already survived,
-not a fixed patience (config.rs:206-222, measured: fixed patience 400
-scored 2/8 seeds vs. 9/16 without it). =STALL_LEAVE=-style thresholds
+Constants and defaults: =escape_stall_patience= is a floor. The chain
+is stalled once =quiet= reaches the larger of that floor and
+=escape_stall_factor= times the longest quiet stretch already survived
+(src/methods/cluster_hopping.rs:5097). Those defaults are 5000 and 2.0
+(src/methods/cluster_hopping/config.rs:2331). A fixed patience of 400
+scored 2 seeds in 8 against 9 in 16 without it
+(src/methods/cluster_hopping/config.rs:662). =STALL_LEAVE=-style thresholds
 recur elsewhere in the crate at value 8 (see
 [[file:catalog.org::*Catalog policy][catalog policy]] and [[file:catalog.org::*Cooperative wells and swarm role][swarm role]]).
 
@@ -1247,9 +1266,10 @@ Feeds/consumes: gated behind the =bank-rpc= Cargo feature. A
 request identity differs is rejected with =replicaMismatch=.
 Scientific mutations still check campaign, ensemble, replica
 membership, and system signature (see [[file:catalog.org::*System signature and candidate validation][signature entry]]).
-=Coordinator.observe= is the identity-free watch path;
-=examples/catalog_status.rs= can poll either that or the
-identity-checked observer-status operation.
+=Coordinator.observe= is the identity-free watch path.
+=examples/catalog_status.rs= calls =observer_status_frame= and
+=observer_status= (examples/catalog_status.rs:46 and
+examples/catalog_status.rs:58). It does not call =observe=.
 
 ** CooperativeRun composition layer
 
@@ -1258,25 +1278,27 @@ protocol above (or fall back to purely local execution when no client
 is attached), recording a complete, replayable, newline-delimited JSON
 trace of every decision.
 
-Key types and functions: =TraceKind= (src/cooperative_search.rs:25,
-sixteen stable event classifications: =LocalWork=, =Admission=,
+Key types and functions: =TraceKind= (src/cooperative_search.rs:37,
+eighteen stable event classifications: =LocalWork=, =Admission=,
 =Rejection=, =SnapshotRefresh=, =PolicyLocal=, =PolicyExploit=,
 =PolicyExplore=, =PolicyLeave=, =PopulationPending=, =PopulationReady=,
 =RpcFallback=, =SharingDisabled=, =Slice=, =Transition=,
-=TransitionExecution=); =TraceEvent= (cooperative_search.rs:82);
+=TransitionExecution=, =RideClaim=, =RideReport=, =Retire=);
+=TraceEvent= (cooperative_search.rs:103);
 ~TransitionTrace~ / ~PolicyTrace~ / ~SliceTrace~ / ~PopulationTrace~
-(cooperative_search.rs:109/126/216/251); =RunManifest=
-(cooperative_search.rs:268); =CooperativeRunError=
-(cooperative_search.rs:401); =CooperativeRun=
-(cooperative_search.rs:449) with ~new~ / ~attach_client~
-(cs.rs:457/488), =record_work= (498), =offer_candidate= (564),
+(cooperative_search.rs:237/254/368/403); =RunManifest=
+(cooperative_search.rs:420); =CooperativeRunError=
+(cooperative_search.rs:613); =CooperativeRun=
+(cooperative_search.rs:764) with ~new~ / ~attach_client~
+(cooperative_search.rs:773/833), =record_work= (936),
+=offer_candidate= (1024),
 ~record_current~ / ~record_transition~ / ~record_executed_transition~
-(632/655/675), =synchronize= (700), ~policy_input~ /
-~registered_policy_input~ (735/789), =sample_candidate= (815),
-=descriptor_hole= (852), =boundary_crossing= (890),
+(1091/1118/1216), =synchronize= (1241), ~policy_input~ /
+~registered_policy_input~ (1276/1495), =sample_candidate= (1521),
+=descriptor_hole= (1871), =boundary_crossing= (1979),
 ~submit_population~ / ~join_population~ / ~abstain_population~ /
-~poll_population~ (928/947/964/981), =decide= (998), =record_slice=
-(1025), =json_lines= (1064).
+~poll_population~ (2138/2159/2216/2234), =decide= (2252),
+=record_slice= (2279), =json_lines= (2318).
 
 Feeds/consumes: this is the object the cooperative example's checkpoint
 closure drives every checkpoint; see [[file:composition.org][composition.org]] for the
@@ -1382,7 +1404,7 @@ Expected passage time to an absorbing target set solves
 \((I - Q)\,t = \mathbf{1}\) over the transient (non-absorbing,
 target-reachable) basins by dense Gaussian elimination with partial
 pivoting, where \(Q\) is the jump chain restricted to them
-(=passage_times=, landscape_graph.rs:230-315); unreachable basins
+(=passage_times=, landscape_graph.rs:309); unreachable basins
 price at infinity by construction, since reachability is separated by
 a frontier search before the linear solve.
 
@@ -1857,26 +1879,28 @@ free-form, so a caller cannot charge an uncharged boundary or leave a
 charged one uncounted.
 
 Key types and functions: =ChargeKind= (src/cooperative_search/ledger.rs:7,
-nine variants: =LocalProposal=, =RemoteProposal=,
-=DescriptorEvaluation= -- all uncharged, no potential call --
+eleven variants: =LocalProposal=, =RemoteProposal=,
+=DescriptorEvaluation= and =RpcFallback= are uncharged;
 =AcceptedQuench=, =RejectedQuench=, =FreshValidation=, =Retry=,
-=AuxiliaryEvaluation= -- all charged -- and =RpcFallback=, uncharged);
-~wire_code~ / ~from_wire_code~ (ledger.rs:30/45); =ReplicaLedgerEvent=
-(ledger.rs:74); =LedgerUpdate= (ledger.rs:89, ~Recorded~ / ~Duplicate~);
-=LedgerError= (ledger.rs:98, nine failure modes including
+=AuxiliaryEvaluation=, =BasinEscape= (one basin-escape attempt) and
+=SaddleRide= (one minimum-mode saddle-ride attempt) are charged);
+=wire_code= / =from_wire_code= (ledger.rs:34/51); =ReplicaLedgerEvent=
+(ledger.rs:93); =LedgerUpdate= (ledger.rs:108, =Recorded= / =Duplicate=);
+=LedgerError= (ledger.rs:117, eleven failure modes including
 =ConflictingReplay=, =BudgetExceeded=, =CounterRegression=);
-=FirstEncounter= (ledger.rs:180, counter vector frozen at first
+=FirstEncounter= (ledger.rs:199, counter vector frozen at first
 validated target encounter, for measuring "work to solution" per
-replica and in aggregate); =CooperativeLedger= (ledger.rs:199),
-=record= (ledger.rs:236, idempotent: an identical replay is a no-op, a
+replica and across the ensemble); =CooperativeLedger= (ledger.rs:218),
+=record= (ledger.rs:255, idempotent: an identical replay is a no-op, a
 conflicting one is an error), =record_first_encounter=
-(ledger.rs:313).
+(ledger.rs:367).
 
-Feeds/consumes: this is what the example driver's =checkpoint= closure
-calls via =CooperativeRun::record_work= for every quench boundary and
-auxiliary evaluation (see composition doc); =FirstEncounter= is the
-crate's mechanism for the "work to solution" statistic quoted in
-measured-status doc comments throughout (e.g. the =Config::recommended=
+Feeds/consumes: the example driver's checkpoint closure records each
+quench boundary as =BasinEscape= and the remaining charged work as
+=AuxiliaryEvaluation=, through =CooperativeRun::record_work_batch=
+(see the composition doc). =FirstEncounter= is the crate's mechanism
+for the "work to solution" statistic quoted in measured-status doc
+comments throughout (for example the =Config::recommended=
 Bayes-factor comparisons).
 
 ** Basin census Good-Turing accounting

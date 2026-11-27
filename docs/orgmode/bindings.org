@@ -72,13 +72,23 @@ cargo cinstall --release --prefix /usr/local
 pkg-config --cflags --libs anneal-core
 #+END_SRC
 
+=cargo cinstall= turns on the =capi= feature, which compiles the C ABI in =src/ffi.rs=.
+A plain =cargo build= needs =--features capi= before those symbols exist.
+
+The four exports are =anneal_box_config_default=, =anneal_box_minimize=, =anneal_last_error= and =anneal_core_version=.
+=anneal_box_config_default= writes four replicas, a budget of 400 work units, the default coverage field and Gaussian escapes, and returns =ANNEAL_SUCCESS=.
+A null output pointer returns =ANNEAL_INVALID_PARAMETER= and writes nothing.
+Set =seed=, =budget=, =replicas=, the coverage fields and =escape= (=ANNEAL_BOX_ESCAPE_GAUSSIAN= or =ANNEAL_BOX_ESCAPE_LANGEVIN=) before =anneal_box_minimize=.
+=anneal_last_error= returns the message of the last failed call on this thread, and =anneal_core_version= the package version.
+
 A hand-written companion header =anneal-core.hpp= wraps the C declarations in =namespace anneal= for ergonomic C++ usage.
 
 =anneal_box_minimize= reads =ANNEAL_SUCCESS= from a callback as "keep
 going". =ANNEAL_STOPPED= asks the search to return at once: the best point
 found is written back, and the call itself returns =ANNEAL_STOPPED=. Any
-other status is a failure and leaves the start in place. The variants live
-in the generated =anneal-core.h=.
+other status is a failure and leaves the start in place. The variants
+(=ANNEAL_SUCCESS=, =ANNEAL_INVALID_PARAMETER=, =ANNEAL_INTERNAL_ERROR=,
+=ANNEAL_STOPPED=) live in the generated =anneal-core.h=.
 
 The install also places =dlpack/dlpack.h= (DLPack 1.3, the header =dlpk= 0.1.5 was translated from) on that include prefix. =anneal-core.h= includes it, so =pkg-config --cflags anneal-core= is enough to compile a consumer. Meson and CMake install the same header.
 

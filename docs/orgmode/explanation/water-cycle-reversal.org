@@ -14,9 +14,16 @@ It covers how the move works, how it fits with the other moves, and what it chan
 * The other moves
 
 A rigid water has a centre and an orientation, six coordinates per molecule.
-=Config::for_tip4p= follows Wales and Hodges (1998) with two moves.
+=Config::for_tip4p= started from the Wales and Hodges (1998) collective
+moves and now offers seven arms.
+=rkick= shifts every centre and every rotation vector together.
 =rtrans= shifts every centre by a small random step.
 =rrot= adds a small random increment to every rotation.
+=rtrans1= shifts one centre.
+=rreor= composes a uniform random rotation onto three bodies when
+there are at least three, and onto every body when there are fewer.
+Centres stay fixed.
+=rreloc= moves one body onto a vacant contact.
 After each move the search relaxes the cluster to a local minimum.
 It then accepts or rejects that minimum by its energy.
 A move allocator picks the move for each hop.
@@ -57,7 +64,7 @@ In ice that move is used to sample arrangements at equilibrium.
 Here the walk is not uniform over cycles, so the move has no proposal ratio.
 It is a move for finding minima, not for sampling.
 
-The allocator sees =rcycle= as a third move, beside =rtrans= and =rrot=.
+The allocator sees =rcycle= as one more arm beside those six.
 If the walk finds no cycle, the move returns the cluster unchanged.
 The search then draws another move for that hop, so it spends no quench on an unchanged cluster.
 It has no rate to set.

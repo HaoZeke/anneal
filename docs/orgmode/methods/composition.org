@@ -4,179 +4,259 @@
 One narrative walk of a cooperative Lennard-Jones cluster run, naming
 each mechanism from [[file:catalog.org][catalog.org]] as it appears. The walk follows
 =examples/lj_cluster_search.rs='s =run_capnp_catalog= function
-(examples/lj_cluster_search.rs:1958-2582), which drives one replica's
-=main= entry point when invoked with the =catalog= mode against
+(examples/lj_cluster_search.rs:4038-6741). Catalog mode, or a set
+catalog endpoint, calls it (examples/lj_cluster_search.rs:2489). That
+call is built with the =bank-rpc= feature. The function drives
 =anneal_core::methods::cluster_hopping::run_with_bias_at_checkpoints=
-(src/methods/cluster_hopping.rs:749).
+(src/methods/cluster_hopping.rs:3369).
 
 * Start: configuration and identity
 
-A replica reads =CATALOG_CAMPAIGN=, =CATALOG_ENSEMBLE=, =CATALOG_REPLICA=
-from the environment (examples/lj_cluster_search.rs:1968-1971) and
-computes the LJ system's canonical =SystemSignature= via
-=crate::catalog::lj::system_signature= (src/catalog/lj.rs:157) and its
+A replica reads its run name, ensemble, and replica id from the
+environment (examples/lj_cluster_search.rs:4072-4086) and computes the
+LJ system's canonical =SystemSignature= via
+=crate::catalog::lj::system_signature= (src/catalog/lj.rs:163) and its
 =DescriptorSpace= via =crate::catalog::lj::descriptor_space=
-(src/catalog/lj.rs:138). A =CooperativeRun= is constructed for the
+(src/catalog/lj.rs:140). A =CooperativeRun= is constructed for the
 single local replica with its charged-work budget
-(examples/lj_cluster_search.rs:1976-1980); if a coordinator endpoint is
-given, a =CatalogClient= connects under the =CatalogIdentity=
-(campaign, ensemble, replica, signature digest) and attaches to the run
-(examples/lj_cluster_search.rs:1982-1997) -- a refused or unreachable
-coordinator leaves local execution active rather than failing the run
-(=RpcFallback=).
+(examples/lj_cluster_search.rs:4090-4094). If an endpoint is given, a
+=CatalogClient= connects under the =CatalogIdentity= and attaches to
+the run (examples/lj_cluster_search.rs:4098-4121). A refused or
+unreachable coordinator leaves local execution active rather than
+failing the run.
 
-Runtime configuration derives from =Config::recommended(n)= with
-=budget_window= forced on (~run_cfg.budget_window = true~,
-examples/lj_cluster_search.rs:1999-2000) and =polish_records= equal to
-one full quench (=relax_steps=, 1000 on =Config::recommended=).
-Two cooperative-only
-extensions are environment-gated: =CATALOG_COOP_WELLS= (feed remote
-minima into the featomic packing archive) and =CATALOG_SHARED_BIAS=
-(deposit remote minima into this chain's own well-tempered bias)
-(examples/lj_cluster_search.rs:2001-2013).
+Runtime configuration is a clone of the caller's =Config=
+(=run_cfg=, examples/lj_cluster_search.rs:4266). The acceptance law is
+copied from that config: =budget_window= is not forced on
+(examples/lj_cluster_search.rs:4281). =polish_records= is set to one
+full quench, =relax_steps=
+(examples/lj_cluster_search.rs:4437-4442). Two cooperative extensions
+are environment-controlled. The SOAP packing archive is fed from remote
+minima unless =CATALOG_COOP_WELLS= is =0=
+(examples/lj_cluster_search.rs:4324-4329), and only when the binary
+includes the =featomic= feature. Remote minima are queued for this
+chain's own bias only when =CATALOG_SHARED_BIAS= is =1=
+(examples/lj_cluster_search.rs:4334).
 
 * The hop loop
 
-=run_with_bias_at_checkpoints= (src/methods/cluster_hopping.rs:749)
+=run_with_bias_at_checkpoints= (src/methods/cluster_hopping.rs:3369)
 drives the ordinary perturb-quench chain against a =BasinBias= keyed on
-=ClusterFingerprint= (examples/lj_cluster_search.rs:2077-2082), calling
-back into the closure below every =checkpoint_interval= charged
-evaluations (default 500, or ~CATALOG_SLICE~ / ~BANK_SLICE~,
-examples/lj_cluster_search.rs:2058-2064). Inside each hop, before the
+=ClusterFingerprint= (examples/lj_cluster_search.rs:4544), calling back
+into the closure below every =checkpoint_interval= charged evaluations.
+The default interval is 500, or ~CATALOG_SLICE~ / ~BANK_SLICE~
+(examples/lj_cluster_search.rs:4443-4448). Inside each hop, before the
 checkpoint fires:
 
-- *Move selection*: =MoveLibrary::LeanBurst='s kernels
-  (src/methods/cluster_hopping/moves.rs:50) are chosen per hop by the
-  Thompson/depth/contextual allocators (=allocate_moves=,
-  =depth_reward=; catalog.org "learned allocation").
+- *Move selection*: the caller's =MoveLibrary= supplies the kernels
+  (src/methods/cluster_hopping/moves.rs:112). =Config::recommended=
+  selects =MoveLibrary::LeanBurst= at every size. An allocator chooses
+  the arm when =allocate_moves= is on (catalog.org "learned allocation").
 - *Screening*: the Bayesian cost-asymmetric screen and the quench
   predictor decide whether a partial relaxation is worth finishing
   (catalog.org "local search"); the return screen aborts trials
   heading straight back into the current basin.
-- *Acceptance*: the Metropolis/budget-window temperature and the
+- *Acceptance*: the Metropolis or budget-window temperature and the
   well-tempered basin bias jointly decide whether the quenched trial
-  becomes the new live state; a tabu quarantine can refuse a return to
-  a stalled funnel outright.
-- *Stall response*: if the chain has gone longer without improving than
-  its own longest prior quiet stretch, a soft-mode climb, symmetrise,
-  path attempt, trail-on-stall, or restart-on-stall may fire, in that
-  priority determined by the config flags set on this run.
+  becomes the new live state. A tabu quarantine can refuse a return to
+  a stalled funnel.
+- *Stall response*: the chain is stalled once =quiet= reaches the
+  larger of =escape_stall_patience= and =escape_stall_factor= times
+  =longest_quiet= (src/methods/cluster_hopping.rs:5097). Those defaults
+  are 5000 and 2.0 (src/methods/cluster_hopping/config.rs:2331).
+  =directed_leave= is tested before =stuck=
+  (src/methods/cluster_hopping.rs:11041). When =directed_leave= is set
+  and more than one leave arm is enabled, the walk draws between those
+  arms. When =directed_leave= is set and that draw does not apply, the
+  walk selects =climb= by name and does not draw
+  (src/methods/cluster_hopping.rs:11046). When =directed_leave= is not
+  set, =stuck= is set, and more than one stall arm is enabled, the
+  arm is drawn (src/methods/cluster_hopping.rs:11048).
+  =recommended_with_scales= turns on =trail= and =climb=
+  (src/methods/cluster_hopping/config.rs:1944)
+  (src/methods/cluster_hopping/config.rs:1945) and leaves =cap= off
+  (src/methods/cluster_hopping/config.rs:2349). The call clock sets
+  =directed_leave= when =escape_on_stall= is on
+  (src/methods/cluster_hopping.rs:7643). On that preset the leave
+  selects =climb= and does not draw. A fresh start is not that leave.
+  It runs when =restart_on_stall= is on, the climb is off, and the
+  chain is not rigid (src/methods/cluster_hopping.rs:7625). It draws
+  =scaled_liquid_start= (src/methods/cluster_hopping.rs:7631). A finite
+  quench of the right length is adopted as a restart
+  (src/methods/cluster_hopping.rs:7636). That start does not restore
+  the occupied funnel. When the cap turn is also on, =directed_leave=
+  draws between =climb= and =cap= only
+  (src/methods/cluster_hopping.rs:6397).
 
-None of this loop body talks to the coordinator; it is the same code
-path a solo (non-cooperative) run takes. The cooperative layer only
-enters at a checkpoint boundary.
+None of this loop body talks to the coordinator. It is the same code
+path a solo run takes. The cooperative layer only enters at a
+checkpoint boundary.
 
 * Checkpoint: conversation with the coordinator
 
-The closure passed as =checkpoint= (examples/lj_cluster_search.rs:2096)
-receives a =ChainCheckpoint= (src/methods/cluster_hopping.rs:114), a
-read-only snapshot of the live chain's current state, best state, and
+The closure passed as =checkpoint= (examples/lj_cluster_search.rs:4691)
+receives a =ChainCheckpoint= (src/methods/cluster_hopping.rs:226), a
+read-only snapshot of the live chain: current state, best state, and
 every quench boundary and accepted transition since the last
-checkpoint. It runs, in order:
+checkpoint.
 
-1. *Charge the cooperative ledger.* Every quench boundary in the
-   snapshot is recorded as =ChargeKind::AcceptedQuench= or
-   =RejectedQuench= via =CooperativeRun::record_work=
-   (examples/lj_cluster_search.rs:2100-2116); any remaining charged
-   work not accounted by a boundary is =AuxiliaryEvaluation=
-   (examples/lj_cluster_search.rs:2117-2133). This is
+When =CATALOG_EVIDENCE_ONLY= is =1=, unsettled charged work is recorded
+and the closure returns =CheckpointAction::Continue=
+(examples/lj_cluster_search.rs:4790 and
+examples/lj_cluster_search.rs:4796). That return is before
+=DescriptorSpace::describe= (examples/lj_cluster_search.rs:5158), before
+a probe (examples/lj_cluster_search.rs:5185), and before the population
+barrier (examples/lj_cluster_search.rs:5429). It does not call
+=record_slice=. The steps below are the other checkpoints. They run, in
+order:
+
+1. *Charge the cooperative ledger.* Each quench boundary in the
+   snapshot is recorded as =ChargeKind::BasinEscape=. Charged work that
+   those boundaries do not cover is =AuxiliaryEvaluation=. A checkpoint
+   with no charged work records an uncharged =LocalProposal=. One
+   =CooperativeRun::record_work_batch= call writes the batch
+   (examples/lj_cluster_search.rs:4906-4929). Executed transitions go
+   through =CooperativeRun::record_executed_transition=
+   (examples/lj_cluster_search.rs:4932-4946). This is
    =crate::cooperative_search::ledger::CooperativeLedger= (catalog.org
-   "cooperative ledger and charge kinds") -- idempotent, so a retried
-   checkpoint after a transient RPC failure never double-charges.
+   "cooperative ledger and charge kinds"). The ledger is idempotent, so
+   a retried checkpoint after a transient RPC failure does not charge
+   the same work twice.
 
 2. *Register local-topology evidence.* =adaptive_catalog_operations=
-   (examples/lj_cluster_search.rs:2149-2157) turns the snapshot's
-   accepted transitions into ~RegisterCurrent~ / ~Adopt~ operations fed
-   to ~CooperativeRun::record_current~ / ~record_transition~
-   (examples/lj_cluster_search.rs:2161-2190), building the same
-   append-only transition evidence
-   =crate::transition_graph::TransitionGraph= consumes elsewhere.
+   (examples/lj_cluster_search.rs:7261) reads unadopted probe
+   transitions. A failed probe has action =probe=, is not validated,
+   and carries a source gradient (examples/lj_cluster_search.rs:7273).
+   When that source is already registered, the probe pushes
+   =Unresolved= and does not push =RegisterCurrent= again. When it is
+   not, =lj_catalog_candidate= is called. That call returns nothing
+   when the Euclidean gradient norm is not finite or above 1e-5
+   (examples/lj_cluster_search.rs:6860)
+   (examples/lj_cluster_search.rs:6861), when =describe= fails
+   (examples/lj_cluster_search.rs:7156), or when the charged work does
+   not fit a u64 (examples/lj_cluster_search.rs:7167). The gradient
+   helper also returns nothing when the energy or a coordinate is not
+   finite, or the lengths disagree (examples/lj_cluster_search.rs:6852).
+   A stored source is kept when every component is below =record_gradient=
+   (src/methods/cluster_hopping.rs:2868)
+   (src/methods/cluster_hopping.rs:2885). The Lennard-Jones preset
+   sets that threshold to 1e-3 per component
+   (src/methods/cluster_hopping/preset.rs:31), so a stored source can
+   miss the Euclidean 1e-5 test. On any of those empty results the
+   loop continues and pushes neither =Unresolved= nor
+   =RegisterCurrent= (examples/lj_cluster_search.rs:7298). A candidate
+   that is present is pushed as =RegisterCurrent=, and the probe then
+   pushes =Unresolved=. =Adopt= is pushed only after a validated
+   transition (examples/lj_cluster_search.rs:7311 and
+   examples/lj_cluster_search.rs:7375). Those operations are posted
+   with =post_record_current= and =post_record_transition=
+   (examples/lj_cluster_search.rs:4949-4996). The occupied minimum is
+   sent only when it has changed
+   (examples/lj_cluster_search.rs:4997-5016), because every registration
+   asks the coordinator to validate it.
 
-3. *Offer validated candidates.* Every quench boundary that converged
-   with a retained gradient is turned into a =CatalogCandidate= by
-   =lj_catalog_candidate= (examples/lj_cluster_search.rs:2603) and
-   offered to the coordinator via
-   =CooperativeRun::offer_candidate=
-   (examples/lj_cluster_search.rs:2207-2220). The coordinator runs
+3. *Offer one validated candidate.* Quench boundaries that converged
+   with a retained gradient become =CatalogCandidate= values through
+   =lj_catalog_candidate= (examples/lj_cluster_search.rs:7144). The
+   candidate is kept only when the Euclidean gradient norm is at most
+   1e-5 (examples/lj_cluster_search.rs:6861). One offer is made per
+   checkpoint, the lowest-energy one. It is skipped only when its
+   energy is within 1e-9 of =last_offered= and the coordinates match
+   (examples/lj_cluster_search.rs:5072). It is posted with
+   =CooperativeRun::post_offer_candidate=
+   (examples/lj_cluster_search.rs:5063-5079). The coordinator runs
    candidate validation (=CandidateValidator=, catalog.org "system
    signature and candidate validation") and, if it passes, attempts
-   admission into =BasinCatalog= (catalog.org "active basin catalog")
-   -- same-basin improvement, conflict-set replacement, or
-   capacity-replacement of the worst nonincumbent.
+   admission into =BasinCatalog= (catalog.org "active basin catalog").
 
-4. *Service the population barrier.* Before any local policy decision,
-   the checkpoint answers the current synchronous population epoch:
-   =join= if a validated candidate is on file for this replica, =poll=
-   if already joined and waiting, =abstain= if nothing valid is on
-   file this epoch (examples/lj_cluster_search.rs:2239-2291). This
-   ordering is deliberate: a checkpoint often finds the chain mid-hop
-   with nothing yet valid, and silence here would starve the epoch
-   rather than let it abstain and close without this replica (catalog.org
-   "Feynman-Kac population epochs").
+4. *Report the current position.* It asks =DescriptorSpace::describe=
+   for the descriptor of the current state
+   (examples/lj_cluster_search.rs:5158). A failed
+   describe returns through =continue_checkpoint=
+   (examples/lj_cluster_search.rs:5161), which records a slice
+   (examples/lj_cluster_search.rs:3671). This runs on the checkpoints that reach
+   it, including those that later reconfigure. It is not an identity
+   claim: it reports wherever the chain stands, mid-hop or not. Only
+   the offer in step 3 feeds the identity tier.
 
-5. *Act on a ready population plan.* If the barrier just closed
-   (=PopulationSynchronizationOutcome::Ready=), the replica locates its
-   own destination in the immutable =PopulationEpochPlan= via
-   =population_family_position= and derives a deterministic
-   rejuvenation draw via =population_rejuvenation_draw=
-   (examples/lj_cluster_search.rs:2295-2298). If =CATALOG_SHARED_BIAS=
-   is set, the assigned parent's coordinates are queued for deposit
-   into this chain's own bias (=pending_deposits=,
-   examples/lj_cluster_search.rs:2299-2301). If =CATALOG_COOP_WELLS=
-   is set, the parent's SOAP cloud mean is folded into the shared
-   featomic packing archive (=set_packing_archive=,
-   examples/lj_cluster_search.rs:2302-2327). The replica then requests
-   a =boundary_crossing= from the parent's descriptor
-   (examples/lj_cluster_search.rs:2328-2339); if the coordinator
-   returns a crossing, =population_region_trial=
-   (examples/lj_cluster_search.rs:1839, region_assignment-adjacent
-   trial construction) proposes a new state via
-   =crate::boundary_transport::boundary_transport= and the checkpoint
-   returns =CheckpointAction::BoundaryProposal= immediately, skipping
-   the ordinary policy decision below for this checkpoint.
+5. *A due probe can return before the barrier.* On a probe interval
+   the checkpoint may poll =boundary_crossing= and return a
+   =ProbeProposal= (examples/lj_cluster_search.rs:5185), or return from
+   the fixed probe, before it reaches the population barrier. That
+   return does not service the barrier on this visit.
 
-6. *Report a position, ordinary case.* When no population
-   reconfiguration fires, the checkpoint asks
-   =crate::descriptor_space::DescriptorSpace::describe= for the
-   current state's descriptor and calls
-   =CooperativeRun::policy_input= then =CooperativeRun::decide=
-   (examples/lj_cluster_search.rs:2400-2428). This is deliberately
-   *not* an identity claim: it reports wherever the chain stands,
-   mid-hop or not, against the census, with no purity gate -- only the
-   offer step above (step 3) feeds the identity tier. =decide= runs
-   the pure =CatalogPolicy::decide= (catalog.org "catalog policy")
-   against the coordinator's returned =CensusEvidence= and
+6. *Service the population barrier.* The checkpoint answers the current
+   synchronous population epoch: =join_population= when it should
+   submit, =poll_population= when it is waiting, and
+   =abstain_population= when it has nothing valid on file
+   (examples/lj_cluster_search.rs:5429-5476). A checkpoint often finds
+   the chain mid-hop with nothing yet valid. Silence there would leave
+   the epoch waiting. Abstaining lets the epoch close without this
+   replica (catalog.org "Feynman-Kac population epochs").
+
+7. *Act on a ready population plan.* If the barrier just closed
+   (=PopulationSynchronizationOutcome::Ready=), the replica reads its
+   parent from the =PopulationEpochPlan=
+   (examples/lj_cluster_search.rs:5477-5519). When =CATALOG_SHARED_BIAS=
+   is =1=, the parent's coordinates are queued for this chain's bias.
+   Unless =CATALOG_COOP_WELLS= is =0=, and the binary includes the
+   =featomic= feature, the parent's SOAP cloud mean is folded into the
+   shared packing archive (examples/lj_cluster_search.rs:5492). The
+   example requires only =bank-rpc= (Cargo.toml:368), so the fold is
+   absent until =featomic= is enabled as well. The occupancy rule
+   (examples/lj_cluster_search.rs:5520-5620) keeps a replica on its own
+   champion, may copy a deeper isomer of the same packing from another
+   replica, and does not copy a parent from a different packing. A
+   surplus body can leave through =featomic_hop::surplus_reseed=. The
+   move returns through =population_reconfiguration=
+   (examples/lj_cluster_search.rs:3714) as
+   =CheckpointAction::BoundaryProposal=, and the checkpoint skips the
+   ordinary policy decision below.
+
+8. *Ask for a policy.* When no population reconfiguration fires,
+   ~CATALOG_SYNC_POLICY=1~ waits and calls
+   =CooperativeRun::policy_input_with_lambda=. Otherwise the request is
+   asynchronous and calls =try_policy_input_with_lambda=, so a decision
+   can act on a slice-old snapshot
+   (examples/lj_cluster_search.rs:5913-5936). The descriptor is the one
+   step 4 already computed. =decide= runs the pure
+   =CatalogPolicy::decide= (catalog.org "catalog policy") against the
+   coordinator's returned =CensusEvidence= and
    =ActiveCatalogRelation=.
 
-7. *Act on the policy decision.* =ContinueLocal= does nothing further
-   this checkpoint. ~Exploit~ / ~Explore~ / ~Leave~ all route through
-   =CooperativeRun::boundary_crossing=
-   (examples/lj_cluster_search.rs:2477-2479): the coordinator returns
-   either a =Crossing= (an observed boundary transport target, catalog.org
-   "boundary transport") or nothing, and if a crossing is returned the
-   same ~CATALOG_SHARED_BIAS~ / ~CATALOG_COOP_WELLS~ side effects as step
-   5 may fire before =boundary_crossing_trial= constructs the proposal
-   and the checkpoint returns =CheckpointAction::BoundaryProposal=.
+9. *Act on the policy decision.* =ContinueLocal= does nothing further
+   this checkpoint. =Exploit= may adopt the coordinator's incumbent
+   (=try_sample_candidate=, action =catalog_incumbent=,
+   examples/lj_cluster_search.rs:6289-6321). =Explore= asks for a
+   descriptor hole (=descriptor_hole=, action =catalog_explore=,
+   examples/lj_cluster_search.rs:6624-6663). =Leave= can reseed or move
+   to another catalog entry (action =catalog_leave=).
 
-8. *Record the slice trace.* Whatever happened, a =SliceTrace=
-   (catalog.org "CooperativeRun composition layer") is recorded via
-   =CooperativeRun::record_slice=
-   (examples/lj_cluster_search.rs:2543-2545) before the checkpoint
-   returns, so the run's newline-delimited JSON trace
-   (=CooperativeRun::json_lines=) has one complete, replayable entry
-   per checkpoint regardless of which branch fired.
+10. *Record the slice trace.* Paths that reach a policy decision record
+    a =SliceTrace= (catalog.org "CooperativeRun composition layer") via
+    =CooperativeRun::record_slice= before they return
+    (examples/lj_cluster_search.rs:6670), so =json_lines= can carry that
+    checkpoint. The evidence-only return does not call =record_slice=.
 
 * Polish and offer
 
-Separately from the checkpoint cadence, =Config.polish_records= extends
-the relaxation of any trial that improves the run's *record* (not every
-hop) to the shared-catalog convergence tolerance
-(src/methods/cluster_hopping/config.rs:652-661). This bounds the extra
-cost to the number of record improvements -- a few hundred evaluations
-each over tens of events across a campaign budget -- rather than paying
-full precision on every accepted hop. Only states polished to this
-tolerance are valid offers in step 3 above; a solo (non-cooperative) run
-leaves ~polish_records = 0~ and never pays this cost.
+Separately from the checkpoint cadence, =Config.polish_records=
+(src/methods/cluster_hopping/config.rs:1373) is a step count. It
+lengthens the relaxation of a new record, and of a basin visit, not
+of every hop. =run_capnp_catalog= sets it to =relax_steps=
+(examples/lj_cluster_search.rs:4442). =recommended_with_scales= sets
+=relax_steps= to 1000 (src/methods/cluster_hopping/config.rs:1965) and
+leaves =polish_records= at 0 (src/methods/cluster_hopping/config.rs:2369).
+With the count above zero, the extra steps run when the record moves,
+and also when a basin visit falls due after four times that many
+charged spent since the last polish
+(src/methods/cluster_hopping.rs:11468). That visit wait ignores branch
+charges and observed-basis charges (src/methods/cluster_hopping.rs:7543
+and src/methods/cluster_hopping.rs:11302). A target or a caller stop
+skips both (src/methods/cluster_hopping.rs:11470). The visit test does
+not read =remaining()=. A solo run leaves ~polish_records = 0~, which
+skips this path. An offer in step 3 is kept only when the Euclidean
+gradient norm is at most 1e-5 (examples/lj_cluster_search.rs:6861).
 
 * Population epoch: reconfiguration
 
@@ -187,10 +267,10 @@ the coordinator ranks the submitted =PopulationMember= entries
 from =SelectionCoefficients=, draws parents by systematic resampling at
 a replayable per-epoch offset (=epoch_systematic_offset=), and caps
 family sizes (=cap_families=). The resulting =PopulationEpochPlan= is
-what step 5 above consumes. Genealogy diagnostics (Kish effective
-sample size, unique parents, max/variance of family size) are computed
-alongside the plan for later analysis, not consumed by the replica
-itself.
+what step 7 above consumes. Genealogy diagnostics (Kish effective
+sample size, unique parents, max and variance of family size) are
+computed alongside the plan for later analysis, not consumed by the
+replica itself.
 
 * Reconfiguration and back to hopping
 
@@ -199,28 +279,43 @@ accepted, the checkpoint returns control to
 =run_with_bias_at_checkpoints=, which relaxes the new candidate state
 through the ordinary quench and re-enters the hop loop. The chain's own
 history (bias deposits, best-known state, tabu list) survives the
-reconfiguration; only the *live* state changes. The next checkpoint
+reconfiguration; only the live state changes. The next checkpoint
 resumes at step 1.
 
 * Termination and the run trace
 
-The loop ends when the chain's =Ledger= is spent
-(src/methods/cluster_hopping.rs:246). The example writes the complete
-=CooperativeRun::json_lines= trace either to =CATALOG_TRACE= or
-=stderr= (examples/lj_cluster_search.rs:2564-2580); this is the
+The loop ends when the ledger reaches its target, the caller stop
+is raised, or =remaining()= is zero
+(src/methods/cluster_hopping.rs:6815). When =max_hops= is set, it also
+ends once =hops= reaches that cap (src/methods/cluster_hopping.rs:6823).
+A finished checkpoint interval is still delivered when nothing remains
+to charge. The same three tests skip a side call
+(src/methods/cluster_hopping.rs:3746). =polish_records= skips on a
+target or a caller stop only (src/methods/cluster_hopping.rs:11470).
+=polish_on_improve= also returns when nothing remains
+(src/methods/cluster_hopping.rs:5829). =Ledger::spent=
+(src/methods/cluster_hopping.rs:1405) is the charged count. The example
+writes =CooperativeRun::json_lines= to =CATALOG_TRACE= when that
+variable names a path, and otherwise to stderr
+(examples/lj_cluster_search.rs:6723-6740). The trace is the
 newline-delimited event stream (catalog.org "CooperativeRun composition
 layer") from which every mechanism's contribution to the run can be
-replayed after the fact -- which checkpoints offered a candidate, which
+replayed after the fact: which checkpoints offered a candidate, which
 were rejected and why (=PolicyReason= codes), which population epochs
-this replica joined versus abstained, and the exact charged-work ledger
-that makes cross-replica comparisons auditable (catalog.org
+this replica joined versus abstained, and the charged-work ledger that
+makes cross-replica comparisons auditable (catalog.org
 "paired-seed evaluation methodology").
 
-A separate, unprivileged observer may poll the coordinator's aggregate
-status at any time via =examples/catalog_status.rs=, which calls
-=CatalogClient::observer_status= (src/catalog_rpc/client.rs:546) --
-the read-only op that needs no replica identity, signature, or journal
-entry (catalog.org "Cap'n Proto catalog protocol").
+A separate observer may poll aggregate status through
+=examples/catalog_status.rs=, which calls
+=CatalogClient::observer_status= (src/catalog_rpc/client.rs:972).
+That operation checks identity. The usage line requires
+=SIGNATURE_HEX= with the campaign and the ensemble
+(examples/catalog_status.rs:8). =system_identity_rejection= rejects a
+mismatch on any of those three (src/catalog_rpc/server.rs:5766).
+No replica slot or journal entry is required. The identity-free read
+is =CatalogClient::observe= (src/catalog_rpc/client.rs:292), matching
+=Coordinator.observe= (catalog.org "Cap'n Proto catalog protocol").
 
 * Dataflow diagram
 
@@ -262,9 +357,9 @@ digraph composition {
     policy -> transport [label="Exploit / Explore / Leave"];
   }
 
-  checkpoint -> ledger [label="record_work"];
-  checkpoint -> validate [label="offer_candidate"];
-  checkpoint -> policy [label="policy_input, decide"];
+  checkpoint -> ledger [label="record_work_batch"];
+  checkpoint -> validate [label="post_offer_candidate"];
+  checkpoint -> policy [label="policy_input_with_lambda /\ntry_policy_input_with_lambda, decide"];
   transport -> checkpoint [label="BoundaryProposal", color="#FF655D", fontcolor="#FF655D"];
 
   subgraph cluster_pop {
@@ -355,18 +450,14 @@ flux-balance weight transfer producing a committor surrogate along
 the channel. The wiring closes the loop the other cooperative
 mechanisms open. The
 [[file:catalog.org::*Spectral referee over the explored landscape (=landscape_graph=)][spectral referee]]
-names the seam; =commission_bridge= (src/catalog_rpc/server.rs:1616)
-turns the seam's two best-anchored
-[[file:catalog.org::*Active basin catalog][catalog]] entries into a
-string with region weights and entry lists at the population epoch
-boundary; two protocol operations (assignment poll at server.rs:638,
-crossing report at server.rs:685) serve it to replicas; and the run
-loop, behind the =CATALOG_BRIDGE= gate
-(examples/lj_cluster_search.rs:2059), jumps to stored entry states
-through the ordinary probe-proposal path and reports every region
-change of its live descriptor as a crossing. Confinement is soft:
-crossings are recorded rather than moves rejected, so no chain's
-acceptance rule changes, the boundary both rejected sharing
-mechanisms crossed. The mechanism is gated until a paired smoke
-measures it, the same discipline every mechanism in
-[[file:catalog.org][the catalog]] enters campaigns under.
+names the seam. Nothing in the coordinator inserts a bridge, so
+the bridge map stays empty. The assignment poll
+(src/catalog_rpc/server.rs:1659) and the crossing report
+(src/catalog_rpc/server.rs:1705) are still served, and a poll of an
+empty map returns no bridge. When =CATALOG_BRIDGE= is =1=
+(examples/lj_cluster_search.rs:4346), the run loop jumps to a stored
+entry state when one exists and reports region changes of the live
+descriptor as crossings. Confinement is soft: crossings are recorded
+rather than moves rejected, so no chain's acceptance rule changes.
+The variable turns that flag on only for the value 1 (src/env.rs:23).
+=CATALOG_SHARED_BIAS= uses the same test.

@@ -27,7 +27,8 @@ if let MoveLibrary::RigidBody { reverse_cycles, .. } = &mut cfg.move_library {
 }
 #+end_src
 
-The library then offers =rtrans= and =rrot= only.
+The library then offers =rkick=, =rtrans=, =rrot=, =rtrans1=, =rreor= and =rreloc=.
+=rcycle= is the arm this switch removes.
 The Python =Config= has no switch for this move.
 
 * Count accepted hops per move

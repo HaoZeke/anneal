@@ -64,9 +64,9 @@ pub enum MoveLibrary {
         /// `rtrans` and `rrot` arms. [`Config::with_rigid_bodies`] turns it on.
         local: bool,
         /// Offer the reversal of a directed hydrogen-bond cycle as one more
-        /// arm. It needs a site geometry with one oxygen and two hydrogens.
+        /// arm when `has_contact_cycles` is true for the site geometry.
         /// [`Config::for_tip4p`] turns it on. With it off, a stalled archive
-        /// walk still reverses contact chains for any bonded rigid body.
+        /// walk still reverses a chain when that same test is true.
         reverse_cycles: bool,
         /// Move one body onto a vacant contact.
         ///
@@ -734,11 +734,11 @@ pub enum ClusterMove {
         /// Half-width of the per-component rotation-vector increment, radians.
         step: f64,
     },
-    /// Replace one body's orientation by a uniform random rotation composed with it.
+    /// Compose a Haar rotation onto three bodies when three or more exist,
+    /// and onto every body when one or two exist. Centres stay fixed.
     ///
-    /// The draw is the Haar measure on SO(3). It has no step length: a
-    /// uniform orientation is the move that is not a small kick in the
-    /// exponential chart.
+    /// Each draw is composed with the stored rotation and has no step length.
+    /// A uniform orientation is the move that is not a small kick in the chart.
     RigidReorient {
         /// Rigid bodies in the state.
         n_molecules: usize,
