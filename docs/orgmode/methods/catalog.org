@@ -369,9 +369,9 @@ stopped improving, each answering a different way of being stuck.
   normalised Laplacian as a continuous collective variable for an
   extra well-tempered bias, replacing a hand-chosen order parameter.
 
-Constants and defaults: the chain is stalled once =quiet= reaches the
-larger of =escape_stall_patience= and =escape_stall_factor= times the
-longest quiet stretch already survived
+Constants and defaults: =escape_stall_patience= is a floor. The chain
+is stalled once =quiet= reaches the larger of that floor and
+=escape_stall_factor= times the longest quiet stretch already survived
 (src/methods/cluster_hopping.rs:5097). Those defaults are 5000 and 2.0
 (src/methods/cluster_hopping/config.rs:2331). A fixed patience of 400
 scored 2 seeds in 8 against 9 in 16 without it
