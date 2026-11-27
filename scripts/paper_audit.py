@@ -8190,6 +8190,7 @@ def append_only_rows(audit: Audit) -> None:
             *history_paths,
         ).stdout.splitlines() if history_paths else []
         ratio_cores_held = False
+        agox_develop_lines: set[str] = set()
         if AGOX_RATIO_SUMMARY in history_paths and (ROOT / AGOX_RATIO_SUMMARY).is_file():
             shown = git("show", f"{base}:{AGOX_RATIO_SUMMARY}")
             if shown.returncode == 0:
@@ -8197,6 +8198,7 @@ def append_only_rows(audit: Audit) -> None:
                     _kept_summary_fields(shown.stdout)
                     == _kept_summary_fields((ROOT / AGOX_RATIO_SUMMARY).read_text())
                 )
+                agox_develop_lines = set(shown.stdout.splitlines())
         removed = []
         diff_path = ""
         for line in history:
@@ -8205,7 +8207,14 @@ def append_only_rows(audit: Audit) -> None:
                 diff_path = match.group(1)
                 continue
             if line.startswith("-") and not line.startswith("---"):
-                if ratio_cores_held and diff_path == AGOX_RATIO_SUMMARY:
+                # Only the develop lines of this one summary, and only while its
+                # hit counts and median walls still match. Any other removed line
+                # still fails, including a later record that shares the log.
+                if (
+                    ratio_cores_held
+                    and diff_path == AGOX_RATIO_SUMMARY
+                    and line[1:] in agox_develop_lines
+                ):
                     continue
                 removed.append(line)
         audit.record(
