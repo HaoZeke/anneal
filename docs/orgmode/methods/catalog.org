@@ -1263,9 +1263,10 @@ Feeds/consumes: gated behind the =bank-rpc= Cargo feature. A
 request identity differs is rejected with =replicaMismatch=.
 Scientific mutations still check campaign, ensemble, replica
 membership, and system signature (see [[file:catalog.org::*System signature and candidate validation][signature entry]]).
-=Coordinator.observe= is the identity-free watch path;
-=examples/catalog_status.rs= can poll either that or the
-identity-checked observer-status operation.
+=Coordinator.observe= is the identity-free watch path.
+=examples/catalog_status.rs= calls =observer_status_frame= and
+=observer_status= (examples/catalog_status.rs:46 and
+examples/catalog_status.rs:58). It does not call =observe=.
 
 ** CooperativeRun composition layer
 
