@@ -3928,6 +3928,18 @@ def test_a_drifted_ase_hit_sentence_is_reported():
     assert [r[2] for r in audit.drifts()] == ["prose"]
 
 
+def test_a_wall_cap_span_in_the_following_sentence_is_reported():
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "and neither ASE arm hits any."
+    assert old in audit_mod.collapse(tex)
+    added = " Each ASE run there stopped at the cap after 3933 to 20950 calls."
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old + added)
+    audit_mod.manuscript_ase(audit)
+    assert [row for row in audit.drifts() if row[2] == "the following sentence names no wall-cap span"] == [
+        ("DRIFT", audit_mod.TEX, "the following sentence names no wall-cap span", "absent", "present")]
+
+
 def test_a_drifted_newcombe_interval_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)

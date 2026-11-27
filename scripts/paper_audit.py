@@ -2126,7 +2126,14 @@ def manuscript_knockouts(audit: Audit) -> None:
     audit.said(SI, "They set no \\texttt{RADIUS}, so GMIN applies its default Lennard-Jones\n"
                    "container: 3.8081, 4.1725, 4.3665, 4.4013, and 4.5303~\\AA{} at 8, 15, 20,\n"
                    "21, and 25 molecules.")
-    audit.said(SI, f"GMIN hits {gmin20} of {sum(t[20])} on (H\\(_2\\)O)\\(_{{20}}\\).")
+    radius = md_table(audit, "bench/tip4p-h2h/README.md", "Size | LJ container")
+    twenty = next(row for _, row in radius if row["Size"] == "(H₂O)₂₀")
+    extent, container = twenty["Centre-of-mass extent (Å)"], twenty["LJ container (Å)"]
+    audit.record(float(extent) > float(container), "bench/tip4p-h2h/README.md",
+                 "the (H2O)20 centre of mass extends past the container",
+                 f"{extent} past {container}", f"{extent} {container}")
+    audit.said(SI, f"The (H\\(_2\\)O)\\(_{{20}}\\) Wales--Hodges minimum extends {extent}~\\AA{{}} from\n"
+                   f"its centroid and therefore does not fit inside the {container}~\\AA{{}} container.")
     audit.said("bench/tip4p-h2h/README.md", "| (H₂O)₈ | | 1/6 | 6/6 |")
     audit.said("bench/tip4p-h2h/README.md", "With the start fixed, the radius still does not lift GMIN off 0/6 at 15 or 20.")
     audit.said(SI, "In the committed radius study, enlarging the container raises GMIN's\n"
@@ -2958,6 +2965,21 @@ def ase_cap(audit: Audit, groups: dict, system: str) -> float:
     return float(caps[0])
 
 
+WALL_CAP_SPAN = "3933 to 20950"
+
+
+def morse_hit_sentences(text: str) -> tuple[str, str]:
+    """The Morse ASE hit sentence and the sentence that follows it."""
+    flat = collapse(tex_without_comments(text))
+    start = flat.find("On the Morse clusters this code hits")
+    end = flat.find(".", start) if start >= 0 else -1
+    if start < 0 or end < 0:
+        return "", flat
+    rest = flat[end + 1:].lstrip()
+    nxt = rest.find(".")
+    return flat[start:end + 1], rest[:nxt + 1] if nxt >= 0 else rest
+
+
 def manuscript_ase(audit: Audit) -> None:
     """Tables tab:ase and tab:ase-morse, the imported rows they come from, and every sentence that reads them."""
     table = load_script("ase_table_audit", "paper/jctc/scripts/ase_table.py")
@@ -3048,6 +3070,11 @@ def manuscript_ase(audit: Audit) -> None:
     audit.said(TEX, f"On the Morse clusters this code hits M\\(_{{38}}\\) and M\\(_{{55}}\\) at \\(\\rho=6\\) on "
                     f"{r['m38r6']} of 12 and at \\(\\rho=14\\) on {r['m38r14']} and {r['m55r14']} of 12, and neither "
                     "ASE arm hits any.")
+    sentence, following = morse_hit_sentences(audit.text(TEX))
+    audit.record(WALL_CAP_SPAN not in sentence, TEX, "the Morse hit sentence names no wall-cap span",
+                 "absent", "absent" if WALL_CAP_SPAN not in sentence else "present")
+    audit.record(WALL_CAP_SPAN not in following, TEX, "the following sentence names no wall-cap span",
+                 "absent", "absent" if WALL_CAP_SPAN not in following else "present")
 
     # The Supporting Information.
     audit.said(SI, "on seeds 2000--2011, at \\(4\\times 10^{5}\\) calls for 38 atoms, \\(1\\times 10^{6}\\) for 55, "
@@ -7337,9 +7364,9 @@ def removed_crest_arms(audit: Audit) -> None:
     nh3_anneal = {int(float(r["calls"])) for r in nh3 if r["arm"] == "anneal"}
     audit.record(nh3_anneal == {4000}, "bench/nh3-tetramer/results.csv",
                  "this code is charged 4000 on the tetramer", "4000", " ".join(map(str, sorted(nh3_anneal))))
-    audit.record(h2o_med > 0 and nh3_med > 0, "bench/h2o-octamer/results.csv",
-                 "the removed CREST arms have complete-run medians", "positive",
-                 f"{_calls_text(h2o_med)} {_calls_text(nh3_med)}")
+    audit.record(4000 in nh3_anneal and 4000 < nh3_med, "bench/nh3-tetramer/results.csv",
+                 "4000 sits below the CREST median", f"below {_calls_text(nh3_med)}",
+                 " ".join(map(str, sorted(nh3_anneal))))
     audit.said(SI, "Table~\\msref{tab:crest} keeps (H\\(_2\\)O)\\(_6\\), (H\\(_2\\)O)\\(_8\\), "
                    "(NH\\(_3\\))\\(_8\\), C\\(_{10}\\), Si\\(_{10}\\), and C\\(_{20}\\).")
     audit.said(SI, "(H\\(_2\\)O)\\(_8\\) counts first-hit calls on both sides.")
