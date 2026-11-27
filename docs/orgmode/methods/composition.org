@@ -78,9 +78,14 @@ checkpoint fires:
   (src/methods/cluster_hopping/config.rs:2349). The call clock sets
   =directed_leave= when =escape_on_stall= is on
   (src/methods/cluster_hopping.rs:7643). On that preset the leave
-  selects =climb= and does not draw. A fresh start on that clock returns to the same
-  funnel (src/methods/cluster_hopping.rs:7574). When the cap turn is
-  also on, =directed_leave= draws between =climb= and =cap= only
+  selects =climb= and does not draw. A fresh start is not that leave.
+  It runs when =restart_on_stall= is on, the climb is off, and the
+  chain is not rigid (src/methods/cluster_hopping.rs:7625). It draws
+  =scaled_liquid_start= (src/methods/cluster_hopping.rs:7631). A finite
+  quench of the right length is adopted as a restart
+  (src/methods/cluster_hopping.rs:7636). That start does not restore
+  the occupied funnel. When the cap turn is also on, =directed_leave=
+  draws between =climb= and =cap= only
   (src/methods/cluster_hopping.rs:6397).
 
 None of this loop body talks to the coordinator. It is the same code
