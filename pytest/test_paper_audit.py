@@ -3999,6 +3999,84 @@ def test_a_fisher_pvalue_dodge_is_reported():
         ("DRIFT", path, "a p-value sentence needs a shared stop", "Fisher p = 0.0094", "present")]
 
 
+def test_a_mixed_stop_win_is_reported():
+    audit = audit_mod.Audit()
+    path = audit_mod.TEX
+    audit.text_cache[path] = audit.text(path) + "\nThe octamer wins.\n"
+    audit_mod.stopping_pairs(audit)
+    assert [row for row in audit.drifts() if row[2] == "a win sentence needs a shared target, tolerance, and budget"] == [
+        ("DRIFT", path, "a win sentence needs a shared target, tolerance, and budget", "wins", "stops differ")]
+
+
+def test_formatted_retired_medians_are_reported():
+    path = audit_mod.TEX
+    plants = (
+        "78\\,367",
+        "78{,}367",
+        "$78,367$",
+        "\\(78,367\\)",
+        "7.8367e4",
+        "78 367",
+        "78\u2212367",
+    )
+    for fragment in plants:
+        audit = audit_mod.Audit()
+        audit.text_cache[path] = audit.text(path) + "\n" + fragment + "\n"
+        audit_mod.stopping_pairs(audit)
+        shown = [row for row in audit.drifts() if row[2] == "a mixed stopping pair stays out"]
+        assert shown == [("DRIFT", path, "a mixed stopping pair stays out", "78367", "present")], fragment
+
+
+def test_holm_phrasings_are_reported():
+    path = audit_mod.TEX
+    plants = (
+        "The ammonia comparison joins that Holm~family.",
+        "The ammonia adjusted-p is 0.01.",
+        "the ammonia comparison joins that holm family.",
+        "An unadjusted comparison is a win.",
+    )
+    for fragment in plants:
+        audit = audit_mod.Audit()
+        audit.text_cache[path] = audit.text(path) + "\n" + fragment + "\n"
+        audit_mod.stopping_pairs(audit)
+        shown = [row for row in audit.drifts() if row[2] == "a Holm family member is outside the shared-stop list"]
+        assert shown and shown[0][1] == path, fragment
+
+
+def test_fisher_pvalue_variants_are_reported():
+    path = audit_mod.TEX
+    plants = (
+        "\\(p = 0.0094\\)",
+        "Fisher p < 0.05",
+        "Fisher p~=~0.0094",
+        "Fisher p of 0.0094",
+        "Fisher's exact p = 0.0094",
+    )
+    for fragment in plants:
+        audit = audit_mod.Audit()
+        audit.text_cache[path] = audit.text(path) + "\n" + fragment + "\n"
+        audit_mod.stopping_pairs(audit)
+        shown = [row for row in audit.drifts() if row[2] == "a p-value sentence needs a shared stop"]
+        assert shown and shown[0][1] == path, fragment
+
+
+def test_a_readme_fisher_pvalue_without_crest_is_reported():
+    audit = audit_mod.Audit()
+    path = "bench/crest-equal/README.md"
+    audit.text_cache[path] = audit.text(path) + "\nFisher p = 0.0094.\n"
+    audit_mod.stopping_pairs(audit)
+    assert [row for row in audit.drifts() if row[1] == path and row[2] == "a p-value sentence needs a shared stop"] == [
+        ("DRIFT", path, "a p-value sentence needs a shared stop", "Fisher p = 0.0094", "present")]
+
+
+def test_a_readme_own_median_is_not_a_mixed_pair():
+    audit = audit_mod.Audit()
+    path = "bench/covalent-h2h/README.md"
+    audit.text_cache[path] = audit.text(path) + "\n| 78,367 |\n"
+    audit_mod.stopping_pairs(audit)
+    assert [row for row in audit.drifts() if row[1] == path and row[2] == "a mixed stopping pair stays out"] == []
+
+
 def test_a_drifted_newcombe_interval_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
