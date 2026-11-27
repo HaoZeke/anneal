@@ -7,6 +7,8 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 PRESETS = ROOT / "docs/orgmode/reference/presets-and-advanced.org"
 RUST_API = ROOT / "docs/orgmode/reference/rust-api.org"
@@ -66,14 +68,95 @@ def _marked_names(path: Path, begin: str, end: str) -> set[str]:
     return set(_MARKUP_NAME.findall(body))
 
 
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _tokenize_use(body: str) -> list[str]:
+    tokens: list[str] = []
+    index = 0
+    while index < len(body):
+        if body[index].isspace():
+            index += 1
+            continue
+        if body.startswith("::", index):
+            tokens.append("::")
+            index += 2
+            continue
+        if body[index] in "{}*,":
+            tokens.append(body[index])
+            index += 1
+            continue
+        match = _IDENT.match(body, index)
+        if match:
+            tokens.append(match.group(0))
+            index = match.end()
+            continue
+        raise AssertionError(f"unparsed pub use syntax near {body[index:index + 20]!r}")
+    return tokens
+
+
+def _exported(name: str) -> bool:
+    return name not in _RUST_KEYWORDS and name != "_"
+
+
+def _parse_use_tree(tokens: list[str], index: int, source: str) -> tuple[set[str], int]:
+    if index >= len(tokens) or _IDENT.fullmatch(tokens[index]) is None:
+        raise AssertionError(f"pub use tree does not start with a name: {source}")
+    last = tokens[index]
+    index += 1
+    while (
+        index + 1 < len(tokens)
+        and tokens[index] == "::"
+        and _IDENT.fullmatch(tokens[index + 1]) is not None
+    ):
+        last = tokens[index + 1]
+        index += 2
+    names: set[str] = set()
+    if index < len(tokens) and tokens[index] == "::":
+        nxt = tokens[index + 1] if index + 1 < len(tokens) else ""
+        if nxt == "*":
+            raise AssertionError(f"pub use glob is not expanded: {source}")
+        if nxt != "{":
+            raise AssertionError(f"unparsed pub use syntax: {source}")
+        index += 2
+        if index < len(tokens) and tokens[index] == "}":
+            return names, index + 1
+        while True:
+            found, index = _parse_use_tree(tokens, index, source)
+            names.update(found)
+            if index < len(tokens) and tokens[index] == ",":
+                index += 1
+                if index < len(tokens) and tokens[index] == "}":
+                    return names, index + 1
+                continue
+            if index < len(tokens) and tokens[index] == "}":
+                return names, index + 1
+            raise AssertionError(f"unclosed pub use group: {source}")
+    if index < len(tokens) and tokens[index] == "as":
+        if index + 1 >= len(tokens) or _IDENT.fullmatch(tokens[index + 1]) is None:
+            raise AssertionError(f"pub use rename lacks a name: {source}")
+        exported = tokens[index + 1]
+        if _exported(exported):
+            names.add(exported)
+        return names, index + 2
+    if _exported(last):
+        names.add(last)
+    return names, index
+
+
 def _pub_use_names(text: str) -> set[str]:
-    stripped = re.sub(r"//.*?$", "", text, flags=re.M)
+    stripped = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    stripped = re.sub(r"//.*?$", "", stripped, flags=re.M)
     names: set[str] = set()
     for match in re.finditer(r"pub use\s+(.*?);", stripped, flags=re.S):
-        body = re.sub(r"\b[a-z_][a-z0-9_]*::", "", match.group(1))
-        for ident in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\b", body):
-            if ident not in _RUST_KEYWORDS:
-                names.add(ident)
+        body = match.group(1).strip()
+        if not body:
+            raise AssertionError("empty pub use")
+        tokens = _tokenize_use(body)
+        found, index = _parse_use_tree(tokens, 0, body)
+        if index != len(tokens):
+            raise AssertionError(f"unparsed pub use tail: {body}")
+        names.update(found)
     return names
 
 
@@ -86,6 +169,24 @@ def test_python_reference_lists_current_exports():
         f"missing {sorted(expected - listed)}; "
         f"extra {sorted(listed - expected)}"
     )
+
+
+def test_pub_use_glob_is_rejected():
+    with pytest.raises(AssertionError, match="glob"):
+        _pub_use_names("pub use crate::methods::*;")
+    with pytest.raises(AssertionError, match="glob"):
+        _pub_use_names("pub use crate::methods::{bar::*, Baz};")
+
+
+def test_pub_use_rename_counts_exported_name():
+    text = "\n".join(
+        [
+            "pub use crate::methods::Bar as Baz;",
+            "pub use crate::methods::{A as B, C, D as _};",
+            "pub use crate::noise_accept::{OsaAccept, OsaResult};",
+        ]
+    )
+    assert _pub_use_names(text) == {"Baz", "B", "C", "OsaAccept", "OsaResult"}
 
 
 def test_rust_reference_lists_current_reexports():
