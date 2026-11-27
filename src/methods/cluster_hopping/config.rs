@@ -1361,14 +1361,14 @@ pub struct Config {
     /// Off leaves the walk on the preset trajectory.
     #[serde(skip_serializing_if = "is_false")]
     pub plateau_heat: bool,
-    /// Extra relaxation steps spent polishing a new best to share tolerance.
+    /// Extra relaxation steps for a new best or a later basin visit.
     ///
-    /// Screened hopping's economy is that almost no hop is fully relaxed, so
-    /// almost no state meets the tolerance a shared census identifies basins
-    /// at, and a cooperative run has nothing valid to offer. Polishing only
-    /// the states that improve the record bounds the cost to the number of
-    /// improvements. `Config::recommended` sets that polish to one full quench,
-    /// 1000 steps, and the calls are charged to the ledger.
+    /// Screened hopping leaves almost every hop short of the tolerance a
+    /// shared census uses, so a cooperative run has nothing valid to offer.
+    /// A new best is polished at once. A basin visit is polished once four
+    /// times this many charged evaluations have passed since the last one.
+    /// `Config::recommended` sets the count to one full quench, 1000 steps,
+    /// and those calls are charged to the ledger.
     /// Zero disables the polish and leaves the solo behaviour untouched.
     pub polish_records: usize,
     /// Polish the incumbent when a hop improves it.
