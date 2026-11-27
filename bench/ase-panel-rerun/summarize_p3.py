@@ -15,6 +15,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+import revision_reach  # noqa: E402
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
 ASE_ARMS = ("ase_bh", "ase_mh")
@@ -157,7 +160,7 @@ def load(path: Path, system: str) -> dict[str, list[dict[str, str]]]:
         charged = int(row["charged"])
         if not 0 < charged <= budget:
             raise SystemExit(f"invalid charged count {row}")
-        if not re.fullmatch(r"[0-9a-f]{40}", row["code_revision"]):
+        if not revision_reach.is_full_sha(row["code_revision"]):
             raise SystemExit(f"invalid revision {row}")
         hit = row["hit"] == "1"
         if row["hit"] not in {"0", "1"} or hit != bool(row["evals_to_hit"]):
@@ -179,7 +182,7 @@ def load(path: Path, system: str) -> dict[str, list[dict[str, str]]]:
         if extra:
             if not re.fullmatch(r"[0-9a-f]{64}", row["host"]):
                 raise SystemExit(f"host is not a hashed machine id {row}")
-            if not re.fullmatch(r"[0-9a-f]{40}", row["harness_blob"]):
+            if not revision_reach.is_full_sha(row["harness_blob"]):
                 raise SystemExit(f"invalid harness blob {row}")
             if row["ase_version"] != "3.29.0":
                 raise SystemExit(f"unexpected ASE version {row}")

@@ -38,6 +38,7 @@ from machine_provenance import (  # noqa: E402
     default_gmin_source_metadata,
     host_label,
     machine_columns,
+    stored_machine_id_compatible,
     read_built_gmin_provenance,
     require_csv_schema,
     validate_gmin_group_provenance,
@@ -261,9 +262,17 @@ def main() -> int:
         for seed in seeds:
             system = f"tip4p{n}"
             start = args.work / f"tip4p{n}-s{seed}.start.gmin"
-            anneal = find(stored, system=system, code="anneal", seed=str(seed),
-                          code_revision=args.anneal_revision,
-                          machine_id=machine["machine_id"])
+            anneal = next(
+                (
+                    row for row in stored
+                    if row.get("system") == system
+                    and row.get("code") == "anneal"
+                    and row.get("seed") == str(seed)
+                    and row.get("code_revision") == args.anneal_revision
+                    and stored_machine_id_compatible(row.get("machine_id"))
+                ),
+                None,
+            )
             if anneal is None or not start.is_file() or sha1(start) != anneal["start_sha1"]:
                 print(f"anneal n={n} seed={seed}", flush=True)
                 anneal = run_anneal(args.binary, n, seed, args.work)
@@ -281,7 +290,7 @@ def main() -> int:
                 and row.get("code") == "gmin"
                 and row.get("seed") == str(seed)
                 and row.get("start_sha1") == start_sha
-                and row.get("machine_id") == machine["machine_id"]
+                and stored_machine_id_compatible(row.get("machine_id"))
             ]
             for cand in gmin_candidates:
                 validate_saved_gmin_provenance(

@@ -136,7 +136,7 @@ def sha256_file(path: Path) -> str:
 
 
 def machine_id() -> str:
-    return hashlib.sha256(Path("/etc/machine-id").read_bytes()).hexdigest()
+    return "unrecorded"
 
 
 def bits(text: str) -> str:

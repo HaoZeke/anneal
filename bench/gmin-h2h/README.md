@@ -22,12 +22,7 @@ follow from them. Neither file has a `host` column.
 Every new per-seed and summary row keeps `host`, whose value remains the
 compatibility UTS name `bench`. Each row adds:
 
-- `machine_id`: lowercase hexadecimal SHA-256 of the public salt
-  `anneal-bench-machine-id-v1` followed by a NUL byte and the machine
-  identifier. On Linux the identifier is the stripped contents of
-  `/etc/machine-id`; if that file is absent or empty, the stripped DMI
-  `/sys/class/dmi/id/product_uuid` is used instead. On macOS it is the
-  hardware UUID (`IOPlatformUUID`) from `ioreg`.
+- `machine_id`: the literal `unrecorded`.
 - `cpu_model`: the first CPU model string, normalized to single spaces.
   On Linux it comes from `/proc/cpuinfo`; on macOS from
   `sysctl -n machdep.cpu.brand_string`.

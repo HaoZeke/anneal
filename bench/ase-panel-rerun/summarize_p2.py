@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
+import revision_reach  # noqa: E402
 
 SYSTEMS = ("lj98", "lj104")
 SEEDS = tuple(range(2000, 2012))
@@ -168,13 +169,13 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
             raise SystemExit(f"unexpected row {row['system']} {row['arm']}")
         if row["budget"] != str(budget):
             raise SystemExit(f"budget drifted {row}")
-        if row["code_revision"] != PIN or not re.fullmatch(r"[0-9a-f]{40}", row["code_revision"]):
+        if row["code_revision"] != PIN or not revision_reach.is_full_sha(row["code_revision"]):
             raise SystemExit(f"revision {row['code_revision']}")
         if not re.fullmatch(r"[0-9a-f]{64}", row["host"]):
             raise SystemExit(f"host is not a machine hash {row['host']}")
         if row["ase_version"] != ASE_VERSION:
             raise SystemExit(f"ase version {row['ase_version']}")
-        if not re.fullmatch(r"[0-9a-f]{40}", row["harness_blob"]):
+        if not revision_reach.is_full_sha(row["harness_blob"]):
             raise SystemExit(f"harness blob {row['harness_blob']}")
         if not re.fullmatch(r"[0-9a-f]{32}", row["session"]):
             raise SystemExit(f"session {row['session']}")

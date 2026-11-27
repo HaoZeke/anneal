@@ -294,12 +294,7 @@ def sha256_file(path: Path) -> str:
 
 
 def hashed_machine_id() -> str:
-    for candidate in (Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")):
-        if candidate.is_file():
-            raw = candidate.read_text(encoding="utf-8").strip()
-            if raw:
-                return sha256_bytes(raw.encode("utf-8"))
-    raise RuntimeError("cannot read a machine id")
+    return "unrecorded"
 
 
 def utc_now() -> str:
@@ -605,7 +600,7 @@ def parse_h2h_seed_stdout(stdout: str, system: str, seed: int, budget: int) -> d
 
 
 def sanitize_log_stdout(stdout: str) -> str:
-    """Remove machine-identifying CSV values while preserving driver output."""
+    """Remove host-identifying CSV values while preserving driver output."""
     lines = stdout.splitlines()
     for index, line in enumerate(lines):
         if not line.startswith("system,"):

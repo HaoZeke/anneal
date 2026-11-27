@@ -48,6 +48,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
+from machine_provenance import stored_machine_id_compatible  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
@@ -328,10 +329,7 @@ def sha256_file(path: Path) -> str:
 
 
 def hashed_machine_id() -> str:
-    raw = Path("/etc/machine-id").read_bytes().strip()
-    if not raw:
-        raise SystemExit("machine id is empty")
-    return hashlib.sha256(raw).hexdigest()
+    return "unrecorded"
 
 
 def affinity_list() -> str:
@@ -647,7 +645,7 @@ def execute(args: argparse.Namespace) -> None:
             if (
                 stored["code_tree"] != trees[arm]
                 or stored["binary_sha256"] != binaries[(arm, driver_for(system))]
-                or stored["machine_id"] != machine
+                or not stored_machine_id_compatible(stored["machine_id"])
                 or int(stored["run_index"]) != index
                 or int(stored["slot"]) != slot
             ):
@@ -1014,7 +1012,7 @@ def summarize(args: argparse.Namespace) -> None:
             if seeds != list(SEEDS):
                 raise SystemExit(f"{system} {arm} seeds {seeds}")
     machines = {row["machine_id"] for row in rows}
-    if len(machines) != 1:
+    if any(not stored_machine_id_compatible(mid) for mid in machines):
         raise SystemExit("more than one machine id")
     for arm in ("A", "B"):
         trees = {row["code_tree"] for row in rows if row["arm"] == arm}

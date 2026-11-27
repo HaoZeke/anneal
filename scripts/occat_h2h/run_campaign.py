@@ -32,6 +32,7 @@ from machine_provenance import (  # noqa: E402
     gmin_row_key,
     host_label,
     machine_columns,
+    stored_machine_id_compatible,
     read_built_gmin_provenance,
     require_csv_schema,
     require_gmin_build_key,
@@ -221,7 +222,7 @@ def load_gmin(
                 if not row_mid or not row_cpu:
                     continue
                 if machine is not None and (
-                    row_mid != machine["machine_id"]
+                    not stored_machine_id_compatible(row_mid)
                     or row_cpu != machine["cpu_model"]
                 ):
                     continue

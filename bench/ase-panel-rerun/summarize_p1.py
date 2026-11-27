@@ -16,6 +16,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+import revision_reach  # noqa: E402
 OUT = ROOT / "bench" / "ase-panel-rerun"
 SEEDS = tuple(range(2000, 2012))
 ARMS = ("anneal", "recommended", "ase_bh", "ase_mh")
@@ -95,11 +98,11 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
     for row in rows:
         if row["system"] != system or row["arm"] not in grouped or row["budget"] != str(budget):
             raise SystemExit(f"unexpected row {row}")
-        if not re.fullmatch(r"[0-9a-f]{40}", row["code_revision"]):
+        if not revision_reach.is_full_sha(row["code_revision"]):
             raise SystemExit(f"invalid revision {row}")
         if not re.fullmatch(r"[0-9a-f]{64}", row["host"]):
             raise SystemExit(f"invalid host {row}")
-        if not re.fullmatch(r"[0-9a-f]{40}", row["harness_blob"]):
+        if not revision_reach.is_full_sha(row["harness_blob"]):
             raise SystemExit(f"invalid harness blob {row}")
         if not row["ase_version"] or not re.fullmatch(r"[0-9a-f]+", row["session"]):
             raise SystemExit(f"invalid ase version or session {row}")

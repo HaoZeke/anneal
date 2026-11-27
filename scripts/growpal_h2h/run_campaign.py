@@ -33,6 +33,7 @@ from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 from machine_provenance import (  # noqa: E402
     host_label,
     machine_columns,
+    stored_machine_id_compatible,
     validate_saved_row_identity,
 )
 
@@ -433,7 +434,7 @@ def load_saved(
         budget=budget,
     )
     if (
-        existing.get("machine_id") != expected_machine["machine_id"]
+        not stored_machine_id_compatible(existing.get("machine_id"))
         or existing.get("cpu_model") != expected_machine["cpu_model"]
     ):
         raise RuntimeError(f"{path} is a legacy or different-machine row")

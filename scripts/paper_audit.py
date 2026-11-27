@@ -2910,7 +2910,7 @@ def ase_groups(audit: Audit) -> dict[tuple[str, str], list[dict[str, str]]]:
         len(ase_hosts) == 1
         and bool(re.fullmatch(r"[0-9a-f]{64}", next(iter(ase_hosts)))),
         "ase panel",
-        "single machine-id sha256 host",
+        "single recorded host digest",
         "one sha256",
         " ".join(sorted(ase_hosts)),
     )

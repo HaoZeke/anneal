@@ -257,7 +257,7 @@ MACHINE_CHECKS = (
 )
 DIGEST_CHECK = 'if len(first) == 64 and all(c in "0123456789abcdef" for c in first):'
 DIGEST_REASON = "a 64-character sha256 digest of a data file, not a commit id"
-# (file, exact line content) -> why the line is not a commit-id or machine-identity check.
+# (file, exact line content) -> why the line is not a commit id or host identity check.
 EXEMPT = {
     ("paper/jctc/scripts/fig_landfold_maps.py", DIGEST_CHECK): DIGEST_REASON,
     ("paper/jctc/scripts/lj75_gmin_table.py", DIGEST_CHECK): DIGEST_REASON,
@@ -280,14 +280,6 @@ EXEMPT = {
         "scripts/run_cuh2_fcc_rec.sh",
         "awk -F: '/^[Cc]pu MHz/ { gsub(/^[ \\t]+/, \"\", $2); print $2 }' /proc/cpuinfo",
     ): "clock speeds of a run, not a machine identity",
-    (
-        "scripts/gmin_panel/tuned.py",
-        'for path in (Path("/etc/machine-id"), Path("/proc/sys/kernel/random/boot_id")):',
-    ): "frozen: the committed tuned rows are verified against this file's exact blob, so it moves with their rerun",
-    (
-        "scripts/paper_rerun/sc_h2h.py",
-        'raw = Path("/etc/machine-id").read_bytes().strip()',
-    ): "the id is read to be hashed by the next line, and only the sha256 reaches a row",
     (
         "paper/jctc/scripts/water_h2h.py",
         'for line in Path("/proc/cpuinfo").read_text().splitlines():',

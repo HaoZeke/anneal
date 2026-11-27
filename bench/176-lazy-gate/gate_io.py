@@ -59,8 +59,7 @@ def durable_write_text(path: Path, text: str) -> str:
 
 
 def machine_id_sha256() -> str:
-    raw = Path("/etc/machine-id").read_text(encoding="utf-8").strip()
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return "unrecorded"
 
 
 def double_bits_hex(value: float) -> str:

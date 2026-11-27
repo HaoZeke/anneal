@@ -63,10 +63,7 @@ def arguments() -> argparse.Namespace:
 
 
 def machine_id() -> str:
-    raw = Path("/etc/machine-id").read_bytes().strip()
-    if not raw:
-        raise RuntimeError("empty machine identifier")
-    return hashlib.sha256(raw).hexdigest()
+    return "unrecorded"
 
 
 def existing_rows(path: Path) -> dict[tuple[str, str, int], dict[str, str]]:

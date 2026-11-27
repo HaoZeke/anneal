@@ -1880,52 +1880,43 @@ def test_native_headerless_and_h2h_row_formats_reject_every_bad_field(tmp_path):
         gad.saved_rerun(kv_path, 38, 2000, "gmin", 400_000, code_revision="svn-1", machine=machine)
 
 
-IOREG_OUTPUT = """+-o Root  <class IORegistryEntry, id 0x100000100, retain 36>
-  +-o MacBookPro  <class IOPlatformExpertDevice, id 0x10000020f, registered, matched, active, busy 0 (112 ms), retain 40>
-    {
-      "IOPlatformSerialNumber" = "C02XXXXXXXXX"
-      "IOPlatformUUID" = "11111111-2222-3333-4444-555555555555"
-    }
-"""
-
-
 def fake_macos(monkeypatch, tools, missing):
-    """A host with no /etc/machine-id, DMI table or /proc/cpuinfo whose ioreg and sysctl answer from ``tools``.
-
-    ``missing`` is the absent path the host names for all three files, so the macOS reads apply to it as to the defaults.
-    """
+    """A macOS host whose sysctl answers from ``tools`` and whose cpuinfo path is absent."""
     import types
 
     import machine_provenance as mp
 
     def run(command, **kwargs):
+        if command[0] not in tools:
+            raise AssertionError(f"unexpected command {command[0]}")
         text = tools[command[0]]
         return types.SimpleNamespace(returncode=0, stdout=text, stderr="")
 
     monkeypatch.setattr(mp.sys, "platform", "darwin")
     monkeypatch.setattr(mp, "subprocess", types.SimpleNamespace(run=run))
-    for name in ("MACHINE_ID_PATH", "PRODUCT_UUID_PATH", "CPUINFO_PATH"):
-        monkeypatch.setattr(mp, name, missing)
+    monkeypatch.setattr(mp, "CPUINFO_PATH", missing)
     return mp
 
 
-def test_machine_provenance_reads_the_hardware_uuid_and_brand_string_on_macos(tmp_path, monkeypatch):
+def test_machine_provenance_writes_unrecorded_and_reads_the_brand_string_on_macos(tmp_path, monkeypatch):
     missing = tmp_path / "missing"
-    mp = fake_macos(monkeypatch, {"ioreg": IOREG_OUTPUT, "sysctl": "Apple  M2 Pro\n"}, missing)
-    digest, cpu = mp.machine_provenance(missing, missing, missing)
-    assert digest == hashlib.sha256(mp.MACHINE_ID_SALT + b"11111111-2222-3333-4444-555555555555").hexdigest()
+    mp = fake_macos(monkeypatch, {"sysctl": "Apple  M2 Pro\n"}, missing)
+    digest, cpu = mp.machine_provenance(missing)
+    assert digest == "unrecorded"
     assert cpu == "Apple M2 Pro"
-    assert set(mp.machine_columns()) == {"machine_id", "cpu_model"}
+    columns = mp.machine_columns()
+    assert columns == {"machine_id": "unrecorded", "cpu_model": "Apple M2 Pro"}
 
 
-def test_machine_provenance_still_refuses_a_macos_host_that_names_nothing(tmp_path, monkeypatch):
+def test_machine_provenance_still_refuses_a_macos_host_with_no_cpu_model(tmp_path, monkeypatch):
     missing = tmp_path / "missing"
-    mp = fake_macos(monkeypatch, {"ioreg": "no uuid here\n", "sysctl": "Apple M2 Pro\n"}, missing)
-    with pytest.raises(RuntimeError, match="hardware UUID"):
-        mp.machine_provenance(missing, missing, missing)
-    mp = fake_macos(monkeypatch, {"ioreg": IOREG_OUTPUT, "sysctl": "\n"}, missing)
+    mp = fake_macos(monkeypatch, {"sysctl": "Apple M2 Pro\n"}, missing)
+    digest, cpu = mp.machine_provenance(missing)
+    assert digest == "unrecorded"
+    assert cpu == "Apple M2 Pro"
+    mp = fake_macos(monkeypatch, {"sysctl": "\n"}, missing)
     with pytest.raises(RuntimeError, match="CPU model"):
-        mp.machine_provenance(missing, missing, missing)
+        mp.machine_provenance(missing)
 
 
 def test_machine_provenance_does_not_ask_macos_tools_on_other_systems(tmp_path, monkeypatch):
@@ -1933,17 +1924,14 @@ def test_machine_provenance_does_not_ask_macos_tools_on_other_systems(tmp_path, 
 
     monkeypatch.setattr(mp.sys, "platform", "linux")
     missing = tmp_path / "missing"
-    with pytest.raises(RuntimeError, match="hardware UUID"):
-        mp.machine_provenance(missing, missing, missing)
-    for name in ("MACHINE_ID_PATH", "PRODUCT_UUID_PATH", "CPUINFO_PATH"):
-        monkeypatch.setattr(mp, name, missing)
+    monkeypatch.setattr(mp, "CPUINFO_PATH", missing)
 
     def refuse(*_args, **_kwargs):
         raise AssertionError("a macOS tool was asked on a Linux host")
 
     monkeypatch.setattr(mp.subprocess, "run", refuse)
-    with pytest.raises(RuntimeError, match="hardware UUID"):
-        mp.machine_provenance(missing, missing, missing)
+    with pytest.raises(RuntimeError, match="CPU model"):
+        mp.machine_provenance(missing)
 
 
 def test_au55_scale_and_morse14_h2h_write_machine_provenance_rows_and_summaries(
@@ -3016,27 +3004,30 @@ def test_morse_panel_and_morse_gmin_regenerate_from_committed_legacy_csvs(
         morse_gmin.main([*mg_base, "--overwrite-legacy"])
 
 
-def test_the_provenance_docs_describe_what_the_code_reads_on_each_system():
+def test_the_provenance_docs_describe_unrecorded_ids_and_no_host_read():
     source = (ROOT / "scripts" / "machine_provenance.py").read_text()
-    docs = {
-        name: " ".join((ROOT / name).read_text().split())
-        for name in ("docs/benchmark-row-provenance.md", "bench/gmin-h2h/README.md")
-    }
-    for name, text in docs.items():
-        for phrase in ("/etc/machine-id", "product_uuid", "IOPlatformUUID", "ioreg", "/proc/cpuinfo",
-                       "sysctl -n machdep.cpu.brand_string"):
-            assert phrase in text, (name, phrase)
-    for phrase in ('"IOPlatformUUID"', '"ioreg"', '"machdep.cpu.brand_string"', "/etc/machine-id",
-                   "/sys/class/dmi/id/product_uuid", "/proc/cpuinfo"):
-        assert phrase in source, phrase
-    text = docs["docs/benchmark-row-provenance.md"]
-    assert "ioreg -rd1 -c IOPlatformExpertDevice" in text
-    assert '"ioreg", "-rd1", "-c", "IOPlatformExpertDevice"' in source
-    for variable in ("ANNEAL_MACHINE_ID", "ANNEAL_CPU_MODEL"):
-        assert variable in text and variable in source
+    readme = (ROOT / "bench" / "gmin-h2h" / "README.md").read_text()
+    docs = " ".join((ROOT / "docs" / "benchmark-row-provenance.md").read_text().split())
+    for phrase in ("/etc/machine-id", "product_uuid", "IOPlatformUUID", "ioreg", "machine_id_path"):
+        assert phrase not in source, phrase
+        assert phrase not in readme, phrase
+        assert phrase not in docs, phrase
+    assert "unrecorded" in source
+    assert "unrecorded" in readme
+    assert "unrecorded" in docs
+    assert "legacy 64-hex" in docs or "legacy 64-hex digest" in docs
+    from machine_provenance import stored_machine_id_compatible
+
+    legacy = "ab" * 32
+    assert stored_machine_id_compatible(legacy)
+    assert stored_machine_id_compatible("unrecorded")
+    assert not stored_machine_id_compatible("host-name")
+    assert not stored_machine_id_compatible(legacy[:-1])
+    assert "/proc/cpuinfo" in source and "/proc/cpuinfo" in docs
+    assert "ANNEAL_CPU_MODEL" in source and "ANNEAL_CPU_MODEL" in docs
+    assert "ANNEAL_MACHINE_ID" not in source
     for key in ("model name", "Model", "Processor", "Hardware"):
-        assert key in text and f'"{key}"' in source
-    assert "only when `/etc/machine-id` is" in text
+        assert key in docs and f'"{key}"' in source
 
 
 HANDED_OFF_ID = hashlib.sha256(b"a campaign head node").hexdigest()
@@ -3063,35 +3054,36 @@ def run_gate_row_write(tmp_path, monkeypatch, **environment):
     return written
 
 
-def test_a_row_writer_stamps_the_machine_identity_a_campaign_hands_it(tmp_path, monkeypatch):
+def test_a_row_writer_writes_unrecorded_even_when_a_campaign_hands_an_id(tmp_path, monkeypatch):
     written = run_gate_row_write(
         tmp_path, monkeypatch, ANNEAL_MACHINE_ID=HANDED_OFF_ID, ANNEAL_CPU_MODEL="  Handed   off CPU ",
     )
-    assert [(row["machine_id"], row["cpu_model"]) for row in written] == [(HANDED_OFF_ID, "Handed off CPU")]
+    assert [(row["machine_id"], row["cpu_model"]) for row in written] == [("unrecorded", "Handed off CPU")]
+    assert HANDED_OFF_ID not in {row["machine_id"] for row in written}
 
 
 def test_a_row_writer_describes_this_machine_when_nothing_is_handed_off(tmp_path, monkeypatch):
     from machine_provenance import machine_provenance
 
-    written = run_gate_row_write(tmp_path, monkeypatch, ANNEAL_MACHINE_ID="", ANNEAL_CPU_MODEL="")
-    assert [(row["machine_id"], row["cpu_model"]) for row in written] == [machine_provenance()]
+    written = run_gate_row_write(tmp_path, monkeypatch, ANNEAL_CPU_MODEL="")
+    machine_id, cpu_model = machine_provenance()
+    assert machine_id == "unrecorded"
+    assert [(row["machine_id"], row["cpu_model"]) for row in written] == [("unrecorded", cpu_model)]
 
 
 @pytest.mark.parametrize(
-    "environment, message",
+    "environment",
     [
-        ({"ANNEAL_MACHINE_ID": HANDED_OFF_ID}, "incomplete ANNEAL_MACHINE_ID/ANNEAL_CPU_MODEL hand-off"),
-        ({"ANNEAL_CPU_MODEL": "Handed off CPU"}, "incomplete ANNEAL_MACHINE_ID/ANNEAL_CPU_MODEL hand-off"),
-        ({"ANNEAL_MACHINE_ID": "x" * 64, "ANNEAL_CPU_MODEL": "CPU"}, "not a salted sha256 digest"),
-        ({"ANNEAL_MACHINE_ID": HANDED_OFF_ID[:40], "ANNEAL_CPU_MODEL": "CPU"}, "not a salted sha256 digest"),
+        {"ANNEAL_MACHINE_ID": HANDED_OFF_ID, "ANNEAL_CPU_MODEL": "CPU"},
+        {"ANNEAL_MACHINE_ID": "x" * 64, "ANNEAL_CPU_MODEL": "CPU"},
+        {"ANNEAL_MACHINE_ID": HANDED_OFF_ID[:40], "ANNEAL_CPU_MODEL": "CPU"},
     ],
 )
-def test_a_row_writer_refuses_an_incomplete_or_malformed_hand_off_and_writes_no_row(
-    tmp_path, monkeypatch, environment, message
-):
-    with pytest.raises(RuntimeError, match=message):
-        run_gate_row_write(tmp_path, monkeypatch, **environment)
-    assert list(csv.DictReader((tmp_path / "rows.csv").open())) == []
+def test_a_row_writer_does_not_record_a_handed_off_machine_id(tmp_path, monkeypatch, environment):
+    written = run_gate_row_write(tmp_path, monkeypatch, **environment)
+    assert [row["machine_id"] for row in written] == ["unrecorded"]
+    assert [row["cpu_model"] for row in written] == ["CPU"]
+    assert environment["ANNEAL_MACHINE_ID"] not in {row["machine_id"] for row in written}
 
 
 def test_the_documented_environment_variables_are_read_in_one_place():
@@ -3099,7 +3091,7 @@ def test_the_documented_environment_variables_are_read_in_one_place():
 
     assert not hasattr(machine_provenance, "environment")
     source = (ROOT / "scripts" / "machine_provenance.py").read_text()
-    assert source.count('os.environ.get("ANNEAL_MACHINE_ID"') == 1
+    assert source.count('os.environ.get("ANNEAL_MACHINE_ID"') == 0
     assert source.count('os.environ.get("ANNEAL_CPU_MODEL"') == 1
     for path in (ROOT / "scripts").rglob("*.py"):
         if path.name != "machine_provenance.py":
@@ -3107,35 +3099,25 @@ def test_the_documented_environment_variables_are_read_in_one_place():
 
 
 def test_machine_provenance_darwin_fallback(tmp_path, monkeypatch):
-    import hashlib
     import subprocess
     import machine_provenance as mp
 
-    missing = tmp_path / "missing"
-    monkeypatch.setattr(mp, "MACHINE_ID_PATH", missing / "machine-id")
-    monkeypatch.setattr(mp, "PRODUCT_UUID_PATH", missing / "product_uuid")
-    monkeypatch.setattr(mp, "CPUINFO_PATH", missing / "cpuinfo")
+    missing = tmp_path / "cpuinfo"
+    monkeypatch.setattr(mp, "CPUINFO_PATH", missing)
     monkeypatch.setattr(mp.sys, "platform", "darwin")
+    asked = []
 
     def fake_run(cmd, **_kwargs):
-        if cmd[0] == "ioreg":
-            return subprocess.CompletedProcess(
-                cmd, 0, '    "IOPlatformUUID" = "11111111-2222-3333-4444-555555555555"\n', ""
-            )
+        asked.append(cmd[0])
         if cmd[:2] == ["sysctl", "-n"] and cmd[2] == "machdep.cpu.brand_string":
             return subprocess.CompletedProcess(cmd, 0, "Apple M2 Pro\n", "")
         return subprocess.CompletedProcess(cmd, 1, "", "")
 
     monkeypatch.setattr(mp.subprocess, "run", fake_run)
-    digest, cpu = mp.machine_provenance(
-        mp.MACHINE_ID_PATH, mp.PRODUCT_UUID_PATH, mp.CPUINFO_PATH
-    )
-    expected = hashlib.sha256(
-        mp.MACHINE_ID_SALT + b"11111111-2222-3333-4444-555555555555"
-    ).hexdigest()
-    assert digest == expected
+    digest, cpu = mp.machine_provenance(missing)
+    assert digest == "unrecorded"
     assert cpu == "Apple M2 Pro"
+    assert "ioreg" not in asked
 
-    # Explicit non-default missing paths still fail instead of querying the host.
-    with pytest.raises(RuntimeError, match="machine-id"):
-        mp.machine_provenance(tmp_path / "other-id", tmp_path / "other-uuid", tmp_path / "other-cpu")
+    with pytest.raises(RuntimeError, match="CPU model"):
+        mp.machine_provenance(tmp_path / "other-cpu")

@@ -1282,7 +1282,7 @@ def main(argv: list[str]) -> int:
     morse_data = args.morse_data.read_text()
     lj_data += "" if lj_data.endswith("\n") else "\n"
     morse_data += "" if morse_data.endswith("\n") else "\n"
-    host = host_label(socket.gethostname())
+    host = "unrecorded"
     machine = machine_columns()
     session = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     seeds = tuple(args.seed) if args.seed else SEEDS

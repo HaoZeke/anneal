@@ -80,8 +80,7 @@ MANIFEST_FIELDS = ("seq", "system", "arm", "seed", "budget", "reference")
 
 
 def machine_id() -> str:
-    raw = Path("/etc/machine-id").read_bytes().strip()
-    return hashlib.sha256(raw).hexdigest()
+    return "unrecorded"
 
 
 def blob_of(path: Path) -> str:

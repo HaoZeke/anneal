@@ -81,12 +81,6 @@ FIELDS = (
 )
 
 
-def machine_id_from_arg(text: str) -> str:
-    if len(text) != 64 or any(ch not in "0123456789abcdef" for ch in text):
-        raise SystemExit("machine id must be 64 hex characters")
-    return text
-
-
 def pin(env: dict[str, str], budget: int) -> None:
     for key in CLEAR_KEYS:
         env.pop(key, None)
@@ -301,7 +295,6 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--revision", action="append", default=[])
     parser.add_argument("--blob", action="append", default=[])
     parser.add_argument("--binary", action="append", default=[])
-    parser.add_argument("--machine-id", default="")
     args = parser.parse_args(argv)
     if args.summarise:
         summarise(load_rows(args.summarise))
@@ -314,7 +307,7 @@ def main(argv: list[str]) -> int:
     for system in args.cells:
         if system not in REFERENCES:
             raise SystemExit(f"unknown system {system}")
-    machine = machine_id_from_arg(args.machine_id)
+    machine = "unrecorded"
     binaries = [Path(item) for item in args.binary]
     for binary in binaries:
         if not binary.is_file():

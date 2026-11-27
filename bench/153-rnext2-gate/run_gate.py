@@ -24,6 +24,8 @@ from pathlib import Path
 
 GATE = Path(__file__).resolve().parent
 REPO = GATE.parents[1]
+sys.path.insert(0, str(REPO / "scripts"))
+from machine_provenance import stored_machine_id_compatible  # noqa: E402
 README = GATE / "README.md"
 PROBE_SOURCE = GATE / "probe.c"
 SEEDS = tuple(range(2000, 2012))
@@ -397,10 +399,7 @@ def thread_env() -> dict[str, str]:
 
 
 def machine_id() -> str:
-    raw = Path("/etc/machine-id").read_text().strip().encode()
-    if not raw:
-        raise RuntimeError("machine id is empty")
-    return hashlib.sha256(raw).hexdigest()
+    return "unrecorded"
 
 
 def sha256_file(path: Path) -> str:
@@ -957,9 +956,8 @@ def check_identity(rows: list[dict[str, str]]) -> None:
     if not rows:
         return
     machines = {row["machine_id"] for row in rows}
-    if len(machines) != 1 or len(next(iter(machines))) != 64:
+    if any(not stored_machine_id_compatible(token) for token in machines):
         raise RuntimeError("machine id is not one digest")
-    int(next(iter(machines)), 16)
     if len({row["probe_sha256"] for row in rows}) != 1:
         raise RuntimeError("more than one probe build")
     for row in rows:

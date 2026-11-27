@@ -39,28 +39,21 @@ these provenance columns:
   label.  The test reads `.py`, `.sh`, `.sbatch` and `.rs` files, in
   `experiments/` too, and fails when a value derived from a label is used as
   a network address.
-- `machine_id` is lowercase hexadecimal SHA-256 of the public salt
-  `anneal-bench-machine-id-v1\0` followed by the machine's identifier.
-  On Linux the identifier is the stripped contents of `/etc/machine-id`;
-  the stripped DMI `product_uuid` is used only when `/etc/machine-id` is
-  absent or empty.  On macOS neither file exists, so the identifier is the
-  hardware UUID (`IOPlatformUUID`) that `ioreg -rd1 -c
-  IOPlatformExpertDevice` prints.  A machine that offers none of these
-  raises an error; a row never records an invented identifier.
+- `machine_id` is the literal `unrecorded`. Harnesses do not read a host
+  machine identifier. A stored row is accepted when its `machine_id` is
+  `unrecorded` or a legacy 64-hex digest, and that acceptance does not abort
+  a resume.
 - `cpu_model` is the first available CPU model string, with whitespace
   normalized.  On Linux it is the first of the `model name`, `Model`,
   `Processor` and `Hardware` entries of `/proc/cpuinfo` that is not empty.
   On macOS, where there is no `/proc/cpuinfo`, it is the brand string of
   `sysctl -n machdep.cpu.brand_string`.  A machine with neither raises an
   error.
-- A process started by a campaign may inherit both values through
-  `ANNEAL_MACHINE_ID` and `ANNEAL_CPU_MODEL`.  Every row writer reads them
-  through `machine_columns()`, the one path that stamps a row.  The
-  inherited `ANNEAL_MACHINE_ID` must be a salted SHA-256 digest like the
-  one this machine computes, and a variable that is empty counts as unset.
-  Setting only one of the two, or an `ANNEAL_MACHINE_ID` that is not a
-  digest, is an error.  With neither variable set the columns describe the
-  machine that runs the row.
+- A process started by a campaign may inherit the CPU model through
+  `ANNEAL_CPU_MODEL`.  Every row writer stamps `machine_id` as `unrecorded`
+  through `machine_columns()` and does not take a machine identifier from
+  the environment.  With `ANNEAL_CPU_MODEL` unset, `cpu_model` describes
+  the machine that runs the row.
 
 The machine fields describe the physical machine that ran the measured row.
 Summaries preserve the distinct source values, separated by semicolons.
