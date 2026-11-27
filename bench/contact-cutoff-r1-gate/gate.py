@@ -37,13 +37,15 @@ import argparse
 import csv
 import hashlib
 import json
-import math
 import os
 import struct
 import subprocess
 import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from target_tol import energy_hits  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 ROWS = HERE / "rows.csv"
@@ -189,7 +191,7 @@ def bits(value: float) -> str:
 
 
 def is_hit(best: float, reference: float) -> bool:
-    return math.isfinite(best) and best <= reference + HIT_TOL
+    return energy_hits(best, reference, HIT_TOL)
 
 
 def child_env(rgpot: Path) -> dict[str, str]:

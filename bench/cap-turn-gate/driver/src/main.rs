@@ -29,7 +29,7 @@ mod padding {
     include!(concat!(env!("OUT_DIR"), "/gate_padding.rs"));
 }
 
-const HIT_TOL: f64 = 0.001;
+const HIT_TOL: f64 = 1.0e-3;
 const STATUS_STRIDE_MASK: u64 = 1023;
 
 #[derive(Clone, Copy)]

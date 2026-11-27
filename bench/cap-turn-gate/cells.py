@@ -1,3 +1,4 @@
+# Copyright (c) anneal developers
 """Pre-registered panel, paper budgets, references, and ABBA schedules."""
 
 from __future__ import annotations

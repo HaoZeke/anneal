@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Pre-registered gate analysis for Config::cap_twist default-on."""
 
 from __future__ import annotations

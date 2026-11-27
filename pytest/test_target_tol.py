@@ -499,3 +499,68 @@ def test_lint_detects_injected_experiments_probe():
 
     line = "    return x <= thresh\n"
     assert classify_line("experiments/_target_tol_lint_probe.py", line, "py") is not None
+
+
+def _hit_bit(text: str) -> bool | None:
+    raw = text.strip().lower()
+    if raw in {"1", "true"}:
+        return True
+    if raw in {"0", "false"}:
+        return False
+    return None
+
+
+def _assert_recorded_hits(rows: list[dict[str, str]], reference_of, hit_key: str = "hit") -> int:
+    checked = 0
+    for row in rows:
+        reference = reference_of(row)
+        assert reference is not None, row.get("cell") or row.get("system")
+        recorded = _hit_bit(row[hit_key])
+        assert recorded is not None, row
+        best = float(row["best"])
+        assert recorded is py_target_tol.energy_hits(best, reference), row
+        checked += 1
+    return checked
+
+
+def test_committed_gate_hit_sets_match_energy_hits():
+    """Recorded hit columns are the energy_hits set at the default tolerance.
+
+    The harness predicate and ``best <= reference + 1e-3`` name the same
+    rows. ``1.0e-3`` is the same value as the literal ``0.001``.
+    """
+    import csv
+
+    basin = _load_module("basin_bound_gate_hits", "bench/basin-bound-gate/run_gate.py")
+    refs = {
+        system: reference
+        for table in (basin.LJ_SPECS, basin.MORSE_SPECS, basin.BLJ_SPECS, basin.SC_SPECS)
+        for system, _budget, reference in table
+    }
+    refs.update({f"tip4p{n}": energy for n, (energy, _text) in basin.load_tip4p_refs(ROOT).items()})
+    with (ROOT / "bench/basin-bound-gate/rows.csv").open(newline="") as handle:
+        basin_rows = list(csv.DictReader(handle))
+    assert _assert_recorded_hits(basin_rows, lambda row: refs.get(row["cell"])) == 5568
+
+    bindings = _load_module("bindings_parity_gate_hits", "bench/bindings-parity-gate/run_gate.py")
+    bind_refs = {
+        system: reference
+        for table in (bindings.LJ_SPECS, bindings.MORSE_SPECS, bindings.BLJ_SPECS, bindings.SC_SPECS)
+        for system, _budget, reference in table
+    }
+    bind_refs.update(refs)
+    with (ROOT / "bench/bindings-parity-gate/rows.csv").open(newline="") as handle:
+        bind_rows = list(csv.DictReader(handle))
+    assert _assert_recorded_hits(bind_rows, lambda row: bind_refs.get(row["cell"])) == 1008
+
+    blj = _load_module("blj_fix5_gate_hits", "bench/blj-fix5-gate/run_gate.py")
+    blj_refs = {system: reference for _panel, system, _driver, _budget, reference, _seeds in blj.SYSTEMS}
+    with (ROOT / "bench/blj-fix5-gate/rows.csv").open(newline="") as handle:
+        blj_rows = list(csv.DictReader(handle))
+    assert _assert_recorded_hits(blj_rows, lambda row: blj_refs.get(row["system"])) == 316
+
+    contact = _load_module("contact_cutoff_gate_hits", "bench/contact-cutoff-r1-gate/gate.py")
+    contact_refs = {cell["cell"]: cell["reference"] for cell in (*contact.PART1, *contact.PART2)}
+    with (ROOT / "bench/contact-cutoff-r1-gate/rows.csv").open(newline="") as handle:
+        contact_rows = list(csv.DictReader(handle))
+    assert _assert_recorded_hits(contact_rows, lambda row: contact_refs.get(row["cell"])) == 900

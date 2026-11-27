@@ -13,9 +13,10 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from machine_provenance import host_label  # noqa: E402
+from machine_provenance import host_label, machine_provenance  # noqa: E402
+from target_tol import energy_hits  # noqa: E402
 
-HIT_TOL = 0.001
+HIT_TOL = 1.0e-3
 SEEDS_12 = tuple(range(2000, 2012))
 
 # Order keeps shorter panels before blj130n98.
@@ -61,10 +62,8 @@ ROW_FIELDS = [
 
 
 def cpu_model() -> str:
-    for line in Path("/proc/cpuinfo").read_text().splitlines():
-        if line.startswith("model name"):
-            return line.split(":", 1)[1].strip().replace(",", " ")
-    return ""
+    _machine_id, model = machine_provenance()
+    return model.replace(",", " ")
 
 
 def single_thread_env() -> dict[str, str]:
@@ -126,7 +125,7 @@ def parse_kv(text: str, prefix: str) -> dict[str, str]:
 
 
 def check_row(system: str, seed: int, budget: int, reference: float, hit: int, evals: int, best: float) -> None:
-    expected_hit = int(best <= reference + HIT_TOL + 1e-12)
+    expected_hit = int(energy_hits(best, reference, HIT_TOL))
     if hit != expected_hit:
         raise RuntimeError(f"{system} seed {seed}: hit={hit} inconsistent with best={best} ref={reference}")
     if hit == 0 and evals != budget:

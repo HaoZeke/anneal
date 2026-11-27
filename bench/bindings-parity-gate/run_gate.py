@@ -25,6 +25,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from machine_provenance import machine_provenance  # noqa: E402
+from target_tol import energy_hits  # noqa: E402
+
 HIT_TOL = 1.0e-3
 OUTSIDE_RATIO_LIMIT = 1.10
 RSS_RATIO_LIMIT = 1.05
@@ -245,7 +249,7 @@ def float_bits_hex(value: float) -> str:
 
 
 def is_hit(best: float, reference: float, tol: float = HIT_TOL) -> bool:
-    return math.isfinite(best) and best <= reference + tol
+    return energy_hits(best, reference, tol)
 
 
 def arm_order(seed: int) -> tuple[str, str, str]:
@@ -927,12 +931,8 @@ def score_cell(
 
 
 def cpu_model_name() -> str:
-    cpuinfo = Path("/proc/cpuinfo")
-    if cpuinfo.is_file():
-        for ln in cpuinfo.read_text(encoding="utf-8", errors="replace").splitlines():
-            if ln.startswith("model name"):
-                return ln.split(":", 1)[1].strip()
-    return "unknown"
+    _machine_id, model = machine_provenance()
+    return model
 
 
 def rustc_version_str() -> str:

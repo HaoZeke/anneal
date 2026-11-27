@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Audit log files for hygiene and build deterministic numeric-owner tar.gz."""
 
 from __future__ import annotations

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) anneal developers
 """Serial single-core ABBA gate runner for Config::cap_twist."""
 
 from __future__ import annotations

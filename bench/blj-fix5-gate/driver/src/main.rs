@@ -17,7 +17,11 @@ use ndarray::{Array1, ArrayView1};
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-const HIT_TOL: f64 = 0.001;
+const HIT_TOL: f64 = 1.0e-3;
+
+// Same one-sided rule as anneal_core::energy_hits. This file is copied onto
+// arm trees that do not all export that function.
+fn energy_hits(energy: f64, target: f64, tol: f64) -> bool { energy.is_finite() && target.is_finite() && tol.is_finite() && tol >= 0.0 && energy <= target + tol }
 const LABEL_A: u32 = 200;
 const LABEL_B: u32 = 201;
 
@@ -189,12 +193,11 @@ fn cmd_blj(args: &[String]) -> i32 {
     let pot_s = pot_ns.load(Ordering::Relaxed) as f64 / 1.0e9;
     let outside_s = (wall - pot_s).max(0.0);
 
-    let level = spec.reference + HIT_TOL;
-    let hit = outcome.best <= level;
+    let hit = energy_hits(outcome.best, spec.reference, HIT_TOL);
     let at_hit = outcome
         .improvements
         .iter()
-        .find(|(_, _, _, energy)| *energy <= level)
+        .find(|(_, _, _, energy)| energy_hits(*energy, spec.reference, HIT_TOL))
         .map(|(_, spent, _, _)| *spent);
     let evals = if hit {
         at_hit.or(Some(outcome.charged)).unwrap_or(budget)
