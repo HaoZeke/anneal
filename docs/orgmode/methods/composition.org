@@ -123,10 +123,10 @@ order:
    when the Euclidean gradient norm is above 1e-5
    (examples/lj_cluster_search.rs:6860), when =describe= fails
    (examples/lj_cluster_search.rs:7156), or when the charged work does
-   not convert to a u64 (examples/lj_cluster_search.rs:7170). A stored
+   not convert to a u64 (examples/lj_cluster_search.rs:7167). A stored
    source is kept when every component is below =record_gradient=
-   (src/methods/cluster_hopping.rs:2868 and
-   src/methods/cluster_hopping.rs:2885). The Lennard-Jones preset
+   (src/methods/cluster_hopping.rs:2868)
+   (src/methods/cluster_hopping.rs:2885). The Lennard-Jones preset
    sets that threshold to 1e-3 per component
    (src/methods/cluster_hopping/preset.rs:31), so a stored source can
    miss the Euclidean 1e-5 test. On any of those empty results the
