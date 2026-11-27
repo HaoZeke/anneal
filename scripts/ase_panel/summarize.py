@@ -18,7 +18,7 @@ if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
 from paired_stats import fisher_exact  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
-from machine_provenance import csv_fields  # noqa: E402
+from machine_provenance import csv_fields, require_lf  # noqa: E402
 import revision_reach  # noqa: E402
 
 SEEDS = tuple(range(2000, 2012))
@@ -82,8 +82,7 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
     rerun_path = directory / ROWS_FILE
     is_rerun = rerun_path.exists()
     if is_rerun:
-        if b"\r" in rerun_path.read_bytes():
-            raise SystemExit(f"{rerun_path} contains CR")
+        require_lf(rerun_path)
         with rerun_path.open(newline="") as handle:
             reader = csv.DictReader(handle)
             if tuple(reader.fieldnames or ()) not in (
@@ -98,8 +97,7 @@ def load(system: str) -> dict[str, list[dict[str, str]]]:
             paths.append(directory / "rows-for-cluster.csv")
         rows = []
         for path in paths:
-            if b"\r" in path.read_bytes():
-                raise SystemExit(f"{path} contains CR")
+            require_lf(path)
             with path.open(newline="") as handle:
                 reader = csv.DictReader(handle)
                 if tuple(reader.fieldnames or ()) not in (ROW_FIELDS, CURRENT_ROW_FIELDS):

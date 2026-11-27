@@ -255,6 +255,12 @@ def csv_fields(values: Iterable[object]) -> str:
     return stream.getvalue()
 
 
+def require_lf(path: Path) -> None:
+    """Refuse a row file that contains a carriage return."""
+    if b"\r" in Path(path).read_bytes():
+        raise SystemExit(f"{path} contains CR")
+
+
 def require_csv_schema(path: Path, fieldnames: Iterable[str]) -> None:
     """Refuse to append a new-schema row beneath a legacy CSV header."""
     if not path.is_file() or path.stat().st_size == 0:

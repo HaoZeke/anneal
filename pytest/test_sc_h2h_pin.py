@@ -7,6 +7,8 @@ import hashlib
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("sc_h2h", ROOT / "scripts" / "paper_rerun" / "sc_h2h.py")
 sc_h2h = importlib.util.module_from_spec(SPEC)
@@ -107,3 +109,12 @@ def test_the_rerun_takes_its_machine_digest_from_the_helper():
     assert "def machine_id(" not in source
     assert "/etc/machine-id" not in source
     assert "host = machine_digest()" in source
+
+
+def test_stored_rows_with_carriage_returns_are_refused(tmp_path: Path):
+    rows = tmp_path / "rows.csv"
+    rows.write_bytes(b"system,arm,seed\r\nsc126-38,anneal,2000\r\n")
+    with pytest.raises(SystemExit, match="contains CR"):
+        sc_h2h.load_done(rows)
+    rows.write_bytes(b"system,arm,seed\nsc126-38,anneal,2000\n")
+    assert sc_h2h.load_done(rows) == {("sc126-38", "anneal", "2000")}

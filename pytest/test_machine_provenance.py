@@ -3200,3 +3200,16 @@ def test_machine_digest_salts_the_macos_ioreg_uuid(tmp_path, monkeypatch):
     monkeypatch.setattr(mp.subprocess, "run", _no_subprocess)
     with pytest.raises(RuntimeError, match="machine-id"):
         mp.machine_digest(mp.MACHINE_ID_PATH, mp.PRODUCT_UUID_PATH)
+
+
+def test_require_lf_rejects_carriage_returns(tmp_path):
+    import machine_provenance as mp
+
+    lf = tmp_path / "lf.csv"
+    lf.write_bytes(b"code_revision,host\nabc,bench\n")
+    mp.require_lf(lf)
+    for body in (b"code_revision,host\r\nabc,bench\r\n", b"code_revision,host\nabc,be\rnch\n"):
+        crlf = tmp_path / "cr.csv"
+        crlf.write_bytes(body)
+        with pytest.raises(SystemExit, match="contains CR"):
+            mp.require_lf(crlf)
