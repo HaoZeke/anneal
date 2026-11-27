@@ -63,20 +63,25 @@ checkpoint fires:
 - *Stall response*: the chain is stalled once =quiet= reaches the
   larger of =escape_stall_patience= and =escape_stall_factor= times
   =longest_quiet= (src/methods/cluster_hopping.rs:5097). Those defaults
-  are 5000 and 2.0 (src/methods/cluster_hopping/config.rs:2331). When
-  the chain is stalled, the call clock is not due, and more than one
-  stall arm is enabled, the arm is drawn
-  (src/methods/cluster_hopping.rs:11048). When the call clock is due
-  and =escape_on_stall= is on (src/methods/cluster_hopping.rs:7643),
-  the walk sets =directed_leave= (src/methods/cluster_hopping.rs:7648)
-  and selects =climb= by name (src/methods/cluster_hopping.rs:11047)
-  and skips that draw.
-  =recommended_with_scales= enables =trail= and =climb=
-  (src/methods/cluster_hopping/config.rs:1944), so both arms are on
-  and this leave is the one that runs. A fresh start on that clock
-  returns to the same funnel (src/methods/cluster_hopping.rs:7574).
-  When the cap turn is also on, the leave is a draw between =climb=
-  and =cap= only (src/methods/cluster_hopping.rs:6397).
+  are 5000 and 2.0 (src/methods/cluster_hopping/config.rs:2331).
+  =directed_leave= is tested before =stuck=
+  (src/methods/cluster_hopping.rs:11041). When =directed_leave= is set
+  and more than one leave arm is enabled, the walk draws between those
+  arms. When =directed_leave= is set and that draw does not apply, the
+  walk selects =climb= by name and does not draw
+  (src/methods/cluster_hopping.rs:11046). When =directed_leave= is not
+  set, =stuck= is set, and more than one stall arm is enabled, the
+  arm is drawn (src/methods/cluster_hopping.rs:11048).
+  =recommended_with_scales= turns on =trail= and =climb=
+  (src/methods/cluster_hopping/config.rs:1944)
+  (src/methods/cluster_hopping/config.rs:1945) and leaves =cap= off
+  (src/methods/cluster_hopping/config.rs:2349). The call clock sets
+  =directed_leave= when =escape_on_stall= is on
+  (src/methods/cluster_hopping.rs:7643). On that preset the leave
+  selects =climb= and does not draw. A fresh start on that clock returns to the same
+  funnel (src/methods/cluster_hopping.rs:7574). When the cap turn is
+  also on, =directed_leave= draws between =climb= and =cap= only
+  (src/methods/cluster_hopping.rs:6397).
 
 None of this loop body talks to the coordinator. It is the same code
 path a solo run takes. The cooperative layer only enters at a
