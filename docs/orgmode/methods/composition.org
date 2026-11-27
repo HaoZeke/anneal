@@ -104,11 +104,23 @@ order:
 
 2. *Register local-topology evidence.* =adaptive_catalog_operations=
    (examples/lj_cluster_search.rs:7261) reads unadopted probe
-   transitions. A failed probe with a source gradient pushes
-   =Unresolved=, and =RegisterCurrent= unless that source is already
-   registered (examples/lj_cluster_search.rs:7273). =Adopt= is pushed
-   only after a validated transition (examples/lj_cluster_search.rs:7311
-   and examples/lj_cluster_search.rs:7375). Those operations are posted
+   transitions. A failed probe has action =probe=, is not validated,
+   and carries a source gradient (examples/lj_cluster_search.rs:7273).
+   When that source is already registered, the probe pushes
+   =Unresolved= and does not push =RegisterCurrent= again. When it is
+   not, =lj_catalog_candidate= is called. That call returns nothing
+   when the gradient norm is above 1e-5
+   (examples/lj_cluster_search.rs:6861), when =describe= fails
+   (examples/lj_cluster_search.rs:7156), or when the charged work does
+   not convert to a u64 (examples/lj_cluster_search.rs:7170).
+   =RECORD_GRADIENT= is 1e-3 (src/methods/cluster_hopping/preset.rs:31),
+   so a stored source gradient can miss 1e-5. On any of those empty
+   results the loop continues and pushes neither =Unresolved= nor
+   =RegisterCurrent= (examples/lj_cluster_search.rs:7298). A candidate
+   that is present is pushed as =RegisterCurrent=, and the probe then
+   pushes =Unresolved=. =Adopt= is pushed only after a validated
+   transition (examples/lj_cluster_search.rs:7311 and
+   examples/lj_cluster_search.rs:7375). Those operations are posted
    with =post_record_current= and =post_record_transition=
    (examples/lj_cluster_search.rs:4949-4996). The occupied minimum is
    sent only when it has changed
