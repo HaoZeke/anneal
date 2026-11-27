@@ -251,13 +251,7 @@ def main() -> None:
             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ]
     )
-    vs_lines = [
-        "",
-        "## Fisher against ASE arms",
-        "",
-        "| system | comparison | hits | Fisher p | wall ratio | inverse ratio |",
-        "| --- | --- | --- | --- | --- | --- |",
-    ]
+    comparisons = []
 
     for system in SYSTEMS:
         n, rho, budget, reference, label = SPEC[system]
@@ -319,16 +313,48 @@ def main() -> None:
                         )
 
                     shown = "—" if signature(group) != signature(other) else fp
-                    vs_lines.append(
-                        f"| {system} | {LABEL[arm]} vs {LABEL[other_arm]} | {hits}/12 vs {other_hits}/12 | "
-                        f"{shown} | {wr:.6f} | {ir:.6f} |"
-                    )
+                    comparisons.append((
+                        system, LABEL[arm], LABEL[other_arm], hits, other_hits, shown,
+                        signature(group) == signature(other), wr, ir,
+                    ))
+
+    shared_ratios = bool(comparisons) and all(item[6] for item in comparisons)
+    if shared_ratios:
+        vs_lines = [
+            "",
+            "## Fisher against ASE arms",
+            "",
+            "| system | comparison | hits | Fisher p | wall ratio | inverse ratio |",
+            "| --- | --- | --- | --- | --- | --- |",
+        ]
+        ratio_sentence = "Medians are Hyndman-Fan type 7. Wall ratios are ratios of arm medians."
+    else:
+        vs_lines = [
+            "",
+            "## Fisher against ASE arms",
+            "",
+            "| system | comparison | hits | Fisher p |",
+            "| --- | --- | --- | --- |",
+        ]
+        ratio_sentence = (
+            "Medians are Hyndman-Fan type 7. Wall ratios are omitted where the arms do not share a stop."
+        )
+    for system, left, right, hits, other_hits, shown, _share, wr, ir in comparisons:
+        if shared_ratios:
+            vs_lines.append(
+                f"| {system} | {left} vs {right} | {hits}/12 vs {other_hits}/12 | "
+                f"{shown} | {wr:.6f} | {ir:.6f} |"
+            )
+        else:
+            vs_lines.append(
+                f"| {system} | {left} vs {right} | {hits}/12 vs {other_hits}/12 | {shown} |"
+            )
 
     readme.extend(vs_lines)
     readme.extend(
         [
             "",
-            "Medians are Hyndman-Fan type 7. Wall ratios are ratios of arm medians.",
+            ratio_sentence,
             "The Rust and NumPy random generators do not make a shared starting",
             "geometry from the same numeric seed, so seed labels are not treated as pairs.",
             "The Fisher cells are blank where the hit, budget, and wall stops differ.",

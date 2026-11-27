@@ -22,13 +22,14 @@ the full call budget, so its call count is right-censored at `charged`.
 Minima hopping stopped at the wall cap on 12/12 seeds; those rows charged 40,554-75,123 calls.
 
 The Fisher cells are blank where the stops differ, and there is no paired test.
+Wall ratios are omitted where the arms do not share a stop.
 
-| comparison | hits | Fisher p | median wall ratio | inverse ratio |
-| --- | --- | --- | --- | --- |
-| recommended against basin hopping | 5/12 vs 0/12 | — | 0.791851 | 1.262864 |
-| recommended against minima hopping | 5/12 vs 0/12 | — | 0.333354 | 2.999812 |
+| comparison | hits | Fisher p |
+| --- | --- | --- |
+| recommended against basin hopping | 5/12 vs 0/12 | — |
+| recommended against minima hopping | 5/12 vs 0/12 | — |
 
 The Fisher cells above are blank where the arms do not share a stop.
-Medians are type 7. Wall ratios are ratios of arm medians. The Rust and
+Medians are type 7. Each wall is that arm's own median. The Rust and
 NumPy random generators do not make a shared starting geometry from the
 same numeric seed, so the report does not treat seed labels as pairs.

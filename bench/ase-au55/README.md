@@ -23,14 +23,15 @@ Basin hopping stopped at the wall cap on 12/12 seeds; those rows charged 522,329
 Minima hopping stopped at the wall cap on 12/12 seeds; those rows charged 72,762-86,949 calls.
 
 The Fisher cells are blank where the stops differ, and there is no paired test.
+Wall ratios are omitted where the arms do not share a stop.
 
-| comparison | hits | Fisher p | median wall ratio | inverse ratio |
-| --- | --- | --- | --- | --- |
-| recommended against basin hopping | 0/12 vs 0/12 | — | 0.333550 | 2.998052 |
-| recommended against minima hopping | 0/12 vs 0/12 | — | 0.326298 | 3.064682 |
+| comparison | hits | Fisher p |
+| --- | --- | --- |
+| recommended against basin hopping | 0/12 vs 0/12 | — |
+| recommended against minima hopping | 0/12 vs 0/12 | — |
 
 The Fisher cells above are blank where the arms do not share a stop.
-Medians are type 7. Wall ratios are ratios of arm medians. The Rust and
+Medians are type 7. Each wall is that arm's own median. The Rust and
 NumPy random generators do not make a shared starting geometry from the
 same numeric seed, so the report does not treat seed labels as pairs.
 

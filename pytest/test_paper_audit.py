@@ -510,9 +510,9 @@ def test_a_drifted_ase_table_cell_is_reported(monkeypatch):
     withhold(monkeypatch, ASE_COMMIT)
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "& 289.0 & This code & hit or budget & 7/12 & 78.919"
+    old = "& 289.0 & This code & 7/5/0 & 7/12 & 78.919"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 289.0 & This code & hit or budget & 8/12 & 78.919")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "& 289.0 & This code & 7/5/0 & 8/12 & 78.919")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
     assert sorted(r[2] for r in audit.drifts()) == ["recommended hits", "tab:ase is the summariser's block"]
@@ -521,12 +521,23 @@ def test_a_drifted_ase_table_cell_is_reported(monkeypatch):
 def test_a_drifted_morse_ase_table_cell_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "wall cap on 12 & 0/12 & 47.556 \\\\"
+    old = "0/0/12 & 0/12 & 47.556 \\\\"
     assert tex.count(old) == 1
-    audit.text_cache[audit_mod.TEX] = tex.replace(old, "wall cap on 12 & 0/12 & 47.557 \\\\")
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "0/0/12 & 0/12 & 47.557 \\\\")
     audit_mod.manuscript_ase(audit)
     audit_mod.generated_tables(audit)
     assert sorted(r[2] for r in audit.drifts()) == ["ase_mh median wall", "tab:ase-morse is the summariser's block"]
+
+
+def test_a_budget_stop_with_no_wall_is_reported():
+    """A Stop cell that is not the row mix drifts even when the wall count is 0."""
+    audit = audit_mod.Audit()
+    tex = audit.text(audit_mod.TEX)
+    old = "BH & 0/12/0 & 0/12 & 123.0"
+    assert tex.count(old) == 1
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, "BH & 0/0/0 & 0/12 & 123.0", 1)
+    audit_mod.manuscript_ase(audit)
+    assert any(r[2] == "ase_bh stop mix" for r in audit.drifts())
 
 
 def test_a_cross_arm_p_value_in_the_ase_section_is_reported():
@@ -3676,7 +3687,6 @@ def test_unreachable_revisions_in_the_bench_readmes_are_found():
         ("bench/agox-lj75/README.md", "ccc22cee"),
         ("bench/ase-lj75/README.md", "162d2307"),
         ("bench/ase-lj75/README.md", "8173c5e2"),
-        ("bench/ase-nonlj/README.md", "90b88235"),
         ("bench/covalent-h2h/README.md", "ce1e7a46"),
         ("bench/covalent-h2h/README.md", "eb7f8999"),
         ("bench/covalent-h2h/README.md", "a52726af"),
@@ -4051,8 +4061,31 @@ def test_a_readme_superiority_verb_is_reported():
         ("The search beats ASE.", "beats"),
         ("The search is better than CREST.", "better than"),
         ("The search wins.", "wins"),
+        ("LJ104 is still behind GMIN.", "behind"),
     ):
         _claim_hits(plant, path, token)
+
+
+def test_behind_the_rows_is_not_a_comparison():
+    path = "bench/covalent-h2h/README.md"
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path) + "\nThe rows sit behind the table.\n"
+    audit_mod.stopping_pairs(audit)
+    assert [row for row in audit.drifts() if "behind" in row[3]] == []
+
+
+def test_with_and_without_do_not_clear_an_outside_sentence():
+    path = "bench/ase-lj98/README.md"
+    _claim_hits("A run with the move and without it has p = 0.00942.", path, "0.00942")
+    _claim_hits("Before the change and after it, p = 0.00942.", path, "0.00942")
+
+
+def test_a_within_code_pair_keeps_its_p_value():
+    path = audit_mod.TEX
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path) + "\nThis code with the part and without it has p = 0.00942.\n"
+    audit_mod.stopping_pairs(audit)
+    assert [row for row in audit.drifts() if "0.00942" in row[3]] == []
 
 
 def test_a_same_stop_keyword_does_not_hide_a_pvalue():

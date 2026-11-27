@@ -345,9 +345,10 @@ def render(system: str) -> tuple[str, str]:
     elif mixed_wall:
         report.extend(["", *stop_notes, "",
             "The Fisher cells are blank where the stops differ, and there is no paired test.",
+            "Wall ratios are omitted where the arms do not share a stop.",
             "",
-            "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
-            "| --- | --- | --- | --- | --- |",
+            "| comparison | hits | Fisher p |",
+            "| --- | --- | --- |",
         ])
     else:
         report.extend(["", *stop_notes, "",
@@ -365,19 +366,32 @@ def render(system: str) -> tuple[str, str]:
                 fisher_text = "—"
         elif signature(other) != signature("recommended"):
             fisher_text = "—"
-        wall_ratio = recommended[3] / other_report[3]
-        inverse_ratio = other_report[3] / recommended[3]
-        report.append(
-            f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
-            f"{fisher_text} | {wall_ratio:.6f} | {inverse_ratio:.6f} |"
-        )
+        if mixed_wall:
+            report.append(
+                f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
+                f"{fisher_text} |"
+            )
+        else:
+            wall_ratio = recommended[3] / other_report[3]
+            inverse_ratio = other_report[3] / recommended[3]
+            report.append(
+                f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
+                f"{fisher_text} | {wall_ratio:.6f} | {inverse_ratio:.6f} |"
+            )
     if system == "lj38":
         fisher_line = ""
     elif mixed_wall:
         fisher_line = "The Fisher cells above are blank where the arms do not share a stop."
     else:
         fisher_line = "Fisher is the two-sided exact test on hits under the recorded stopping rule."
-    if system != "lj38":
+    if system != "lj38" and mixed_wall:
+        report.extend(["",
+            fisher_line,
+            "Medians are type 7. Each wall is that arm's own median. The Rust and",
+            "NumPy random generators do not make a shared starting geometry from the",
+            "same numeric seed, so the report does not treat seed labels as pairs.",
+        ])
+    elif system != "lj38":
         report.extend(["",
             fisher_line,
             "Medians are type 7. Wall ratios are ratios of arm medians. The Rust and",

@@ -18,10 +18,8 @@ Seeds 6400-6405, budget 4,000,000, host bench, reference -543.665361.
 Current AGOX hit 0 of 6, median wall 7031.920068 s.
 Documented AGOX hit 0 of 6, median wall 8399.304438 s.
 Anneal at 30a4ea8801236aba5175eea07b07e2424a056bd7 hit 2 of 6, median wall 81.334000 s.
-Type-7 median wall ratio, current AGOX over anneal: 87.498181.
-Type-7 median wall ratio, anneal over current AGOX: 0.011434.
-Type-7 median wall ratio, documented AGOX over anneal: 103.653286.
-Type-7 median wall ratio, anneal over documented AGOX: 0.009648.
+Seeds 6403 and 6404 stopped at a hit. The other four anneal seeds and every AGOX seed ran the full budget.
+The arms do not share one stop, so this note prints no wall ratio.
 The rows are in `bench/agox-lj98`.
 
 ## LJ75

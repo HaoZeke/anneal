@@ -221,54 +221,6 @@ UNVERIFIABLE = [
     ('bench/ase-lj75/README.md',
      '| minima hopping | 0/12 | — | — | — | -391.70068193 | 5.79164907 | 172.344747 | 3.375083 | 0.296295 | 0.943898 | 171.463289 |',
      ('162d230740f0', '8173c5e2855b'), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m38r6 | for_cluster vs basin hopping | 5/12 vs 0/12 | — | 0.324342 | 3.083165 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m38r6 | for_cluster vs minima hopping | 5/12 vs 0/12 | — | 0.324323 | 3.083344 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m38r6 | recommended vs basin hopping | 12/12 vs 0/12 | — | 0.025276 | 39.563762 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m38r6 | recommended vs minima hopping | 12/12 vs 0/12 | — | 0.025274 | 39.566068 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m38r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | — | 0.314585 | 3.178786 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m38r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | — | 0.314572 | 3.178919 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m38r14 | recommended vs basin hopping | 12/12 vs 0/12 | — | 0.018058 | 55.378224 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m38r14 | recommended vs minima hopping | 12/12 vs 0/12 | — | 0.018057 | 55.380532 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m55r6 | for_cluster vs basin hopping | 12/12 vs 0/12 | — | 0.081985 | 12.197304 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m55r6 | for_cluster vs minima hopping | 12/12 vs 0/12 | — | 0.081980 | 12.198089 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m55r6 | recommended vs basin hopping | 12/12 vs 0/12 | — | 0.018064 | 55.359963 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m55r6 | recommended vs minima hopping | 12/12 vs 0/12 | — | 0.018062 | 55.363522 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m55r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | — | 0.304338 | 3.285817 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m55r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | — | 0.304323 | 3.285984 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m55r14 | recommended vs basin hopping | 5/12 vs 0/12 | — | 0.317431 | 3.150296 |',
-     ('90b88235fe54',), WHY_OLD),
-    ('bench/ase-nonlj/README.md',
-     '| m55r14 | recommended vs minima hopping | 5/12 vs 0/12 | — | 0.317414 | 3.150456 |',
-     ('90b88235fe54',), WHY_OLD),
     ('bench/covalent-h2h/README.md',
      '| Si10 | anneal G | 12/12 | reference or 1e5 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |',
      ('8aeb3b0b2272', 'b22eb28536ef', 'ce1e7a46826c', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
@@ -3033,9 +2985,14 @@ def manuscript_ase(audit: Audit) -> None:
                 audit.cell(where, "budget", cells[1], float(budgets[system]))
                 audit.cell(where, "cap", cells[2], ase_cap(audit, groups, system))
             audit.cell(where, f"{arm} hits", cells[5], frac(groups[(system, arm)]))
-            if arm != "recommended":
-                count = re.search(r"\d+", cells[4])
-                audit.cell(where, f"{arm} wall stops", count.group(0) if count else "", float(stops(system, arm)))
+            group = groups[(system, arm)]
+            hit_n = sum(r["stop"] == "hit" for r in group)
+            budget_n = sum(r["stop"] == "budget" for r in group)
+            wall_n = sum(r["stop"] == "wall" for r in group)
+            known = hit_n + budget_n + wall_n == len(group)
+            audit.record(known, where, f"{arm} stop mix uses hit, budget, and wall",
+                         f"{hit_n}/{budget_n}/{wall_n}", f"{len(group)} rows")
+            audit.cell(where, f"{arm} stop mix", cells[4].strip(), f"{hit_n}/{budget_n}/{wall_n}")
             audit.cell(where, f"{arm} median wall", cells[6], median([float(r["wall_s"]) for r in groups[(system, arm)]]))
         audit.cell(TEX, f"{label} lines", " ".join(shown), " ".join(systems))
 
@@ -5851,9 +5808,9 @@ def cover_letter(audit: Audit) -> None:
     for word in ("Science Institute", "University of Iceland, Reykjavik, Iceland\\\\"):
         audit.record(word not in audit.text(COVER), COVER, f"the cover letter does not list {word}", "absent",
                      "absent" if word not in audit.text(COVER) else "present")
-    audit.said(COVER, "The independently started, wall-capped comparisons with the Atomic\n"
-                      "Simulation Environment are reported descriptively because their arms are\n"
-                      "censored and do not share starts.")
+    audit.said(COVER, "The independently started comparisons with the Atomic\n"
+                      "Simulation Environment are reported descriptively because the arms do not\n"
+                      "share one stop and do not share starts.")
     audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
 
 
@@ -7179,6 +7136,7 @@ def nh3_prose(row: dict[str, object]) -> str:
     return (
         f"anneal stops on the ammonia octamer at a fixed charge of {row['stop_calls']} calls, "
         f"the longest of the six CREST runs, and hits {row['anneal_hits']} of {row['anneal_n']} seeds. "
+        f"CREST hits {row['crest_hits']} of {row['crest_n']} seeds. "
         f"That charge is {row['search_calls']} search calls and a {row['polish_calls']}-call polish. "
         f"Seeds {row['no_run']} have no run.txt; their stop is the calls\\_to\\_hit of results.csv. "
         f"On the run.txt files, seeds {row['run_txt']}, the energy before the polish stays above the target."
@@ -7349,8 +7307,16 @@ def octamer_records(audit: Audit) -> dict[str, dict[str, object]] | None:
     audit.cell("bench/nh3-octamer/results.csv", "ammonia hits of CREST",
                f"{crest_nh3_hits}/{len(nh3_crest)}", frac(nh3_crest))
     sentence = nh3_prose(nh3)
-    audit.record("6 of 6" not in sentence and "full runs" not in sentence, SI,
-                 "the ammonia sentence is not a paired hit test", "separate", sentence)
+    both_counts = (
+        f"{nh3['crest_hits']} of {nh3['crest_n']}" in sentence
+        and f"{nh3['anneal_hits']} of {nh3['anneal_n']}" in sentence
+        and "paired" not in sentence
+        and "fisher" not in sentence.casefold()
+        and "full runs" not in sentence
+    )
+    audit.record(both_counts, SI,
+                 "the ammonia sentence states both hit counts and is not a paired test",
+                 "both counts", sentence)
     audit.said(SI, sentence)
     audit.said(SI, "CREST stops at the end of its run.")
     audit.said(SI, "Those runs are not a paired test.")
@@ -7529,7 +7495,8 @@ _INTERVAL = re.compile(
 _SIGNED_RANK = re.compile(r"(?i)\bW\+\s*(\d+)|\bW-\s*(\d+)")
 _SUPERIOR = re.compile(
     r"(?i)(?<!packing )(?:\bwins\b|\boutperforms\b|\bbeats\b|\bbetter than\b|\bfewer calls\b|"
-    r"\blower wall\b|\bhits none\b|\bhits neither\b|\bhits no seed\b)"
+    r"\blower wall\b|\bhits none\b|\bhits neither\b|\bhits no seed\b|"
+    r"\bbehind\b(?!\s+(?:the|a|an|every|each|its|this|those|these)\b))"
 )
 _STORED_BEAT = re.compile(r"(?i)beats the stored")
 # A competitor whose stop is not the template comparison. Naming one of these
@@ -7591,13 +7558,36 @@ def _comparison_shared(arms: dict[str, str]) -> bool:
     return len(stops) >= 2 and len(set(stops)) == 1
 
 
+_GENERIC_ARM = frozenset({"with", "without", "before", "after"})
+
+
+def _within_code_pair(text: str, arms: dict[str, str]) -> bool:
+    """Generic arm words clear a number only for this code's own pair.
+
+    A sentence that merely contains with and without, or before and after,
+    is not the knockout table and not the before/after pair.
+    """
+    if not set(arms) <= _GENERIC_ARM:
+        return True
+    if re.search(r"(?i)\b(?:gmin|crest|ase|occat|gad|openconf|agox)\b", text):
+        return False
+    folded = text.casefold()
+    if re.search(r"this code|this work|this search|this article|anneal", folded):
+        return True
+    if "only with" in folded and "only without" in folded:
+        return True
+    if "c2de652d" in folded or "eeec8e2c" in folded:
+        return True
+    return False
+
+
 def _mentioned_shared(text: str, rules: dict[str, dict[str, str]]) -> str | None:
     """A comparison whose every arm is named here and whose arms share a stop."""
     present = _arms_in(text)
     for name, arms in rules.items():
         if len(arms) < 2 or not set(arms) <= present:
             continue
-        if _comparison_shared(arms):
+        if _comparison_shared(arms) and _within_code_pair(text, arms):
             return name
     return None
 

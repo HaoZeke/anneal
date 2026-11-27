@@ -13,6 +13,6 @@ GMIN is Wales revision `aac1548a8aec13b53ad12a8d6904625081685d2e`, built without
 | LJ104 | anneal | 3/6 | 251.227 | 0.744 | 0.702 | 0.770 | 20.49 | 53.86 |
 | LJ104 | gmin | 2/6 | 186.964 | 0.744 | 0.702 | 0.770 |  |  |
 
-Hit counts match v4. LJ98 is close to the earlier 1.129. LJ104 improved on v4 and is still behind GMIN.
+Hit counts match v4. LJ98 is close to the earlier 1.129. LJ104's same-session wall ratio moved from 0.770 in v4 to 0.744. Both arms stop at the first hit or the budget wall.
 
 A `cpu-clock` profile of this binary, LJ104 seed 2000, budget 200_000, core 0, no longer shows `prepare_duals` or the seeded matrix fill. The potential is 30.2% of samples. Outside it, the dense scan remains the large share: `scan_avx2` 26.7% and `successive_shortest_paths` 14.5%. Symmetry detection is 4.9% and orbit completion 2.2%.

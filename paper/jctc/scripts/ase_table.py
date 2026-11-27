@@ -108,12 +108,14 @@ def summary(system: str, arms: dict[str, list[dict[str, str]]], preset: str) -> 
         raise SystemExit(f"ase_table: {system} cap is not three times the slowest {preset} wall")
     hits = {arm: sum(r["hit"] == "1" for r in rows) for arm, rows in arms.items()}
     stops = {arm: sum(r["stop"] == "wall" for r in rows) for arm, rows in arms.items()}
+    mix = {arm: stop_mix(rows) for arm, rows in arms.items()}
     if stops["recommended"]:
         raise SystemExit(f"ase_table: {system} a run of this code stopped at the cap")
     return {
         "cap": float(next(iter(caps))),
         "hits": hits,
         "stops": stops,
+        "mix": mix,
         "wall": {arm: statistics.median(float(r["wall_s"]) for r in rows) for arm, rows in arms.items()},
         "calls": {arm: (min(int(r["charged"]) for r in rows), max(int(r["charged"]) for r in rows))
                   for arm, rows in arms.items()},
@@ -144,10 +146,14 @@ def show_wall(value: float) -> str:
     return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
 
 
-def _stop(arm: str, count: int) -> str:
-    if arm == "recommended":
-        return "hit or budget"
-    return f"wall cap on {count}"
+def stop_mix(rows: list[dict[str, str]]) -> str:
+    """How many runs ended at a hit, at the budget, and at the wall cap."""
+    hit = sum(r["stop"] == "hit" for r in rows)
+    budget = sum(r["stop"] == "budget" for r in rows)
+    wall = sum(r["stop"] == "wall" for r in rows)
+    if hit + budget + wall != len(rows):
+        raise SystemExit("ase_table: a row stop is not hit, budget, or wall")
+    return f"{hit}/{budget}/{wall}"
 
 
 def body(specs: dict[str, tuple], panel: dict[str, dict]) -> list[str]:
@@ -162,7 +168,7 @@ def body(specs: dict[str, tuple], panel: dict[str, dict]) -> list[str]:
                 show_budget(budget) if index == 0 else "",
                 show_wall(s["cap"]) if index == 0 else "",
                 names[arm],
-                _stop(arm, s["stops"][arm]),
+                s["mix"][arm],
                 f"{s['hits'][arm]}/12",
                 show_wall(s["wall"][arm]),
             ]) + " \\\\")
@@ -193,9 +199,9 @@ COMMON = [
     "The budget of this code counts one call per combined energy and gradient pass.",
     "Cap is the wall in seconds after which a run stops at its next check, three times",
     "the slowest wall of the cluster preset of this code on that cluster.",
-    "Stop names the rule that ended the runs of that arm.",
-    "A wall cap on 12 means every run of that arm ended at the cap; those runs",
-    "are misses with the call count still under the budget, and no run of this code ended at the cap.",
+    "Stop counts the runs that ended at a hit, at the budget, and at the wall cap, in that order.",
+    "A wall count is a miss still under the budget. A budget count used the full call budget and missed.",
+    "No run of this code ended at the wall cap.",
     "Wall is the median over the 12 runs of the seconds that arm took;",
     "a BH or MH run that ended at the cap is counted at its wall.",
     "No cross-arm test is reported: starts differ; every arm has the same numeric call",

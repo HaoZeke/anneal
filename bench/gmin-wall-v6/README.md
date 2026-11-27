@@ -36,4 +36,4 @@ GMIN's per-evaluation time, type 7 of `us_per_eval` on the six seeds, drifted up
 | v5 | 42.18 | 47.45 |
 | v6 | 46.46 | 51.28 |
 
-Hit counts match v5. The LJ104 outside-potential median is 48.23 µs, from 53.86 µs in v5. The same-session ratio is 0.871, so LJ104 is still behind GMIN. Anneal's own median wall fell from 251.227 s in v5 to 232.258 s here. GMIN's median wall in this session was 202.241 s, against 186.964 s in v5 and 186.079 s in v4.
+Hit counts match v5. The LJ104 outside-potential median is 48.23 µs, from 53.86 µs in v5. The same-session ratio is 0.871. Both arms stop at the first hit, and a miss stops at the budget wall. Anneal's own median wall fell from 251.227 s in v5 to 232.258 s here. GMIN's median wall in this session was 202.241 s, against 186.964 s in v5 and 186.079 s in v4.

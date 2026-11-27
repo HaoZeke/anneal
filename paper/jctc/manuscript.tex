@@ -846,9 +846,9 @@ Seeds 2000--2011.
 The budget of this code counts one call per combined energy and gradient pass.
 Cap is the wall in seconds after which a run stops at its next check, three times
 the slowest wall of the cluster preset of this code on that cluster.
-Stop names the rule that ended the runs of that arm.
-A wall cap on 12 means every run of that arm ended at the cap; those runs
-are misses with the call count still under the budget, and no run of this code ended at the cap.
+Stop counts the runs that ended at a hit, at the budget, and at the wall cap, in that order.
+A wall count is a miss still under the budget. A budget count used the full call budget and missed.
+No run of this code ended at the wall cap.
 Wall is the median over the 12 runs of the seconds that arm took;
 a BH or MH run that ended at the cap is counted at its wall.
 No cross-arm test is reported: starts differ; every arm has the same numeric call
@@ -863,21 +863,21 @@ The Supporting Information gives the revisions, drivers, and row records.}
 \toprule
 Cluster & Budget & Cap & Arm & Stop & Hits & Wall (s) \\
 \midrule
-LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & This code & hit or budget & 12/12 & 0.605 \\
- &  &  & BH & wall cap on 12 & 0/12 & 4.645 \\
- &  &  & MH & wall cap on 12 & 0/12 & 4.858 \\
-LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & This code & hit or budget & 12/12 & 0.051 \\
- &  &  & BH & wall cap on 11 & 1/12 & 4.220 \\
- &  &  & MH & wall cap on 12 & 0/12 & 4.442 \\
-LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & This code & hit or budget & 7/12 & 78.919 \\
- &  &  & BH & wall cap on 0 & 0/12 & 123.0 \\
- &  &  & MH & wall cap on 12 & 0/12 & 299.2 \\
-LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & This code & hit or budget & 5/12 & 101.7 \\
- &  &  & BH & wall cap on 0 & 0/12 & 128.5 \\
- &  &  & MH & wall cap on 12 & 0/12 & 305.2 \\
-Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & This code & hit or budget & 0/12 & 36.000 \\
- &  &  & BH & wall cap on 12 & 0/12 & 107.9 \\
- &  &  & MH & wall cap on 12 & 0/12 & 110.3 \\
+LJ\(_{38}\) & \(4\times 10^{5}\) & 4.645 & This code & 12/0/0 & 12/12 & 0.605 \\
+ &  &  & BH & 0/0/12 & 0/12 & 4.645 \\
+ &  &  & MH & 0/0/12 & 0/12 & 4.858 \\
+LJ\(_{55}\) & \(1\times 10^{6}\) & 4.220 & This code & 12/0/0 & 12/12 & 0.051 \\
+ &  &  & BH & 1/0/11 & 1/12 & 4.220 \\
+ &  &  & MH & 0/0/12 & 0/12 & 4.442 \\
+LJ\(_{98}\) & \(4\times 10^{6}\) & 289.0 & This code & 7/5/0 & 7/12 & 78.919 \\
+ &  &  & BH & 0/12/0 & 0/12 & 123.0 \\
+ &  &  & MH & 0/0/12 & 0/12 & 299.2 \\
+LJ\(_{104}\) & \(4\times 10^{6}\) & 291.0 & This code & 5/7/0 & 5/12 & 101.7 \\
+ &  &  & BH & 0/12/0 & 0/12 & 128.5 \\
+ &  &  & MH & 0/0/12 & 0/12 & 305.2 \\
+Au\(_{55}\) & \(1\times 10^{6}\) & 107.9 & This code & 0/12/0 & 0/12 & 36.000 \\
+ &  &  & BH & 0/0/12 & 0/12 & 107.9 \\
+ &  &  & MH & 0/0/12 & 0/12 & 110.3 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -892,9 +892,9 @@ Seeds 2000--2011.
 The budget of this code counts one call per combined energy and gradient pass.
 Cap is the wall in seconds after which a run stops at its next check, three times
 the slowest wall of the cluster preset of this code on that cluster.
-Stop names the rule that ended the runs of that arm.
-A wall cap on 12 means every run of that arm ended at the cap; those runs
-are misses with the call count still under the budget, and no run of this code ended at the cap.
+Stop counts the runs that ended at a hit, at the budget, and at the wall cap, in that order.
+A wall count is a miss still under the budget. A budget count used the full call budget and missed.
+No run of this code ended at the wall cap.
 Wall is the median over the 12 runs of the seconds that arm took;
 a BH or MH run that ended at the cap is counted at its wall.
 No cross-arm test is reported: starts differ; every arm has the same numeric call
@@ -909,18 +909,18 @@ The Supporting Information gives the revision, driver, and row record.}
 \toprule
 Cluster & Budget & Cap & Arm & Stop & Hits & Wall (s) \\
 \midrule
-M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.186 & This code & hit or budget & 12/12 & 0.502 \\
- &  &  & BH & wall cap on 12 & 0/12 & 10.186 \\
- &  &  & MH & wall cap on 12 & 0/12 & 10.188 \\
-M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.516 & This code & hit or budget & 9/12 & 2.136 \\
- &  &  & BH & wall cap on 12 & 0/12 & 9.517 \\
- &  &  & MH & wall cap on 12 & 0/12 & 9.518 \\
-M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.637 & This code & hit or budget & 12/12 & 0.226 \\
- &  &  & BH & wall cap on 12 & 0/12 & 15.638 \\
- &  &  & MH & wall cap on 12 & 0/12 & 15.642 \\
-M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & This code & hit or budget & 8/12 & 11.333 \\
- &  &  & BH & wall cap on 12 & 0/12 & 47.553 \\
- &  &  & MH & wall cap on 12 & 0/12 & 47.556 \\
+M\(_{38}\), \(\rho=6\) & \(4\times 10^{5}\) & 10.186 & This code & 12/0/0 & 12/12 & 0.502 \\
+ &  &  & BH & 0/0/12 & 0/12 & 10.186 \\
+ &  &  & MH & 0/0/12 & 0/12 & 10.188 \\
+M\(_{38}\), \(\rho=14\) & \(4\times 10^{5}\) & 9.516 & This code & 9/3/0 & 9/12 & 2.136 \\
+ &  &  & BH & 0/0/12 & 0/12 & 9.517 \\
+ &  &  & MH & 0/0/12 & 0/12 & 9.518 \\
+M\(_{55}\), \(\rho=6\) & \(1\times 10^{6}\) & 15.637 & This code & 12/0/0 & 12/12 & 0.226 \\
+ &  &  & BH & 0/0/12 & 0/12 & 15.638 \\
+ &  &  & MH & 0/0/12 & 0/12 & 15.642 \\
+M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & This code & 8/4/0 & 8/12 & 11.333 \\
+ &  &  & BH & 0/0/12 & 0/12 & 47.553 \\
+ &  &  & MH & 0/0/12 & 0/12 & 47.556 \\
 \bottomrule
 \end{tabular}
 \end{table}

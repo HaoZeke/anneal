@@ -66,12 +66,8 @@ reran both arms of Au55 under the Gupta input above (4/12 against 1/12).
 
 Wall is the search wall each code reports. Inside is `pot_s`, the time
 inside the potential; outside is the rest of the wall. Medians and
-interquartile ranges are Hyndman-Fan type 7. Fisher is the two-sided exact
-test on hits. Mann-Whitney (MW) is two-sided, the normal approximation with
-the tie and continuity corrections, on calls to the minimum (misses ranked
-above every hit) and on wall to the minimum where call-cap censoring leaves
-every cross-arm pair order observed (`-` where misses censor wall time at
-unequal horizons).
+interquartile ranges are Hyndman-Fan type 7. Fisher and Mann-Whitney are
+not printed, because the two arms do not share a stop.
 
 During session `20261117T035457Z` the virtual machine was suspended three
 times: the `utc` stamps of three rows lie 476 s, 2057 s and 2068 s after

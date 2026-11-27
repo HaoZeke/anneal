@@ -369,7 +369,7 @@ The protocol is that of the first panel, with these changes:
   The call units differ, so there is no paired test. The first panel's 1,154 against 612 compared two different
   quench tolerances. G improves from 2,234 to 1,016 (p = 0.019).
 - Si10: P rises from 966 to 1,782 calls. That change is not significant
-  (p = 0.29), but P and G at 1e-6 are now behind R (p = 0.019).
+  (p = 0.29), but P and G at 1e-6 take more calls than R (p = 0.019).
 - C10: P goes from 9/12 hits at 63k calls to 12/12 at 13.8k, and G from
   11/12 at 55k to 12/12 at 15.5k. Both are level with R. No container
   constant is involved.
@@ -623,7 +623,7 @@ only; the numbers are not from the timed panel.
   | Si20 | 11,162 | 10,908 | 8,454 | 0.08 | 0.22 |
   | C10 | 20,087 | 23,764 | 43,802 (45/48) | 0.002 | 0.008 |
 
-  On Si13 at 48 seeds, P and G stay behind R. Twelve seeds do not show it.
+  On Si13 at 48 seeds, P and G take more calls than R. Twelve seeds do not show it.
 - Si13, what R has that P lacks: taking the energy lattice out of R gives
   862 calls, taking the five prior gates out gives 854, and running R on
   the budget-window temperature gives 1,084. Adding the two-phase surface,
