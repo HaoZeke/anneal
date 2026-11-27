@@ -95,5 +95,76 @@
     "seed": 20261123,
     "quantile": "linear",
     "draw": "anneal indices, then crest indices"
+  },
+  "crest_builds": {
+    "definition": "crest revision token; each anneal row joins the crest row of the same seed; pooled_result_holds is true when both comparison flags match the pooled rows",
+    "pooled": {
+      "crest_hits_exceed_anneal_hits": true,
+      "call_ratio_below_one": true
+    },
+    "by_build": {
+      "6914a25": {
+        "shards": [
+          "A",
+          "B",
+          "C"
+        ],
+        "seeds": [
+          2000,
+          2001,
+          2002,
+          2003,
+          2004,
+          2005,
+          2006,
+          2007,
+          2008
+        ],
+        "n": {
+          "anneal": 9,
+          "crest": 9,
+          "rows": 18
+        },
+        "hits": {
+          "anneal": 8,
+          "crest": 8
+        },
+        "median_calls": {
+          "anneal": 331153.0,
+          "crest": 232593.0
+        },
+        "median_ratio": 0.7023732232532999,
+        "crest_hits_exceed_anneal_hits": false,
+        "call_ratio_below_one": true,
+        "pooled_result_holds": false
+      },
+      "af7eb99": {
+        "shards": [
+          "D"
+        ],
+        "seeds": [
+          2009,
+          2010,
+          2011
+        ],
+        "n": {
+          "anneal": 3,
+          "crest": 3,
+          "rows": 6
+        },
+        "hits": {
+          "anneal": 0,
+          "crest": 3
+        },
+        "median_calls": {
+          "anneal": 332676.0,
+          "crest": 319746.0
+        },
+        "median_ratio": 0.9611333549760127,
+        "crest_hits_exceed_anneal_hits": true,
+        "call_ratio_below_one": true,
+        "pooled_result_holds": true
+      }
+    }
   }
 }

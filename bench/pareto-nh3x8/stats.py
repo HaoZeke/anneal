@@ -79,6 +79,67 @@ def load_calls() -> dict[str, list[int]]:
     return {"calls": grouped, "hits": hits}
 
 
+CREST_BUILDS = ("6914a25", "af7eb99")
+
+
+def crest_token(revision: str) -> str:
+    found = [token for token in CREST_BUILDS if token in revision]
+    if len(found) != 1:
+        raise SystemExit("crest revision does not name one recorded build")
+    return found[0]
+
+
+def load_rows() -> list[dict[str, str]]:
+    with ROWS.open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    if any(row["machine_id"] != "unrecorded" for row in rows):
+        raise SystemExit("machine_id is not the literal unrecorded")
+    return rows
+
+
+def crest_build_rows() -> dict[str, dict]:
+    """Group each seed by the crest revision token. Row cells stay as recorded."""
+    by_seed: dict[str, dict[str, dict[str, str]]] = {}
+    for row in load_rows():
+        by_seed.setdefault(row["seed"], {})[row["arm"]] = row
+    groups: dict[str, dict] = {}
+    for seed in sorted(by_seed, key=int):
+        pair = by_seed[seed]
+        if set(pair) != set(ARMS):
+            raise SystemExit(f"seed {seed} is not one anneal row and one crest row")
+        token = crest_token(pair["crest"]["revision"])
+        bucket = groups.setdefault(
+            token,
+            {
+                "shards": [],
+                "seeds": [],
+                "calls": {arm: [] for arm in ARMS},
+                "hits": {arm: [] for arm in ARMS},
+            },
+        )
+        shard = pair["crest"]["shard"]
+        if shard not in bucket["shards"]:
+            bucket["shards"].append(shard)
+        bucket["seeds"].append(int(seed))
+        for arm in ARMS:
+            bucket["calls"][arm].append(int(pair[arm]["calls"]))
+            bucket["hits"][arm].append(int(pair[arm]["hit"]))
+    return groups
+
+
+def median_ratio_point(anneal: list[int], crest: list[int]) -> float:
+    left = np.asarray(anneal, dtype=float)
+    right = np.asarray(crest, dtype=float)
+    return float(np.median(right) / np.median(left))
+
+
+def comparison_flags(anneal_hits: int, crest_hits: int, ratio: float) -> dict[str, bool]:
+    return {
+        "crest_hits_exceed_anneal_hits": crest_hits > anneal_hits,
+        "call_ratio_below_one": ratio < 1.0,
+    }
+
+
 def bootstrap_median_ratio(anneal: list[int], crest: list[int]) -> tuple[float, float, float]:
     rng = np.random.default_rng(BOOTSTRAP_SEED)
     left = np.asarray(anneal, dtype=float)
@@ -103,6 +164,28 @@ def summary() -> dict:
     odds = (anneal_hits * miss_counts["crest"]) / (miss_counts["anneal"] * crest_hits)
     u, mann_p = mann_whitney([float(v) for v in calls["anneal"]], [float(v) for v in calls["crest"]])
     point, low, high = bootstrap_median_ratio(calls["anneal"], calls["crest"])
+    pooled_flags = comparison_flags(anneal_hits, crest_hits, point)
+    by_build: dict[str, dict] = {}
+    for token, bucket in crest_build_rows().items():
+        build_hits = {arm: int(sum(bucket["hits"][arm])) for arm in ARMS}
+        build_ratio = median_ratio_point(bucket["calls"]["anneal"], bucket["calls"]["crest"])
+        flags = comparison_flags(build_hits["anneal"], build_hits["crest"], build_ratio)
+        by_build[token] = {
+            "shards": bucket["shards"],
+            "seeds": bucket["seeds"],
+            "n": {
+                "anneal": len(bucket["calls"]["anneal"]),
+                "crest": len(bucket["calls"]["crest"]),
+                "rows": len(bucket["calls"]["anneal"]) + len(bucket["calls"]["crest"]),
+            },
+            "hits": build_hits,
+            "median_calls": {
+                arm: float(np.median(np.asarray(bucket["calls"][arm], dtype=float))) for arm in ARMS
+            },
+            "median_ratio": build_ratio,
+            **flags,
+            "pooled_result_holds": flags == pooled_flags,
+        }
     return {
         "arms": list(ARMS),
         "n": {**counts, "rows": sum(counts.values())},
@@ -141,6 +224,14 @@ def summary() -> dict:
             "quantile": "linear",
             "draw": "anneal indices, then crest indices",
         },
+        "crest_builds": {
+            "definition": (
+                "crest revision token; each anneal row joins the crest row of the same seed; "
+                "pooled_result_holds is true when both comparison flags match the pooled rows"
+            ),
+            "pooled": pooled_flags,
+            "by_build": by_build,
+        },
     }
 
 
@@ -158,6 +249,11 @@ def main(argv: list[str]) -> None:
     ratio = payload["median_ratio"]
     print(f"ROWS {payload['n']['rows']}")
     print(f"HITS anneal {payload['hits']['anneal']} crest {payload['hits']['crest']}")
+    for token, block in payload["crest_builds"]["by_build"].items():
+        print(
+            f"BUILD {token} HITS anneal {block['hits']['anneal']} crest {block['hits']['crest']} "
+            f"RATIO {block['median_ratio']!r} HOLDS {block['pooled_result_holds']}"
+        )
     print(f"FISHER_P {fisher['p']!r}")
     print(f"MWU_U {mann['u']!r}")
     print(f"MWU_P {mann['p']!r}")

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -71,3 +72,28 @@ def test_stats_script_is_deterministic(tmp_path):
         )
     assert first.read_bytes() == second.read_bytes()
     assert first.read_bytes() == STATS.read_bytes()
+
+
+def test_crest_build_split_keeps_every_row():
+    payload = json.loads(STATS.read_text())
+    builds = payload["crest_builds"]["by_build"]
+    assert list(builds) == ["6914a25", "af7eb99"]
+    seeds: list[int] = []
+    hit_sum = {"anneal": 0, "crest": 0}
+    row_sum = 0
+    pooled = payload["crest_builds"]["pooled"]
+    for block in builds.values():
+        seeds.extend(block["seeds"])
+        row_sum += block["n"]["rows"]
+        for arm in ("anneal", "crest"):
+            hit_sum[arm] += block["hits"][arm]
+        same = (
+            block["crest_hits_exceed_anneal_hits"] == pooled["crest_hits_exceed_anneal_hits"]
+            and block["call_ratio_below_one"] == pooled["call_ratio_below_one"]
+        )
+        assert block["pooled_result_holds"] is same
+    assert seeds == list(range(2000, 2012))
+    assert row_sum == payload["n"]["rows"] == 24
+    assert hit_sum == payload["hits"]
+    assert builds["6914a25"]["pooled_result_holds"] is False
+    assert builds["af7eb99"]["pooled_result_holds"] is True

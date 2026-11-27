@@ -44,6 +44,12 @@ Shard A anneal records d3c3e351e2bfd8c26a279943a26e5a8230467284. Shard B anneal 
 
 Crest cells are not the same string across shards. Shard A crest is 6914a25. Shard B crest is crest 3.0.2 6914a25; xtb 6.7.1 edcfbbe. Shard C crest is 3.0.2+6914a25. Shard D crest is crest:3.0.2(af7eb99) xtb:6.7.1(edcfbbe).
 
+## Crest builds
+
+The merged crest rows use two builds. Shards A, B and C record 6914a25. Shard D records af7eb99. Every merged row stays in the table.
+
 ## Summary
 
 `stats.py` compares anneal with crest. The two-sided Fisher exact test uses the hit counts. The two-sided Mann-Whitney test uses `calls`, with a miss stored as budget plus 1. The median ratio is the crest median of `calls` divided by the anneal median of `calls`. The interval is a percentile bootstrap of 10000 resamples from seed 20261123, linear quantiles, drawing the anneal indices and then the crest indices.
+
+`stats.json` splits hits and the call ratio by crest build. The pooled comparison has a higher crest hit count than the anneal hit count, and a call ratio below one. The nine-seed build has equal hit counts, so the pooled hit comparison does not hold there, and its call ratio stays below one. The three-seed build has a higher crest hit count and a call ratio below one, so the pooled comparison holds there.
