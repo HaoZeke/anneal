@@ -68,3 +68,5 @@ no-motif-soap-gate,on,hit
 openconf-h2h,branch,matched-call-count
 openconf-h2h,develop,matched-call-count
 openconf-h2h,openconf,matched-call-count
+b6-timing-gate,A,hit-or-budget
+b6-timing-gate,B,hit-or-budget
