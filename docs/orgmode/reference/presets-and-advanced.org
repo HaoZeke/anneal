@@ -351,7 +351,7 @@ A name that is not exported is not listed.
 - =DEFAULT_TARGET_WALKERS= :: default population size for the diffusion search (24).
 - =DEFAULT_STEPS_PER_CONTROL= :: diffusion steps between population updates (2).
 - =DEFAULT_BETA0= :: initial inverse-temperature scale for that population (1).
-- =IDENTITY_TOL= :: distance below which two box minima count as one (1e-3).
+- =IDENTITY_TOL= :: scaled max-norm that treats two quenched box points as one minimum (1e-3 times each coordinate width).
 - =COPPER_Z=, =GOLD_Z=, =PLATINUM_Z= :: atomic numbers for =Gupta= species labels.
 
 ** Presets, bounds, and histories
@@ -393,7 +393,8 @@ A name that is not exported is not listed.
 ** Search, polish, and sampling
 
 - =cluster_search= :: point-set search. The call is under Search surfaces above.
-- =ensemble_optimize=, =box_ensemble_optimize= :: design-box search. A gradient selects hop and quench.
+- =box_ensemble_optimize= :: design-box hop. Requires a gradient.
+- =ensemble_optimize= :: design-box search. A gradient selects hop and quench; without one, the search is values-only.
 - =global_optimize=, =global_optimize_objective= :: portfolio search. The objective form takes ~noise_sigma~ and ~policy~.
 - =minimize=, =MinimizeResult= :: SciPy-shaped box minimization and its result.
 - =low_discrepancy_points=, =pilot_draws_qmc= :: low-discrepancy points and pilot parameter draws.
