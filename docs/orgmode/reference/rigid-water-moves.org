@@ -70,8 +70,10 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
 - =rotate_step= :: largest =rrot= increment per component, or the cap of the =rorient= angle, in radians.
 - =local= :: =true= offers =rorient= in place of =rkick=, =rtrans=, =rrot=, =rtrans1=, =rreor= and =rreloc=.
 - =relocate= :: =true=, and =local= false, adds =rreloc=.
-- =reverse_cycles= :: =true= adds =rcycle= when a geometry is set and that geometry has a contact cycle.
-  The archive walk still reverses a chain from the declared bonds when that arm is absent.
+- =reverse_cycles= :: =true= adds =rcycle= when a geometry is set and =has_contact_cycles= is true
+  (src/methods/cluster_hopping/moves.rs:331).
+  With that arm off, the stalled archive walk still reverses a chain when that same test is true
+  (src/methods/cluster_hopping/stall_bridge.rs:67).
   A quench from that walk, or from the shell walk, can lower the published minimum.
   It does not reset the main chain's stall clock, it does not pay the move allocator, and a stall escape returns to a minimum the main chain quenched.
   A rigid search prints nothing. It returns the shell entries, the archive entries, and the auxiliary records kept or withheld in =Outcome::rigid_path=, and the Python =cluster_search= puts them in its =rigid_path= dict.
@@ -88,7 +90,8 @@ It labels the three sites 8, 1 and 1, so =rcycle= is on there too.
 
 * =rcycle= rules
 
-- The library offers =rcycle= for any geometry that has a contact cycle.
+- The library offers =rcycle= when =reverse_cycles= is on and =has_contact_cycles= is true
+  (src/methods/cluster_hopping/moves.rs:329).
   With no declared bonds, that cycle exists only when one site has atomic number 8 and two have atomic number 1.
   A declared bond graph does not need those atomic numbers.
 - A hydrogen bond is a donor site within the body's contact of another body's anchor.
