@@ -334,3 +334,90 @@ removed prior names when ~H2H_PRIORS~ is set in the process environment.
 - =run_hmc=, =run_qmc= (see =python/anneal/__init__.py= and the tests for the signatures).
 
 All return dicts with =best_pos=, =best_val=, =n_evals= (or the rich =History= / =DeviceHistory= / =EnsembleHistory= objects from =run= / =run_device=).
+
+* Public exports
+
+The Python names below are =anneal.__all__= plus the =anneal._core= stub list.
+Every crate-root re-export is on the [[file:rust-api.org][Rust API]] page.
+A name that is not exported is not listed.
+
+# BEGIN-PY-EXPORTS
+
+** Version, tolerances, and defaults
+
+- =__version__= :: installed package version string.
+- =DEFAULT_HIT_TOL= :: default one-sided target window (1e-3).
+- =SEARCH_HIT_TOL= :: cluster-search target window (1e-4).
+- =DEFAULT_TARGET_WALKERS= :: default population size for the diffusion search (24).
+- =DEFAULT_STEPS_PER_CONTROL= :: diffusion steps between population updates (2).
+- =DEFAULT_BETA0= :: initial inverse-temperature scale for that population (1).
+- =IDENTITY_TOL= :: distance below which two box minima count as one (1e-3).
+- =COPPER_Z=, =GOLD_Z=, =PLATINUM_Z= :: atomic numbers for =Gupta= species labels.
+
+** Presets, bounds, and histories
+
+- =Boltzmann=, =Fast=, =Gsa= :: logarithmic, reciprocal, and Tsallis presets.
+- =Bounds= :: lower and upper box bounds.
+- =History=, =EpochLine= :: classical-run trace and one epoch row.
+- =DeviceHistory=, =EnsembleHistory= :: histories from =run_device= and =run_ensemble=.
+- =run=, =run_qmc=, =run_hmc= :: classical, quasi-Monte Carlo, and Hamiltonian Monte Carlo drivers.
+- =run_device=, =run_ensemble= :: single-chain and batched device drivers.
+- =_run_device=, =_run_device_ensemble= :: extension entry points wrapped by =run_device= and =run_ensemble=.
+
+** Objectives and cluster potentials
+
+- =PyObjective= :: native objective over a Python callable and an optional gradient.
+- =BasinBias= :: well-tempered bias keyed by structural basin identity.
+- =PairPotential= :: Lennard-Jones or Morse pair potential.
+- =BinaryLennardJones= :: two-species Lennard-Jones potential.
+- =SuttonChen= :: Sutton-Chen metal potential.
+- =Gupta= :: Gupta metal potential.
+- =Tip4pCluster= :: rigid TIP4P cluster potential.
+- =GminTip4p= :: GMIN rigid TIP4P potential.
+- =Config=, =Ledger= :: cluster-search configuration and charged-call ledger.
+- =PotentialCalculator= :: ASE calculator over a built-in potential or objective.
+- =Anneal= :: ASE optimizer for a local quench or a cluster search.
+
+** Cluster geometry
+
+- =energy_hits= :: one-sided target test. True when the energy is at or below the target plus the tolerance.
+- =recommend_target_n= :: walker count from an evaluation budget and a dimension.
+- =rigid_from_ohh= :: Cartesian (O, H, H) triples to block Rodrigues coordinates.
+- =energy_ohh= :: rigid TIP4P energy of Cartesian (O, H, H) coordinates.
+- =block_from_interleaved_gmin= :: interleaved GMIN rows to block centres, then rotations.
+- =interleaved_gmin_from_block= :: block centres and rotations to interleaved GMIN rows.
+- =gmin_tip4p_sites= :: reference body-frame sites (O, H, H, M).
+- =osa_acceptance_rate= :: empirical noise-aware acceptance rate for a noisy cost gap.
+- =quench= :: local relaxation used by a molecular cluster search.
+
+** Search, polish, and sampling
+
+- =cluster_search= :: point-set search. The call is under Search surfaces above.
+- =ensemble_optimize=, =box_ensemble_optimize= :: design-box search. A gradient selects hop and quench.
+- =global_optimize=, =global_optimize_objective= :: portfolio search. The objective form takes ~noise_sigma~ and ~policy~.
+- =minimize=, =MinimizeResult= :: SciPy-shaped box minimization and its result.
+- =low_discrepancy_points=, =pilot_draws_qmc= :: low-discrepancy points and pilot parameter draws.
+- =polish=, =qmc_polish=, =qmc_polish_objective=, =shifted_qmc_polish= :: bounded L-BFGS polish from a start or from low-discrepancy starts.
+- =qmc_best1bin_scout=, =qmc_best1bin_scout_objective= :: best/1/bin differential-evolution scout from low-discrepancy points.
+- =qmc_gsa_global_search=, =qmc_gsa_global_search_objective= :: generalized simulated annealing from low-discrepancy starts.
+- =qmc_trust_region_poll=, =qmc_trust_region_poll_objective= :: shifted low-discrepancy poll around a center.
+- =additive_independence= :: rank-1 separable surrogate sampler.
+- =estimate_gle_omega0= :: local frequency estimate for colored-noise Langevin.
+- =gle_langevin=, =gle_langevin_objective=, =gle_langevin_preconditioned=, =gle_langevin_preconditioned_objective= :: colored-noise Langevin drivers. The preconditioned pair adapts a diagonal coordinate scaling.
+- =dmc_population_optimize= :: population diffusion search. ~target_n~ defaults through =recommend_target_n=, ~steps_per_control~ through =DEFAULT_STEPS_PER_CONTROL=, and ~beta0~ through =DEFAULT_BETA0=.
+- =gpmd_optimize=, =amsa_optimize=, =bfwt_optimize= :: standalone Metropolis helpers used as portfolio arms.
+- =open_parameter_store=, =JsonlParameterStore=, =Hdf5ParameterStore= :: JSON-lines and HDF5 parameter archives.
+
+** Landscape maps and tensor exchange
+
+- =LandfoldMap=, =landfold=, =landfold_book= :: sketch-map of descriptor rows or of minima books.
+- =TvmFfiTensorMetadata=, =tvm_ffi_tensor=, =tvm_ffi_tensor_metadata=, =tvm_ffi_tensors_from_history= :: DLPack tensor metadata and conversion.
+
+** ChemFit bridge
+
+- =ChemFitVector= :: flat view of nested ChemFit parameters.
+- =flatten_parameters=, =unflatten_parameters= :: flatten a parameter dictionary and rebuild it.
+- =chemfit_box= :: finite box from ChemFit bounds.
+- =fit_anneal=, =fit_chemfit=, =run_fitter=, =run_benchmark= :: gradient-free ChemFit optimization.
+
+# END-PY-EXPORTS
