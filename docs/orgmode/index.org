@@ -89,6 +89,7 @@ See the [[file:architecture.org][architecture]] page for the five signatures and
    howto/chemfit
    howto/precision-policy
    howto/morse-clusters
+   howto/panel-examples
    howto/rgmin-lbfgs
    howto/tip4p-cycle-reversal
    howto/landfold

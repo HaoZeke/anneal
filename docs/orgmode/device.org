@@ -24,6 +24,11 @@ history = run_device(objective, low, high, Boltzmann(t_init=5.0, sigma=0.5),
 # history.best_pos is a CuPy array on device 0
 #+end_src
 
+The objective must return a scalar Array API array.
+The runner converts it into the bounds namespace.
+A Python float, int, bool, or complex raises =ValueError=.
+A NumPy scalar is accepted and converted.
+
 * Batched ensemble runner
 
 A single chain underuses a GPU: one vector per step is kernel-launch bound.
@@ -37,6 +42,9 @@ history = run_ensemble(batched_objective, low, high, Fast(t_init=5.0, gamma=0.5)
                        n_chains=16384, n_epochs=40, steps_per_epoch=150, seed=0)
 best = history.global_best_val   # min over the per-chain bests
 #+end_src
+
+The ensemble objective must return an Array API array of shape =(n_chains,)=.
+A Python float, int, bool, or complex raises =ValueError=.
 
 On a consumer GPU the batched ensemble reaches the same global minimum as the NumPy backend; the GPU carries a fixed per-run kernel cost of a few seconds, so the CPU is faster for narrow ensembles, but the GPU overtakes it once the ensemble is wide enough.
 The speedup is an ensemble-width effect and is the same for the Boltzmann, Fast, and Generalized presets because they share the one backend.

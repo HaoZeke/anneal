@@ -73,6 +73,10 @@ print("Shifted-QMC polish best:", out_s["best_val"])
 
 * Step 3: Device and ensemble (identical kernel)
 
+A single-chain objective must return a scalar Array API array.
+A Python float, int, bool, or complex raises =ValueError=.
+The ensemble objective is called on shape =(n_chains, dim)= and must return shape =(n_chains,)=.
+
 #+begin_src python
 from anneal import run_device, run_ensemble
 

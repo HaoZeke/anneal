@@ -46,7 +46,7 @@ The figure is written to =build/morse6/morse6-hits.svg= from that file.
 - Sizes: N = 35, 37, 43, 44 and 60 at rho = 6.
 - Seeds: 12000 to 12015.
 - Budget: 100000 calls per run.
-- Hit: within 1e-3 of the Cambridge table's energy, with every gradient component at most 1e-3.
+- Hit: an energy at or below the Cambridge table energy plus 1e-3, and every gradient component at most 1e-3. The energy test is =energy_hits=.
 
 To reproduce:
 
@@ -56,3 +56,5 @@ cargo run --release --example morse_table -- \
 #+end_src
 
 Append =reduced= to run =Config::recommended= on reduced units.
+
+=Config::for_cluster_with_scales= is =Config::for_cluster= at a caller-supplied length and energy.
