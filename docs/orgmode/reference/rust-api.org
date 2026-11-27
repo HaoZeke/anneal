@@ -84,6 +84,5 @@ assert!(energy_hits(-10.0 + DEFAULT_HIT_TOL, -10.0, DEFAULT_HIT_TOL));
 assert!(qmc_skip_from_seed(7) > 0);
 assert!(beta_step_for_acceptance(2.0, TARGET_SWAP_ACCEPT) > 0.0);
 #+end_src
-```
 
 # END-RUST-EXPORTS
