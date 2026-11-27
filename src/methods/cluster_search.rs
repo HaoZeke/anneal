@@ -214,6 +214,21 @@ struct Check {
     gradient: Array1<f64>,
 }
 
+impl Check {
+    /// Write `at`, `energy`, and `gradient` into the buffers already stored.
+    ///
+    /// A different length is left untouched so the caller can allocate.
+    fn replace(&mut self, at: ArrayView1<f64>, energy: f64, gradient: &Array1<f64>) -> bool {
+        if self.at.len() != at.len() || self.gradient.len() != gradient.len() {
+            return false;
+        }
+        self.at.assign(&at);
+        self.energy = energy;
+        self.gradient.assign(gradient);
+        true
+    }
+}
+
 /// Gradient already charged by a relaxation, shared with the driver's check.
 #[derive(Clone)]
 struct PaidCheck(Arc<Mutex<Option<Check>>>);
@@ -1002,11 +1017,19 @@ where
                                 gradient: &Array1<f64>,
                                 physical: bool| {
                     if physical {
-                        *last.borrow_mut() = Some(Check {
-                            at: point.to_owned(),
-                            energy,
-                            gradient: gradient.clone(),
-                        });
+                        let mut slot = last.borrow_mut();
+                        let reused = match slot.as_mut() {
+                            Some(check) => check.replace(point, energy, gradient),
+                            None => false,
+                        };
+                        if !reused {
+                            *slot = Some(Check {
+                                at: point.to_owned(),
+                                energy,
+                                gradient: gradient.clone(),
+                            });
+                        }
+                        drop(slot);
                         if energy.is_finite()
                             && best_physical
                                 .borrow()
@@ -1244,7 +1267,7 @@ where
                     // `f` is the extrapolated energy, so the stored check is the
                     // descent's own evaluation at `xr`.
                     *paid.lock().expect("paid check") =
-                        last.borrow().clone().filter(|check| check.at == xr);
+                        last.borrow_mut().take().filter(|check| check.at == xr);
                     return (f, xr);
                 }
                 // Charged like any other evaluation: asking whether a relaxation
@@ -1254,12 +1277,15 @@ where
                 // and so does one whose last paid evaluation is where it stopped.
                 let mut f = f;
                 let mut xr = xr;
-                let stored_gradient = |point: &Array1<f64>| -> Option<Array1<f64>> {
-                    last.borrow()
-                        .clone()
-                        .filter(|check| check.at == *point)
-                        .or_else(|| prior.clone().filter(|check| check.at == *point))
-                        .map(|check| check.gradient)
+                let stored_gradient = |point: ArrayView1<f64>| -> Option<Array1<f64>> {
+                    if let Some(check) = last.borrow().as_ref()
+                        && check.at.view() == point
+                    {
+                        return Some(check.gradient.clone());
+                    }
+                    prior.as_ref().and_then(|check| {
+                        (check.at.view() == point).then(|| check.gradient.clone())
+                    })
                 };
                 let mut validated = None;
                 let confirm = |led: &mut Ledger,
@@ -1274,9 +1300,7 @@ where
                     if !energy.is_finite() {
                         return None;
                     }
-                    if reuse_confirm_gradient
-                        && let Some(gradient) = stored_gradient(&point.to_owned())
-                    {
+                    if reuse_confirm_gradient && let Some(gradient) = stored_gradient(point) {
                         return gradient_is_converged(gradient.view(), cfg.record_gradient)
                             .then_some(gradient);
                     }
@@ -1392,7 +1416,7 @@ where
                         energy: f,
                         gradient,
                     })
-                    .or_else(|| last.borrow().clone().filter(|check| check.at == xr));
+                    .or_else(|| last.borrow_mut().take().filter(|check| check.at == xr));
                 (f, xr)
             },
         )
@@ -3150,6 +3174,65 @@ mod tests {
     use super::*;
     use crate::potentials::PairPotential;
     use ndarray::Array1;
+
+    /// A replaced check keeps the same buffers and the same bits as a
+    /// freshly allocated check. The recommended four-atom walk keeps
+    /// the charged total and the encounters recorded on this base.
+    #[test]
+    fn reusing_a_paid_check_keeps_the_search_result() {
+        let mut check = Check {
+            at: Array1::from_vec(vec![1.0, 2.0, 3.0]),
+            energy: 4.0,
+            gradient: Array1::from_vec(vec![5.0, 6.0, 7.0]),
+        };
+        let at_storage = check.at.as_ptr();
+        let gradient_storage = check.gradient.as_ptr();
+        let at = Array1::from_vec(vec![8.0, 9.0, 10.0]);
+        let gradient = Array1::from_vec(vec![11.0, 12.0, 13.0]);
+        let energy = 14.0;
+        let fresh = Check {
+            at: at.clone(),
+            energy,
+            gradient: gradient.clone(),
+        };
+
+        assert!(check.replace(at.view(), energy, &gradient));
+        assert_eq!(check.at.as_ptr(), at_storage);
+        assert_eq!(check.gradient.as_ptr(), gradient_storage);
+        assert_eq!(check.energy.to_bits(), fresh.energy.to_bits());
+        assert_eq!(check.at, fresh.at);
+        assert_eq!(check.gradient, fresh.gradient);
+        for (left, right) in check.at.iter().zip(fresh.at.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        for (left, right) in check.gradient.iter().zip(fresh.gradient.iter()) {
+            assert_eq!(left.to_bits(), right.to_bits());
+        }
+        assert!(check.at.view() == at.view());
+        let other = Array1::from_vec(vec![8.0, 9.0, 11.0]);
+        assert!(check.at != other);
+        assert!(check.at.view() != other.view());
+        let short = Array1::from_vec(vec![1.0]);
+        assert!(!check.replace(short.view(), 0.0, &gradient));
+        assert_eq!(check.at.as_ptr(), at_storage);
+        assert_eq!(check.energy.to_bits(), energy.to_bits());
+        assert_eq!(check.at, at);
+
+        let potential = PairPotential::lennard_jones(4);
+        let recommended = Config::recommended(4);
+        let mut ledger = Ledger::new(2_000);
+        let (out, _) =
+            search_lennard_jones(&potential, &recommended, &mut ledger, 1).expect("search");
+        assert_eq!(ledger.spent(), 2000);
+        assert_eq!(out.charged, ledger.spent());
+        assert_eq!(ledger.charges().total(), ledger.spent());
+        assert_eq!(ledger.charges().unnamed, 0);
+        assert_eq!(
+            format!("{:?}", ledger.encounters()),
+            "[(57, -5.999999998900713), (706, -5.9999999998457785)]"
+        );
+        assert_eq!(out.best.to_bits(), ledger.encounters()[1].1.to_bits());
+    }
 
     /// A dropped status leaves a zero force. That force is not a converged
     /// evaluation of a non-finite energy.
