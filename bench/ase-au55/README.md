@@ -16,14 +16,13 @@ the full call budget, so its call count is right-censored at `charged`.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | anneal | 0/12 | 1 | -190.81083051 | 0.22002228 | 33.279924 | 1.000000 | 1.000000 | 27.704543 | 5.575382 |
 | recommended | 0/12 | 1 | -190.98001732 | 0.05083548 | 36.000117 | 1.081737 | 0.924439 | 28.228509 | 7.807164 |
-| basin hopping | 0/12 | — | -189.79900994 | 1.23184286 | 107.930215 | 3.243103 | 0.308347 | 15.963161 | 91.967020 |
-| minima hopping | 0/12 | — | -190.29395447 | 0.73689833 | 110.328913 | 3.315179 | 0.301643 | 2.350913 | 107.935484 |
+| basin hopping | 0/12 | — | -189.79900994 | 1.23184286 | 107.930215 | — | — | 15.963161 | 91.967020 |
+| minima hopping | 0/12 | — | -190.29395447 | 0.73689833 | 110.328913 | — | — | 2.350913 | 107.935484 |
 
 Basin hopping stopped at the wall cap on 12/12 seeds; those rows charged 522,329-590,386 calls.
 Minima hopping stopped at the wall cap on 12/12 seeds; those rows charged 72,762-86,949 calls.
 
-The Fisher cells are blank where the stops differ, and there is no paired test.
-Wall ratios are omitted where the arms do not share a stop.
+Ratios and tests are printed only for same-stop pairs.
 
 | comparison | hits | Fisher p |
 | --- | --- | --- |

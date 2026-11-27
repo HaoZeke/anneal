@@ -89,6 +89,24 @@ def test_au_length_comes_from_the_evaluator(monkeypatch):
     assert '"length"' not in RUNNER_PATH.read_text()
 
 
+def test_a_ratio_cell_follows_the_stop_mix():
+    _summary, report = SUMMARY.render("lj55")
+    assert "Ratios and tests are printed only for same-stop pairs." in report
+    rows = {}
+    for line in report.splitlines():
+        if not line.startswith("| ") or line.startswith("| ---") or line.startswith("| arm"):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        rows[cells[0]] = cells
+    assert rows["recommended"][6] == "0.065000"
+    assert rows["basin hopping"][6] == "—"
+    assert rows["minima hopping"][7] == "—"
+    _summary, lj38 = SUMMARY.render("lj38")
+    assert "| recommended | hit | 12/12 |" in lj38
+    assert "| anneal | hit or budget | 10/12 |" in lj38
+    assert "The stops differ, and there is no paired test." in lj38
+
+
 def test_wall_cap_call_ranges_report_wall_stops_only():
     _summary, report = SUMMARY.render("lj55")
     grouped = SUMMARY.load("lj55")

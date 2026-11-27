@@ -216,10 +216,10 @@ UNVERIFIABLE = [
      '| anneal | 0/6 | 55.299841 | -396.282249 | 1.210082 | 1.000000 | 1.000000 |',
      ('0a5136605161', 'ccc22cee607b'), WHY_OLD),
     ('bench/ase-lj75/README.md',
-     '| basin hopping | 0/12 | — | — | — | -393.72607097 | 3.76626003 | 89.907831 | 1.760879 | 0.567898 | 46.580477 | 43.358141 |',
+     '| basin hopping | 0/12 | — | — | — | -393.72607097 | 3.76626003 | 89.907831 | — | — | 46.580477 | 43.358141 |',
      ('162d230740f0', '8173c5e2855b'), WHY_OLD),
     ('bench/ase-lj75/README.md',
-     '| minima hopping | 0/12 | — | — | — | -391.70068193 | 5.79164907 | 172.344747 | 3.375083 | 0.296295 | 0.943898 | 171.463289 |',
+     '| minima hopping | 0/12 | — | — | — | -391.70068193 | 5.79164907 | 172.344747 | — | — | 0.943898 | 171.463289 |',
      ('162d230740f0', '8173c5e2855b'), WHY_OLD),
     ('bench/covalent-h2h/README.md',
      '| Si10 | anneal G | 12/12 | reference or 1e5 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |',
@@ -5809,8 +5809,11 @@ def cover_letter(audit: Audit) -> None:
         audit.record(word not in audit.text(COVER), COVER, f"the cover letter does not list {word}", "absent",
                      "absent" if word not in audit.text(COVER) else "present")
     audit.said(COVER, "The independently started comparisons with the Atomic\n"
-                      "Simulation Environment are reported descriptively because the arms do not\n"
-                      "share one stop and do not share starts.")
+                      "Simulation Environment share one numeric call ceiling and wall cap\n"
+                      "within a cluster.\n"
+                      "They are reported descriptively because the starts are unpaired and\n"
+                      "runs reaching the shared cap are censored, so no cross-arm\n"
+                      "significance test is reported.")
     audit.said(COVER, "Every printed number is computed from rows committed to the repository.")
 
 
@@ -8053,6 +8056,23 @@ APPEND_ONLY_RECORDS = {
 }
 
 
+AGOX_RATIO_SUMMARY = "bench/agox-lj98/summary.csv"
+
+
+def _kept_summary_fields(text: str) -> list[str]:
+    """Hit count and median wall, without a wall-ratio column."""
+    kept = []
+    for line in text.splitlines():
+        if not line:
+            continue
+        parts = line.split(",")
+        if parts[0] == "code":
+            kept.append("code,hits,n,median_wall_s")
+        else:
+            kept.append(",".join(parts[:4]))
+    return kept
+
+
 def touched_record_paths(base: str) -> set[str]:
     """Every csv and jsonl path named from base to HEAD, including one absent at HEAD.
 
@@ -8130,10 +8150,17 @@ def append_only_rows(audit: Audit) -> None:
                 continue
             old_lines = shown.stdout.splitlines(keepends=True)
             allowed = _upstream_removed_lines(ref, base_ref, path)
-            if len(cur_lines) < len(old_lines) - len(allowed.intersection(old_lines)):
-                rewritten.append(f"{ref}: truncated ({len(cur_lines)} < {len(old_lines)} lines)")
+            compared_old, compared_cur = old_lines, cur_lines
+            if path == AGOX_RATIO_SUMMARY:
+                # The hit count and the median wall stay. The ratio columns do not:
+                # the arms do not share a stop.
+                compared_old = [line + "\n" for line in _kept_summary_fields(shown.stdout)]
+                compared_cur = [line + "\n" for line in _kept_summary_fields("".join(cur_lines))]
+                allowed = set()
+            if len(compared_cur) < len(compared_old) - len(allowed.intersection(compared_old)):
+                rewritten.append(f"{ref}: truncated ({len(compared_cur)} < {len(compared_old)} lines)")
                 continue
-            idx = _first_rewritten_line(old_lines, cur_lines, allowed)
+            idx = _first_rewritten_line(compared_old, compared_cur, allowed)
             if idx is not None:
                 rewritten.append(f"{ref}: line {idx} rewritten")
         audit.record(
@@ -8162,7 +8189,25 @@ def append_only_rows(audit: Audit) -> None:
             "log", "-p", "--no-renames", "--format=", f"{base}..HEAD", "--",
             *history_paths,
         ).stdout.splitlines() if history_paths else []
-        removed = [line for line in history if line.startswith("-") and not line.startswith("---")]
+        ratio_cores_held = False
+        if AGOX_RATIO_SUMMARY in history_paths and (ROOT / AGOX_RATIO_SUMMARY).is_file():
+            shown = git("show", f"{base}:{AGOX_RATIO_SUMMARY}")
+            if shown.returncode == 0:
+                ratio_cores_held = (
+                    _kept_summary_fields(shown.stdout)
+                    == _kept_summary_fields((ROOT / AGOX_RATIO_SUMMARY).read_text())
+                )
+        removed = []
+        diff_path = ""
+        for line in history:
+            match = re.match(r"diff --git a/(\S+) b/", line)
+            if match:
+                diff_path = match.group(1)
+                continue
+            if line.startswith("-") and not line.startswith("---"):
+                if ratio_cores_held and diff_path == AGOX_RATIO_SUMMARY:
+                    continue
+                removed.append(line)
         audit.record(
             not removed,
             "record-file history",
@@ -9165,6 +9210,70 @@ def cross_document_equations(audit: Audit) -> None:
         audit.record(False, "paper/jctc", "a cross-document equation reference", "present", "none")
 
 
+def wall_ratios_follow_stops(audit: Audit) -> None:
+    """A printed wall ratio requires the two arms to record the same stop mix."""
+    panel = load_script("ase_panel_ratios", "scripts/ase_panel/summarize.py")
+    labels = {label: arm for arm, label in panel.LABELS.items()}
+    for system in panel.SYSTEMS:
+        _ratio_table(audit, f"bench/ase-{system}/README.md", panel.load(system), panel.stop_mix, labels)
+    # The LJ75 summarizer imports scipy. The stop mix is the row column, so this
+    # check reads the rows and does not import that module.
+    lj75_rows = [
+        row for row in audit.rows("bench/ase-lj75/rows.csv")
+        if row["system"] == "lj75" and row["budget"] == "4000000" and row["host"] == "bench"
+    ]
+    lj75_grouped: dict[str, list[dict[str, str]]] = {}
+    for row in lj75_rows:
+        lj75_grouped.setdefault(row["arm"], []).append(row)
+    _ratio_table(
+        audit,
+        "bench/ase-lj75/README.md",
+        lj75_grouped,
+        panel.stop_mix,
+        {"anneal": "anneal", "basin hopping": "ase_bh", "minima hopping": "ase_mh"},
+    )
+    summary = audit.text(AGOX_RATIO_SUMMARY)
+    readme = audit.text("bench/agox-lj98/README.md")
+    leaked = [token for token in ("median_over_anneal", "87.498181", "103.653286") if token in summary or token in readme]
+    audit.record(not leaked, "bench/agox-lj98/README.md", "wall ratio across differing stops",
+                 "absent", " ".join(leaked) or "absent")
+    audit.record("prints no wall ratio" in readme, "bench/agox-lj98/README.md",
+                 "the note says the arms do not share a stop", "present",
+                 "present" if "prints no wall ratio" in readme else "absent")
+
+
+def _ratio_table(audit: Audit, path: str, grouped: dict, mix, labels: dict[str, str]) -> None:
+    text = audit.text(path)
+    ratio_names = ("over anneal", "anneal over", "median wall ratio", "inverse ratio")
+    for header, rows in _markdown_tables(text):
+        indexes = [header.index(name) for name in ratio_names if name in header]
+        if not indexes:
+            continue
+        for _line, cells in rows:
+            left, right = _ratio_arms(cells[0], labels)
+            if left is None or right is None or left not in grouped or right not in grouped:
+                continue
+            same = mix(grouped[left]) == mix(grouped[right])
+            for index in indexes:
+                if index >= len(cells):
+                    continue
+                cell = cells[index].strip()
+                if same:
+                    audit.record(cell not in {"", "—"}, path, "same-stop wall ratio", cell, "a ratio")
+                else:
+                    audit.record(cell == "—", path, "wall ratio across differing stops", cell, "—")
+
+
+def _ratio_arms(label: str, labels: dict[str, str]) -> tuple[str | None, str | None]:
+    text = label.strip()
+    if text in labels and text != "anneal":
+        return labels[text], "anneal"
+    if text.startswith("recommended against "):
+        other = labels.get(text.removeprefix("recommended against "))
+        return ("recommended", other) if other else (None, None)
+    return None, None
+
+
 def run(report: bool = False, write_map: bool = False, pre_submission: bool = False) -> int:
     problems = unauditable()
     if problems:
@@ -9185,7 +9294,7 @@ def run(report: bool = False, write_map: bool = False, pre_submission: bool = Fa
         g3_session, no_move_choice_claim,
         reproduction_records, sutton_chen, crest_equal, crest_equal_bench, crest_table, gmin_tuned,
         morse_m70_pair, rerun_summaries,
-        append_only_rows, tip4p_unscored, tip4p_r2_rows, pending_text, citation_metadata,
+        append_only_rows, wall_ratios_follow_stops, tip4p_unscored, tip4p_r2_rows, pending_text, citation_metadata,
                   figure_source_scripts, bibliography_keys, conversion_literals,
                   own_references, build_receipts, cross_document_equations, selection_tables, gmin_panel_drivers, prior_switches,
                   method_definitions, au55_superseded, cap_turn_campaign):

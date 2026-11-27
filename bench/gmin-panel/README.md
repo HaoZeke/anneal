@@ -77,8 +77,8 @@ both inside and outside rates stayed within the other seeds of the same
 system and arm. On LJ98 GMIN seed 2000 (wall 194.9 s), `pot_s` stayed at
 161.9 s while `outside_s` rose to 33.0 s against 19.4-24.8 s on the other
 eleven seeds, and LJ98 GMIN seed 2005 right after the third resume took
-225.3 s (inside 200.5 s); because both LJ98 arms carry misses, `MW p wall`
-is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
+225.3 s (inside 200.5 s). No Mann-Whitney value is printed, because the two
+arms do not share a stop, and `hit` and `evals_to_hit` are unaffected.
 
 - `rows.csv`: one row per run, appended and never rewritten; `--summarize`
   scores the latest stored row of each seed. `code_revision` is the anneal

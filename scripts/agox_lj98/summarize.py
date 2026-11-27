@@ -65,6 +65,13 @@ def by_code(rows: list[dict[str, str]], code: str) -> list[dict[str, str]]:
     return chosen
 
 
+def stop_mix(rows: list[dict[str, str]]) -> tuple[int, int]:
+    """Hits, then full-budget misses. These rows have no stop column."""
+    hits = sum(row["hit"] == "1" for row in rows)
+    budget = sum(row["hit"] != "1" and row["charged"] == row["budget"] for row in rows)
+    return hits, budget
+
+
 def paired_ratio(left: list[dict[str, str]], right: list[dict[str, str]]) -> list[float]:
     ratios = []
     for one, other in zip(left, right):
@@ -81,25 +88,31 @@ def main() -> None:
     rows = load()
     grouped = {code: by_code(rows, code) for code in CODES}
     anneal = grouped["anneal"]
-    lines = [
-        "code,hits,n,median_wall_s,median_over_anneal,median_anneal_over",
-    ]
+    anneal_mix = stop_mix(anneal)
+    shared = all(stop_mix(grouped[code]) == anneal_mix for code in CODES)
+    header = "code,hits,n,median_wall_s"
+    if shared:
+        header += ",median_over_anneal,median_anneal_over"
+    lines = [header]
     print("LJ98 seeds 6400-6405, budget 4000000, host bench")
+    if not shared:
+        print("The arms do not share one stop, so this note prints no wall ratio.")
     for code in CODES:
         group = grouped[code]
         hits = sum(int(row["hit"]) for row in group)
         wall = median([float(row["wall_s"]) for row in group])
-        if code == "anneal":
-            over = 1.0
-            back = 1.0
-        else:
-            over = median(paired_ratio(group, anneal))
-            back = median(paired_ratio(anneal, group))
-        print(
-            f"{code} hits {hits}/6 median_wall_s {wall:.6f} "
-            f"median_over_anneal {over:.6f} median_anneal_over {back:.6f}"
-        )
-        lines.append(f"{code},{hits},6,{wall:.6f},{over:.6f},{back:.6f}")
+        text = f"{code} hits {hits}/6 median_wall_s {wall:.6f}"
+        row = f"{code},{hits},6,{wall:.6f}"
+        if shared:
+            if code == "anneal":
+                over = back = 1.0
+            else:
+                over = median(paired_ratio(group, anneal))
+                back = median(paired_ratio(anneal, group))
+            text += f" median_over_anneal {over:.6f} median_anneal_over {back:.6f}"
+            row += f",{over:.6f},{back:.6f}"
+        print(text)
+        lines.append(row)
     SUMMARY.write_text("\n".join(lines) + "\n")
 
 

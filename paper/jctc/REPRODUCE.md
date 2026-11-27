@@ -45,7 +45,7 @@ not say that `achemso-control` was missing.
 tectonic and pdfTeX break lines differently, so the poppler body counts
 differ slightly. The receipt records the tectonic count. `--check` compares
 pages with that receipt and does not ask the body counts to be equal. The
-measured body counts are 6822 words with tectonic and 6814 words
+measured body counts are 6860 words with tectonic and 6852 words
 with pdfTeX.
 
 ## Benchmark panels

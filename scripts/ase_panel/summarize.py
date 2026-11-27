@@ -207,6 +207,35 @@ def joined(rows: list[dict[str, str]], key: str) -> str:
     return ", ".join(dict.fromkeys(row[key] for row in rows))
 
 
+def stop_mix(rows: list[dict[str, str]]) -> tuple[int, int, int]:
+    """Hit, budget, and wall counts. A ratio needs this mix to match."""
+    return (
+        sum(row.get("stop") == "hit" for row in rows),
+        sum(row.get("stop") == "budget" for row in rows),
+        sum(row.get("stop") == "wall" for row in rows),
+    )
+
+
+def stop_phrase(rows: list[dict[str, str]]) -> str:
+    """The stop the rows record, read from the stop column."""
+    hit, budget, wall = stop_mix(rows)
+    count = len(rows)
+    if wall == count:
+        return f"wall cap on {wall}"
+    if hit == count:
+        return "hit"
+    if budget == count:
+        return "budget"
+    parts = []
+    if hit:
+        parts.append("hit")
+    if budget:
+        parts.append("budget")
+    if wall:
+        parts.append("wall")
+    return " or ".join(parts)
+
+
 def render(system: str) -> tuple[str, str]:
     _, budget, reference, title = SYSTEMS[system]
     grouped = load(system)
@@ -292,41 +321,36 @@ def render(system: str) -> tuple[str, str]:
             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
         ])
     def signature(arm: str) -> tuple[int, int, int]:
-        group = grouped[arm]
-        return (
-            sum(row.get("stop") == "hit" for row in group),
-            sum(row.get("stop") == "budget" for row in group),
-            sum(row.get("stop") == "wall" for row in group),
-        )
+        return stop_mix(grouped[arm])
 
     stop_notes = []
     for (
         arm, hits, best, wall, inside, outside, over, back, fisher_p,
         wall_stops, cap, low_charged, high_charged, versus,
     ) in reports:
+        same_stop = signature(arm) == signature("anneal")
         if system == "lj38":
-            stop = "hit or budget" if arm in ("anneal", "recommended") else f"wall cap on {wall_stops}"
             report.append(
-                f"| {LABELS[arm]} | {stop} | {hits}/12 | {best:.8f} | {best - reference:.8f} | "
-                f"{wall:.6f} | {inside:.6f} | {outside:.6f} |"
+                f"| {LABELS[arm]} | {stop_phrase(grouped[arm])} | {hits}/12 | {best:.8f} | "
+                f"{best - reference:.8f} | {wall:.6f} | {inside:.6f} | {outside:.6f} |"
             )
         else:
+            # A wall ratio is a paired comparison. Blank it when the stop mix differs.
+            fisher_cell = fisher_p if same_stop else "—"
+            over_cell = f"{over:.6f}" if same_stop else "—"
+            back_cell = f"{back:.6f}" if same_stop else "—"
             report.append(
-                f"| {LABELS[arm]} | {hits}/12 | {fisher_p} | {best:.8f} | {best - reference:.8f} | "
-                f"{wall:.6f} | {over:.6f} | {back:.6f} | {inside:.6f} | {outside:.6f} |"
+                f"| {LABELS[arm]} | {hits}/12 | {fisher_cell} | {best:.8f} | {best - reference:.8f} | "
+                f"{wall:.6f} | {over_cell} | {back_cell} | {inside:.6f} | {outside:.6f} |"
             )
         if wall_stops:
             stop_notes.append(
                 f"{LABELS[arm].capitalize()} stopped at the wall cap on {wall_stops}/12 seeds; "
                 f"those rows charged {low_charged:,}-{high_charged:,} calls."
             )
-        # LJ38 keeps the wall-stop blank from the earlier report. Other systems
-        # blank a Fisher cell when the hit, budget, and wall counts differ.
-        # The summary CSV keeps the computed p.
-        if system == "lj38":
-            if wall_stops == 12:
-                report[-1] = report[-1].replace(f"| {fisher_p} |", "| — |", 1)
-        elif signature(arm) != signature("anneal"):
+        # The summary CSV keeps the computed p and the computed wall ratios.
+        # The note prints a test or a ratio only when the stop mixes match.
+        if system == "lj38" and wall_stops == 12:
             report[-1] = report[-1].replace(f"| {fisher_p} |", "| — |", 1)
     recommended = next(item for item in reports if item[0] == "recommended")
     recommended_hits = recommended[1]
@@ -334,6 +358,7 @@ def render(system: str) -> tuple[str, str]:
     mixed_wall = any(signature(item[0]) != signature("anneal") for item in reports) or any(
         signature(other) != signature("recommended") for other in ASE_ARMS
     )
+    pair_shared = any(signature(other) == signature("recommended") for other in ASE_ARMS)
     if system == "lj38":
         report.extend(["", *stop_notes, "",
             "Basin hopping and minima hopping stopped at the wall on every seed.",
@@ -342,13 +367,19 @@ def render(system: str) -> tuple[str, str]:
             "NumPy random generators do not make a shared starting geometry from the",
             "same numeric seed, so the report does not treat seed labels as pairs.",
         ])
-    elif mixed_wall:
+    elif mixed_wall and not pair_shared:
         report.extend(["", *stop_notes, "",
-            "The Fisher cells are blank where the stops differ, and there is no paired test.",
-            "Wall ratios are omitted where the arms do not share a stop.",
+            "Ratios and tests are printed only for same-stop pairs.",
             "",
             "| comparison | hits | Fisher p |",
             "| --- | --- | --- |",
+        ])
+    elif mixed_wall:
+        report.extend(["", *stop_notes, "",
+            "Ratios and tests are printed only for same-stop pairs.",
+            "",
+            "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
+            "| --- | --- | --- | --- | --- |",
         ])
     else:
         report.extend(["", *stop_notes, "",
@@ -361,22 +392,26 @@ def render(system: str) -> tuple[str, str]:
         other_report = next(item for item in reports if item[0] == other)
         other_hits = other_report[1]
         fisher_text = recommended_versus[other]
+        same_pair = signature(other) == signature("recommended")
         if system == "lj38":
             if other_report[9] == 12 and recommended[9] != 12:
                 fisher_text = "—"
-        elif signature(other) != signature("recommended"):
+        elif not same_pair:
             fisher_text = "—"
-        if mixed_wall:
+        if system != "lj38" and (not mixed_wall or pair_shared):
+            if same_pair:
+                wall_ratio = f"{recommended[3] / other_report[3]:.6f}"
+                inverse_ratio = f"{other_report[3] / recommended[3]:.6f}"
+            else:
+                wall_ratio = inverse_ratio = "—"
+            report.append(
+                f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
+                f"{fisher_text} | {wall_ratio} | {inverse_ratio} |"
+            )
+        else:
             report.append(
                 f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
                 f"{fisher_text} |"
-            )
-        else:
-            wall_ratio = recommended[3] / other_report[3]
-            inverse_ratio = other_report[3] / recommended[3]
-            report.append(
-                f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
-                f"{fisher_text} | {wall_ratio:.6f} | {inverse_ratio:.6f} |"
             )
     if system == "lj38":
         fisher_line = ""

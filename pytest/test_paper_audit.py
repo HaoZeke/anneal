@@ -4668,6 +4668,37 @@ def test_an_si_qualifier_covers_a_stripped_equation_reference():
                 if label == "an SI equation reference keeps its S or names the SI"]
 
 
+def test_printed_wall_ratios_follow_the_stop_mix():
+    audit = audit_mod.Audit()
+    audit_mod.wall_ratios_follow_stops(audit)
+    assert audit.drifts() == []
+
+
+def test_a_differing_stop_wall_ratio_is_a_drift():
+    audit = audit_mod.Audit()
+    path = "bench/ase-lj98/README.md"
+    planted = audit.text(path).replace("| — | — |", "| 1.234567 | 0.810000 |", 1)
+    assert planted != audit.text(path)
+    audit.text_cache[path] = planted
+    audit_mod.wall_ratios_follow_stops(audit)
+    drifts = [row for row in audit.drifts() if row[2] == "wall ratio across differing stops"]
+    assert drifts
+    assert drifts[0][1] == path
+
+
+def test_agox_summary_keeps_hits_when_ratio_columns_go():
+    text = (ROOT / "bench/agox-lj98/summary.csv").read_text()
+    kept = audit_mod._kept_summary_fields(text)
+    assert kept == [
+        "code,hits,n,median_wall_s",
+        "agox,0,6,7031.920068",
+        "agox-documented,0,6,8399.304438",
+        "anneal,2,6,81.334000",
+    ]
+    changed = text.replace("anneal,2,6,", "anneal,3,6,", 1)
+    assert audit_mod._kept_summary_fields(changed) != kept
+
+
 def test_a_main_text_equation_without_its_name_is_reported():
     audit = audit_mod.Audit()
     si = audit.text("paper/jctc/si.tex")

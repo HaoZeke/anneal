@@ -15,7 +15,7 @@ the full call budget, so its call count is right-censored at `charged`.
 | arm | stop | hits | median best | gap to -173.928427 | median wall s | median inside s | median outside s |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | anneal | hit or budget | 10/12 | -173.92842659 | 0.00000041 | 0.982206 | 0.582390 | 0.399817 |
-| recommended | hit or budget | 12/12 | -173.92842659 | 0.00000041 | 0.605387 | 0.283605 | 0.321782 |
+| recommended | hit | 12/12 | -173.92842659 | 0.00000041 | 0.605387 | 0.283605 | 0.321782 |
 | basin hopping | wall cap on 12 | 0/12 | -171.10081694 | 2.82761006 | 4.644532 | 1.313719 | 3.330812 |
 | minima hopping | wall cap on 12 | 0/12 | -170.08494879 | 3.84347821 | 4.858002 | 0.136979 | 4.727197 |
 

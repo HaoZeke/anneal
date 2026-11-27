@@ -15,14 +15,13 @@ the full call budget, so its call count is right-censored at `charged`.
 | arm | hits | Fisher p vs anneal | median best | gap to -543.665361 | median wall s | over anneal | anneal over | median inside s | median outside s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | anneal | 4/12 | 1 | -543.54672557 | 0.11863543 | 84.630861 | 1.000000 | 1.000000 | 59.056659 | 25.579015 |
-| recommended | 7/12 | — | -543.66536077 | 0.00000023 | 78.918537 | 0.932503 | 1.072383 | 47.071047 | 31.134047 |
-| basin hopping | 0/12 | — | -536.02030046 | 7.64506053 | 123.012927 | 1.453523 | 0.687983 | 77.440966 | 45.571962 |
-| minima hopping | 0/12 | — | -532.04115348 | 11.62420752 | 299.160840 | 3.534891 | 0.282894 | 1.395366 | 297.686307 |
+| recommended | 7/12 | — | -543.66536077 | 0.00000023 | 78.918537 | — | — | 47.071047 | 31.134047 |
+| basin hopping | 0/12 | — | -536.02030046 | 7.64506053 | 123.012927 | — | — | 77.440966 | 45.571962 |
+| minima hopping | 0/12 | — | -532.04115348 | 11.62420752 | 299.160840 | — | — | 1.395366 | 297.686307 |
 
 Minima hopping stopped at the wall cap on 12/12 seeds; those rows charged 56,362-80,878 calls.
 
-The Fisher cells are blank where the stops differ, and there is no paired test.
-Wall ratios are omitted where the arms do not share a stop.
+Ratios and tests are printed only for same-stop pairs.
 
 | comparison | hits | Fisher p |
 | --- | --- | --- |

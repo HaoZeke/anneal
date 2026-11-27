@@ -6,7 +6,7 @@ Checked notes for the JCTC manuscript on one basin-hopping preset for Lennard-Jo
 
 de Souza, Angewandte Chemie International Edition 64, e202500393 (2025), doi:10.1002/anie.202500393, describes GOAT, a global optimisation algorithm for molecules and atomic clusters that does not run molecular dynamics. The abstract reports organic molecules, water clusters, metal complexes, and metal nanoparticles, and a comparison with CREST. It says GOAT is in general more efficient and accurate than previous algorithms, and that the potential can be chosen freely, including hybrid DFT.
 
-The manuscript reports no CREST hit-rate win. The anneal octamer rows record no target, tolerance, budget, or stop, and the Holm family for CREST is empty. The manuscript cites `deSouzaGoat2025`.
+The manuscript reports no CREST hit-rate win. The anneal octamer rows record no target, tolerance, budget, or stop, and the Holm family for CREST is empty. The rows of bench/h2o8-matched record 0 of 12 seeds reaching the threshold during the hop phase. All 12 hits come in the charged answer polish, with margins \(1.1\times 10^{-9}\) to \(1.0\times 10^{-7}\) Eh below the threshold. The manuscript cites `deSouzaGoat2025`.
 
 Cite `deSouzaGoat2025`. Add a head-to-head on the water hexamer at a shared energy and gradient budget. The abstract gives no hexamer size and no seed count.
 
@@ -52,9 +52,9 @@ Cite `christiansenAgox2022`. Pin a head-to-head to v3.11.1, and say whether the 
 
 ## 2026-11-11 — ASE 3.29.0
 
-Larsen and co-workers, Journal of Physics: Condensed Matter 29, 273002 (2017), doi:10.1088/1361-648X/aa680e, is the ASE paper. Repository tag 3.29.0 is dated 21 June 2026. The manuscript still prints no ASE count.
+Larsen and co-workers, Journal of Physics: Condensed Matter 29, 273002 (2017), doi:10.1088/1361-648X/aa680e, is the ASE paper. Repository tag 3.29.0 is dated 21 June 2026. The manuscript prints the ASE hit counts, including basin hopping at 1 of 12 on LJ55.
 
-Cite `larsenAse2017` for the code. Run the missing arm on tag 3.29.0, name basin hopping as the ASE optimiser, and charge force calls as the hop does. No printed ASE number is contradicted, because none is printed.
+Cite `larsenAse2017` for the code. Name basin hopping as the ASE optimiser, and charge force calls as the hop does. The manuscript prints the ASE hit counts, including basin hopping at 1 of 12 on LJ55. This paper does not report that count.
 
 ## 2026-11-11 — pele 0.1.2
 
@@ -156,7 +156,7 @@ Vahediahmar, Zweig, Zhang, and Azizi, arXiv:2610.12523 (8 October 2026), ask whe
 
 The manuscript does not score the hexamer by an IRA motif match, and it does not compare polished energies with CREST 3.0.2. This preprint does not treat the water hexamer, so it does not contradict the withdrawn hexamer hit rates or the six polished gaps. It does contradict any reading in which a CREST ensemble, or a GFN2-xTB reference set, is the complete low-energy answer.
 
-Cite `vahediahmarGeomDrugs2026` beside the CREST section. Keep the hexamer result as a motif hit rate and a polished gap.
+Cite `vahediahmarGeomDrugs2026` beside the CREST section. The manuscript does not score the hexamer by an IRA motif match.
 
 ## 2026-11-11 — Seven atoms are proved, and the diameter bound is tighter
 
@@ -246,7 +246,7 @@ Cite `olivierPairTables2026`. Keep them out of the Lennard-Jones table.
 
 Zhang, Cheng, and Zhang, Journal of Computational Chemistry 47, e70389 (2026), doi:10.1002/jcc.70389, release GMMLP. An improved genetic algorithm searches on AIMNet2, trained at ωB97M-D3/def2-TZVPP. The benchmarks are nine molecular clusters with one to ten molecules: formaldehyde, methylamine, methanol, methane, water, sulfuric acid, nitric acid, ammonia, and urea. Across those benchmarks the abstract counts 9869 isomers.
 
-Giri and Anoop already search water clusters of that size on AIMNet2, with a tabu driver rather than this genetic algorithm. The manuscript's water surfaces are TIP4P and GFN2-xTB. GMMLP does not report those energies, so it does not contradict them. A comparison with the sealed hexamer counts only if both sides relax on the same potential.
+Giri and Anoop already search water clusters of that size on AIMNet2, with a tabu driver rather than this genetic algorithm. The manuscript's water surfaces are TIP4P and GFN2-xTB. GMMLP does not report those energies, so it does not contradict them. The hexamer hit rates are withdrawn. A comparison counts only if both sides relax on the same potential.
 
 Cite `zhangGmmlp2026` beside `giriAimnetClusters2025`.
 
@@ -286,7 +286,7 @@ Cite `zhangSgmsc2026`. A free-cluster hit is not a supported-cluster hit.
 
 Krummenacher, Gubler, Finkler, Huber, Sommer-Jörgensen, and Goedecker, SoftwareX 25, 101632 (2024), doi:10.1016/j.softx.2024.101632, implement minima hopping on the Atomic Simulation Environment, for clusters and for bulk. A corrigendum is SoftwareX 26, 101645 (2024), doi:10.1016/j.softx.2024.101645. The current code deposit is doi:10.5281/zenodo.24035625, published 7 November 2026. The deposit says any ASE calculator can be attached, and that periodic runs can move the cell. It publishes no hit rate.
 
-The missing ASE arm in the manuscript is basin hopping on tag 3.29.0. This package is minima hopping. It does not fill that kit, and it does not contradict the open count, because no ASE number is printed.
+The manuscript prints basin hopping on tag 3.29.0, including 1 of 12 on LJ55. This package is minima hopping. It does not fill that kit. The manuscript prints the ASE hit counts. This package does not report that count.
 
 Cite `krummenacherMinimaHopping2024` for the paper and `krummenacherAseMh2026` for the November deposit. A comparison that uses this code has to be named as minima hopping, and it has to charge force calls.
 
@@ -342,7 +342,7 @@ Tahir, Shang, Li, and Ren, arXiv:2404.10492 (16 April 2024), relax water cluster
 
 The manuscript's hexamer is TIP4P and GFN2-xTB. This preprint leaves those two surfaces alone. The 25-molecule reordering stays out of the hexamer table.
 
-Cite `tahirRpaWater2024`. The hexamer comparison remains the one already sealed.
+Cite `tahirRpaWater2024`. The hexamer hit rates are withdrawn.
 
 ## 2026-11-11 — Lennard-Jones benchmarks that score something else
 
@@ -392,7 +392,7 @@ Cite `lauriaComplax2026`.
 
 Tao, Shao, and Zhu, arXiv:2401.13953 (25 January 2024), add a fingerprint energy so a local optimisation prefers high-symmetry structures. They test silicon, silicon carbide, and Lennard-Jones clusters. For LJ38 and LJ75 they name the double funnels. Two hundred random starts come from CALYPSO. Energies and forces use the ASE calculator, and the trajectories use FIRE. The fingerprint search shifts the density of local minima toward lower energy. The note gives no Cambridge energy and no force-call hit rate.
 
-The missing ASE arm is basin hopping on tag 3.29.0. This preprint is a biased local relaxation, and it does not fill that arm. It does not contradict a printed ASE count, because none is printed, and it gives no energy below the Cambridge values. A comparison, if it is run, is LJ38 and LJ75 at one relaxation budget, and it has to be named as this fingerprint relaxation.
+The manuscript prints basin hopping on tag 3.29.0, including 1 of 12 on LJ55. This preprint is a biased local relaxation, and it does not run that comparison. It does not report that count, and it gives no energy below the Cambridge values. A comparison, if it is run, is LJ38 and LJ75 at one relaxation budget, and it has to be named as this fingerprint relaxation.
 
 Cite `taoFingerprint2024`. Keep it out of the basin-hopping hit table.
 
@@ -466,7 +466,7 @@ Cite `songSelectiveSearch2026` and `agadaCrystalTurbo2026`. Keep CrystalMO-TuRBO
 
 ## 2026-11-12 — Cross-field optimisers checked against the printed arms
 
-Nedanovski, Nenov, and Pilev, arXiv:2606.15830 (14 June 2026), seed CMA-ES restarts from a nearest-better clustering of a Sobol sample. On the composition functions of the CEC suites they report, the fixed-budget target coverage is higher than BIPOP-CMA-ES. The tests are analytic benchmark functions. They do not run LJ98. The cross-field section prints a BIPOP arm at 6 of 6 on LJ98, with median 1324848 calls, against retry rows at 6 of 6 with median 813591. Those counts are this hop's arm. The preprint does not contradict them. Do not replace the Hansen citation with this restart.
+Nedanovski, Nenov, and Pilev, arXiv:2606.15830 (14 June 2026), seed CMA-ES restarts from a nearest-better clustering of a Sobol sample. On the composition functions of the CEC suites they report, the fixed-budget target coverage is higher than BIPOP-CMA-ES. The tests are analytic benchmark functions. They do not run LJ98. Do not replace the Hansen citation with this restart.
 
 Wolfson, arXiv:2606.26164 (24 June 2026), and Swarm and Evolutionary Computation 110, 102574 (November 2026), doi:10.1016/j.swevo.2026.102574, release ChiSao, a GPU-resident multimodal optimiser. The preprint names basin hopping among sequential baselines and reports a wall-clock speedup against it on analytic functions where the methods it compares all succeed. The suite is analytic. It is not a Lennard-Jones force-call hit rate, and it does not contradict a printed basin-hopping count.
 
@@ -554,7 +554,7 @@ Cite `ahmadPdmo2026`.
 
 Woo, arXiv:2611.13143 (9 November 2026), runs an agent loop on algorithms in the Atomic Simulation Environment. One target rewrites an implementation so that it runs faster and returns the same results. The other redesigns the method so that a relaxation uses fewer force evaluations. On problems held out from the agent, the note says the best optimisers need 3.1 to 3.4 times fewer force evaluations than L-BFGS for a structure relaxation, and 4.6 to 17 times fewer than a standard climbing-image nudged elastic band. The record has no DOI.
 
-The missing ASE arm is basin hopping on tag 3.29.0. This preprint is a local relaxation and a band calculation. It does not run that arm, and it publishes no basin-hopping hit rate. ASE tag 3.29.0, checked again on 12 November 2026, is still the newest tag, and the master tip is still the 11 November 2026 merge. AGOX is still v3.11.1, CREST is still v3.0.2 with the 16 June 2026 master tip, pele is still v0.1.2, and xtb is still v6.8.0. The preprint does not contradict the open count, because no ASE number is printed. A comparison that uses these optimisers has to be named as this local relaxation. Its force-call ratio is not the hop's hit rate.
+The manuscript prints basin hopping on tag 3.29.0, including 1 of 12 on LJ55. This preprint is a local relaxation and a band calculation. It does not run that comparison, and it publishes no basin-hopping hit rate. ASE tag 3.29.0, checked again on 12 November 2026, is still the newest tag, and the master tip is still the 11 November 2026 merge. AGOX is still v3.11.1, CREST is still v3.0.2 with the 16 June 2026 master tip, pele is still v0.1.2, and xtb is still v6.8.0. This preprint does not report that count. A comparison that uses these optimisers has to be named as this local relaxation. Its force-call ratio is not the hop's hit rate.
 
 Cite `wooAseOptimizers2026`. Keep the open arm on stock basin hopping in ASE 3.29.0.
 
@@ -742,7 +742,7 @@ Saha, University of Illinois Chicago (15 July 2026), doi:10.25417/uic.32991926, 
 
 Wen, Jiang, Li, Zhang, and Wang, The Journal of Chemical Physics 165, 094301 (1 September 2026), doi:10.1063/5.0349333, test three uncertainty estimates for a graph network, then use Monte Carlo dropout to drive active learning. The cluster tests are Ta\(_2\)N\(_3^-\) and LaSi\(_{24}\). The abstract reports an error on the potential, not a new global-minimum energy.
 
-Neither contradicts the Cambridge hit targets or the sealed hexamer counts. A head-to-head would be one nickel size on that Gaussian approximation potential, or Ta\(_2\)N\(_3^-\) or LaSi\(_{24}\) on the surface they train. Neither fills the open ASE, AGOX, and GMIN kit, and neither warrants a head-to-head on the Lennard-Jones preset or on the CREST table.
+Neither contradicts the Cambridge hit targets or the withdrawn hexamer hit rates. A head-to-head would be one nickel size on that Gaussian approximation potential, or Ta\(_2\)N\(_3^-\) or LaSi\(_{24}\) on the surface they train. Neither fills the open ASE, AGOX, and GMIN kit, and neither warrants a head-to-head on the Lennard-Jones preset or on the CREST table.
 
 Cite `sahaNickel2026` and `wenClusterUncertainty2026`.
 
@@ -798,7 +798,7 @@ The 55 in that search counts gold, aluminium, and nickel. It is not the Lennard-
 
 Yıldırım, Afyon Kocatepe University Journal of Sciences and Engineering 25, 1053--1061 (18 September 2025), doi:10.35414/akufemubid.1643569, treats every composition of the 19-atom Cu\(_n\)Pd\(_{19-n}\) series. The abstract combines the Gupta potential with density-functional calculations. It says the site preference, core or surface, follows the atomic radius, and that the excess energy at both levels favours mixing. The number of copper--palladium bonds is tied to that excess energy. The abstract does not name basin hopping, and it gives no Lennard-Jones energy.
 
-Nineteen atoms sits outside 38, 55, 75, 98, and 104. This series does not contradict the Cambridge hit targets or the sealed hexamer counts. A head-to-head would be one of these 19-atom clusters on the Gupta potential. It does not warrant a head-to-head on the Lennard-Jones preset.
+Nineteen atoms sits outside 38, 55, 75, 98, and 104. This series does not contradict the Cambridge hit targets or the withdrawn hexamer hit rates. A head-to-head would be one of these 19-atom clusters on the Gupta potential. It does not warrant a head-to-head on the Lennard-Jones preset.
 
 Cite `eryurekAuAlNi2025` and `yildirimCupd2025`.
 
@@ -826,7 +826,7 @@ The manuscript clusters are one component. The abstract does not quote a Cambrid
 
 Alkhatib, Salem, Hesselink, and Mpourmpakis, ACS Omega 10, 30996--31008 (14 July 2025), doi:10.1021/acsomega.5c04082, order the atoms of multimetallic nanoparticles with a bond-centric model and a genetic algorithm. Weighting factors turn a monometallic bond strength into a bimetallic one. The abstract reports the ordering of 2869-atom cuboctahedra across 15 bimetallic combinations, compared with experiment and with other calculations.
 
-The size 2869 is outside 38, 55, 75, 98, and 104. The shape is held as a cuboctahedron, and the energy is the bond-centric cohesive energy. The abstract gives no Cambridge Lennard-Jones energy and no water energy, so it does not contradict the hit targets or the sealed hexamer counts. It does not fill the open ASE, AGOX, and GMIN kit. It does not warrant a head-to-head on the Lennard-Jones preset.
+The size 2869 is outside 38, 55, 75, 98, and 104. The shape is held as a cuboctahedron, and the energy is the bond-centric cohesive energy. The abstract gives no Cambridge Lennard-Jones energy and no water energy, so it does not contradict the hit targets or the withdrawn hexamer hit rates. It does not fill the open ASE, AGOX, and GMIN kit. It does not warrant a head-to-head on the Lennard-Jones preset.
 
 Cite `canestrariIcosahedra2025` and `alkhatibOrdering2025`.
 
@@ -866,7 +866,7 @@ The keys `safaGoldIons2026` and `rahmatizadGold2026` now carry the journal DOI b
 
 Adel, Szmitek, Hartl, Wanzenböck, and Madsen, Journal of Chemical Information and Modeling 66, 7414--7425 (25 June 2026), doi:10.1021/acs.jcim.6c00843, put a diffusion model inside an evolutionary search and relax the samples. The Lennard-Jones benchmark runs from 5 to 40 atoms, against CMA-ES. They say CMA-ES finds the global minimum only up to about 17 atoms, depending on the seed, and that one diffusion evolution finds the global minimum at every size they tried, with an energy difference below \(10^{-6}\) eV. Clusters smaller than 25 atoms are found in fewer than 10 generations. Larger clusters are found in fewer than 150 generations, except LJ34 and LJ38. They single out LJ31 and LJ38. For LJ38 they name the face-centred cubic truncated octahedron as the global minimum and an incomplete Mackay icosahedron as the second minimum. The same paper treats neutral gold clusters Au13, Au31, and Au38.
 
-The manuscript's LJ38 map puts the recommended hop on that truncated octahedron. This paper does not report a lower potential energy, so it does not contradict the Cambridge energy at 38 atoms. The search stops at 40 atoms, so LJ55, LJ75, LJ98, and LJ104 are absent. The cross-field section prints a BIPOP arm at 6 of 6 on LJ98. This CMA-ES comparison stops at 40 atoms and does not run that arm, so the 6 of 6 row stands. A generation count is not the force-call budget the hop charges. The article prints the LJ38 hit count. These runs are not that count. The gold clusters are not the Lennard-Jones map. It does warrant a head-to-head on LJ38, at one force-call budget, against this diffusion search. Do not import the generation counts into the hit table.
+The manuscript's LJ38 map puts the recommended hop on that truncated octahedron. This paper does not report a lower potential energy, so it does not contradict the Cambridge energy at 38 atoms. The search stops at 40 atoms and does not run LJ98, so LJ55, LJ75, LJ98, and LJ104 are absent. A generation count is not the force-call budget the hop charges. The article prints the LJ38 hit count. These runs are not that count. The gold clusters are not the Lennard-Jones map. It does warrant a head-to-head on LJ38, at one force-call budget, against this diffusion search. Do not import the generation counts into the hit table.
 
 Cite `adelGuidedDiffusion2026`.
 
@@ -1050,7 +1050,7 @@ Cite `ayalaLennardJones2026` and `wasnikSurrogate2026`.
 
 Semeniuk and Feia, Ukrainian Journal of Physics 71, 554 (22 May 2026), doi:10.15407/ujpe71.6.554, put a genetic algorithm in the Atomic Simulation Environment and recover global and local minima of silica polymorphs. The abstract also names MACE and AIMNet2 as neural-network relaxers. The search is a crystal, not basin hopping.
 
-The missing ASE arm is basin hopping on tag 3.29.0. This paper does not run that arm, and it publishes no basin-hopping hit rate. It does not contradict the open count, because no ASE number is printed. A comparison that uses this code has to be named as a crystal genetic algorithm.
+The manuscript prints basin hopping on tag 3.29.0, including 1 of 12 on LJ55. This paper does not run that comparison, and it publishes no basin-hopping hit rate. It does not report that count. A comparison that uses this code has to be named as a crystal genetic algorithm.
 
 Cite `semeniukAseGenetic2026`.
 
@@ -1058,7 +1058,7 @@ Cite `semeniukAseGenetic2026`.
 
 Lombardi, Riccius, Pare, Heenen, Reuter, and Scheurer, Computer Physics Communications 328, 110354 (November 2026), doi:10.1016/j.cpc.2026.110354, release EZGA. The record has no day. A multi-stage genetic algorithm explores molecules and crystals. The program summary says the benchmarks are peptide conformations, Lennard-Jones nanoclusters, a binary-oxide convex hull, and the surface phase diagrams of CuO and Cu\(_2\)O, and that those benchmarks recover the targeted low-energy basins. It lists ASE among the optional libraries, and it says an energy evaluator may be an ASE calculator.
 
-The abstract does not name LJ38, LJ55, LJ75, LJ98, or LJ104, and it does not report an energy below the Cambridge values, so it does not contradict the hit targets or the withdrawn hexamer hit rates. It gives no force-call hit rate. The missing ASE arm is basin hopping on tag 3.29.0. EZGA does not run that arm, and it publishes no basin-hopping hit rate. Because the abstract does not name the manuscript sizes, it does not yet warrant a head-to-head on the sealed maps. A comparison that uses this search has to name the Lennard-Jones sizes it actually ran.
+The abstract does not name LJ38, LJ55, LJ75, LJ98, or LJ104, and it does not report an energy below the Cambridge values, so it does not contradict the hit targets or the withdrawn hexamer hit rates. It gives no force-call hit rate. The manuscript prints basin hopping on tag 3.29.0, including 1 of 12 on LJ55. EZGA does not run that comparison, and it publishes no basin-hopping hit rate. Because the abstract does not name the manuscript sizes, it does not yet warrant a head-to-head on the sealed maps. A comparison that uses this search has to name the Lennard-Jones sizes it actually ran.
 
 Lombardi, Ducci, Panosetti, and co-workers, ChemRxiv (31 August 2026), doi:10.26434/chemrxiv.15008068/v1, add a transition-kernel layer to the same engine. The abstract says the layer turns the population search into fifteen statistical methods, from equilibrium sampling through free-energy calculations, and that each method is checked on a non-interacting gas or an interacting lattice gas. The abstract gives no Lennard-Jones energy and no water energy, so it does not contradict the sealed maps. It does not warrant a head-to-head on those maps or on the CREST table.
 
@@ -1230,9 +1230,9 @@ Cite `ketterSaddle2026`, `qinGenerative2026`, `vandevenSpices2026`, and `caneteT
 
 Liu, Zhang, Woodley, Goedecker, Catlow, Sokol, and co-workers, Journal of the American Chemical Society 148, 44973--44983 (7 October 2026), doi:10.1021/jacs.6c15378, search cation vacancies in metal oxides. Minima hopping on machine-learned potentials proposes the configurations. Hybrid quantum-mechanics/molecular-mechanics embedded clusters and periodic density-functional calculations follow. The abstract says a relaxation that starts from the lattice vacancy can miss a reconstruction. For charge-neutral vacancies in oxides whose cations have formal oxidation state +4 or higher, the preferred defects contain O--O bonds or O--O--O chains, with bond lengths of about 1.4 angstroms, and the formation energy can drop by up to several electronvolts. At lower oxidation states the conventional vacancy remains preferred at charge neutrality, and a positive charge can reverse that preference. The abstract says these defects need a global structure search.
 
-The embedded cluster is a quantum-mechanics region inside an oxide. It is a bulk vacancy, not a free Lennard-Jones cluster and not the water hexamer. The abstract gives no Cambridge energy, so it does not contradict the hit targets or the withdrawn hexamer hit rates. Goedecker is an author of the minima-hopping code already filed as `krummenacherMinimaHopping2024`. This paper runs that search on vacancies. It does not run the missing ASE basin-hopping arm on tag 3.29.0, and it publishes no basin-hopping hit rate. A head-to-head would be one of these vacancies on the potential they use. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+The embedded cluster is a quantum-mechanics region inside an oxide. It is a bulk vacancy, not a free Lennard-Jones cluster and not the water hexamer. The abstract gives no Cambridge energy, so it does not contradict the hit targets or the withdrawn hexamer hit rates. Goedecker is an author of the minima-hopping code already filed as `krummenacherMinimaHopping2024`. This paper runs that search on vacancies. The manuscript prints basin hopping on tag 3.29.0, including 1 of 12 on LJ55. This paper does not run that comparison, and it publishes no basin-hopping hit rate. A head-to-head would be one of these vacancies on the potential they use. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
 
-Neuman, Park, Wilson, and Wales, The Journal of Physical Chemistry Letters 17, 11747--11753 (21 August 2026), doi:10.1021/acs.jpclett.6c02357, map an 8-atom periodic cell of carbon by discrete path sampling. MACE-MATPES-r2SCAN-0 supplies the energy, the forces, and the stress through an Atomic Simulation Environment interface. The abstract compares the enthalpy landscape with the experimental phase diagram and adds a dispersion correction on selected crystals. Eight periodic atoms are not LJ38. The missing ASE arm is basin hopping on tag 3.29.0. This paper uses ASE as the calculator interface for discrete path sampling. It publishes no basin-hopping hit rate and no Cambridge energy, so it does not contradict the hit targets or the withdrawn hexamer hit rates. A head-to-head would be that carbon cell on MACE. It does not warrant a head-to-head on the sealed maps or on the CREST table.
+Neuman, Park, Wilson, and Wales, The Journal of Physical Chemistry Letters 17, 11747--11753 (21 August 2026), doi:10.1021/acs.jpclett.6c02357, map an 8-atom periodic cell of carbon by discrete path sampling. MACE-MATPES-r2SCAN-0 supplies the energy, the forces, and the stress through an Atomic Simulation Environment interface. The abstract compares the enthalpy landscape with the experimental phase diagram and adds a dispersion correction on selected crystals. Eight periodic atoms are not LJ38. The manuscript prints basin hopping on tag 3.29.0, including 1 of 12 on LJ55. This paper uses ASE as the calculator interface for discrete path sampling. It publishes no basin-hopping hit rate and no Cambridge energy, so it does not contradict the hit targets or the withdrawn hexamer hit rates. A head-to-head would be that carbon cell on MACE. It does not warrant a head-to-head on the sealed maps or on the CREST table.
 
 Cite `liuOxideVacancy2026` and `neumanCarbonLandscape2026`.
 
@@ -1318,7 +1318,7 @@ The 11 November note said the manuscript does not cite de Souza. The manuscript 
 
 The Wiley record of the same article, doi:10.1002/anie.202500393, read on 16 November 2026, is not limited to the abstract. On GFN2-xTB in the gas phase, the text says CREST and GOAT give the same results up to the octamer and then differ. For (H2O)16, GOAT finds an ice-derived structure with an ordered hydrogen-bond network, and CREST stops at a disordered configuration 1.45 kcal/mol above it. For (H2O)32, GOAT does not find that crystalline structure with the defaults, and it still finds lower minima. The figure caption says each algorithm was run three times, and the differences from the global minima are given in kcal/mol.
 
-The sealed hexamer counts are withdrawn. The hexamer sits inside the range the paper calls the same. The paper gives no seed count and no motif hit rate. The 1.45 kcal/mol gap is sixteen molecules. A head-to-head that uses this comparison is (H2O)16 at GFN2-xTB, with the three-run protocol the figure names. Keep 1.45 kcal/mol out of a hexamer table.
+The hexamer hit rates are withdrawn. The hexamer sits inside the range the paper calls the same. The paper gives no seed count and no motif hit rate. The 1.45 kcal/mol gap is sixteen molecules. A head-to-head that uses this comparison is (H2O)16 at GFN2-xTB, with the three-run protocol the figure names. Keep 1.45 kcal/mol out of a hexamer table.
 
 No new key. `deSouzaGoat2025` already carries that DOI.
 
@@ -1340,7 +1340,7 @@ Cite `tahmassebpurHeat2026` and `shaoHydroxideWater2026`.
 
 Park, Pracht, Kavanagh, and Wales, arXiv:2611.19365 (14 November 2026), introduce a persistent socket interface connecting GMIN, OPTIM, and PATHSAMPLE to calculators available through the Atomic Simulation Environment (ASE). Keeping both the calculator and the socket connection active avoids repeated initialisation across landscape searches. They apply the bridge to gallium vacancies in \(\beta\)-Ga\(_2\)O\(_3\) using two NequIP potentials, building kinetic transition networks, disconnectivity visualisations, mean first-passage times, and heat capacities.
 
-The manuscript scores GMIN on native Lennard-Jones 98 and 104, and names ASE's own basin-hopping optimiser as a separate unprinted arm. This persistent socket interface does not fill that ASE basin-hopping arm, and it reports no Lennard-Jones or water-hexamer hit rate, so no printed count is contradicted. A head-to-head using this bridge would share one ASE calculator (such as those NequIP vacancy networks) rather than the native Lennard-Jones preset. The GMIN and OPTIM directory pages remain unchanged since 17 March 2022, while this preprint documents the new ASE coupling.
+The manuscript scores GMIN on native Lennard-Jones 98 and 104, and prints the ASE hit counts, including basin hopping at 1 of 12 on LJ55. This persistent socket interface does not run that comparison, and it reports no Lennard-Jones or water-hexamer hit rate, so it does not contradict those printed counts. A head-to-head using this bridge would share one ASE calculator (such as those NequIP vacancy networks) rather than the native Lennard-Jones preset. The GMIN and OPTIM directory pages remain unchanged since 17 March 2022, while this preprint documents the new ASE coupling.
 
 Liu, Wang, and Shen, arXiv:2611.21489 (16 November 2026), identify local topology hallucinations across MACE-MP-0a, CHGNet, and M3GNet (with SevenNet-Omni tested in a supplementary comparison) against fixed-cell PBE calculations on periodic \(s\)- and \(p\)-block structures. Two-against-one model consensus matched PBE on 55 of 57 positive-curvature directions but on only 5 of 56 negative-curvature directions; even unanimous negative predictions matched PBE in only 5 of 14 cases. In LiGe\(_2\)S, two MACE minima connected by a verified saddle relaxed into one PBE basin, and PBE relaxation returned nine of ten selected model minima to their reference basins. They pair a two-point directional curvature reference test with endpoint relaxation.
 
@@ -1813,7 +1813,7 @@ Cite `lazzariSeekerMicrosolvation2026`, `livoniWaterNanoclusters2026`, `teeuwenP
 
 Han and Lin, ChemRxiv (26 November 2026), doi:10.26434/chemrxiv.15012813/v1, patch the GPU eigensolver of xtb with an adaptive FP32/FP64 ladder. Each self-consistent-charge iteration starts in FP32 and switches to FP64 once the largest change on the Hamiltonian diagonal falls below a threshold. A converged density is accepted only from an FP64 solve. The CPU path stays bit-identical. On 32 systems with up to 19,200 basis functions, the 29 systems that finish on the GPU agree with the CPU to within \(2.4\times 10^{-7}\) Eh, below the SCC threshold.
 
-Relevance: This is an evaluation path for GFN2-xTB, beside `luXtbloom2026` and the xtb 6.8.0 energy shift. It does not rerun the water hexamer or the Lennard-Jones maps. The abstract says the CPU path stays bit-identical and does not name the xtb release that was patched. The manuscript still names xtb 6.7.1 for the archived hexamer relaxations. The 11 November note records polished gaps at \(1\times 10^{-7}\) Eh. The GPU agreement window is wider than those gaps, and this preprint does not recompute them, so it does not contradict the 6.7.1 gaps or the kept hexamer rows, 1 of 12 for this code and 4 of 12 for CREST. No search head-to-head. Keep the hexamer table on xtb 6.7.1. A later check can re-polish the same finals on this GPU ladder. Do not start a new CREST search for it.
+Relevance: This is an evaluation path for GFN2-xTB, beside `luXtbloom2026` and the xtb 6.8.0 energy shift. It does not rerun the water hexamer or the Lennard-Jones maps. The abstract says the CPU path stays bit-identical and does not name the xtb release that was patched. The manuscript still names xtb 6.7.1 for the archived hexamer relaxations. The 11 November note says the manuscript does not print a table of \(1\times 10^{-7}\) Eh gaps. The GPU agreement window is wider than that scale, and this preprint does not recompute the archived relaxations, so it does not contradict the 6.7.1 record or the withdrawn hexamer hit rates. No search head-to-head. Keep the hexamer table on xtb 6.7.1. A later check can re-polish the same finals on this GPU ladder. Do not start a new CREST search for it.
 
 Release check on 26 November 2026: no numbered release is newer than the 25 November pass. `crest-lab/crest` remains `v3.0.2` (25 August 2024). `grimme-lab/xtb` remains `v6.8.0` (5 November 2026); the rolling `bleed` release still points at `de1e3af6`. `pele-python/pele` remains `v0.1.2` (12 October 2026). The `ase/ase` GitLab releases list is empty and the newest tag is still `3.29.0` (21 June 2026). `agox/agox` remains tagged at `v3.11.1` (4 February 2026). `ksags/GOFEE` returns HTTP 404. A GitHub search for a Wales-group GMIN repository returned no hits, and a GitLab name search for GMIN returned unrelated projects.
 
@@ -1823,6 +1823,6 @@ Cite `hanGpuXtb2026`.
 
 Engsvang, Hasan, and Elm, ChemRxiv (26 November 2026), doi:10.26434/chemrxiv.15012805/v1, sample hydrate configurations of iodine oxyacid and iodine oxide clusters with ABCluster and CREST. The hydrolysis kinetics of selected small oxide hydrates are calculated at \(\omega\)B97X-D4/def2-TZVP with a DLPNO-CCSD(T)/aug-cc-pVTZ-PP correction. Final structures and frequencies are at \(\omega\)B97X-D3BJ/aug-cc-pVTZ-PP. Single-point corrections are at ZORA-DLPNO-CCSD(T0)/TZVPP, with ma-ZORA-def2-TZVPP on non-iodine atoms and SARC-ZORA-TZVPP on iodine. Iodine oxyacid clusters generally exhibit limited hydration. Iodine oxide-containing clusters exhibit a substantially higher degree of hydration than the oxyacid clusters and often populate higher hydrates. The abstract says that hydration slightly suppresses oxyacid nucleation and enhances oxide nucleation, with a maximum enhancement around 20--40% relative humidity. Section 3.4 reports that the cluster formation potential changes by less than an order of magnitude from 0 to 100% relative humidity, and that the change is negligible for every condition studied.
 
-Relevance: This preprint is on the same watch as `hasanAcidClusters2026`. Hasan and Elm are authors of that paper, which already samples atmospheric acid--base clusters with ABCluster and CREST. This preprint is iodine oxides and oxyacids. It gives no Cambridge energy and no hexamer count. It does not contradict the kept hexamer rows, 1 of 12 for this code and 4 of 12 for CREST, or the polished gaps. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
+Relevance: This preprint is on the same watch as `hasanAcidClusters2026`. Hasan and Elm are authors of that paper, which already samples atmospheric acid--base clusters with ABCluster and CREST. This preprint is iodine oxides and oxyacids. It gives no Cambridge energy and no hexamer count. It does not contradict the withdrawn hexamer hit rates. The manuscript does not print a table of \(1\times 10^{-7}\) Eh gaps. It does not warrant a head-to-head on the Lennard-Jones preset or on the CREST hexamer table.
 
 Cite `engsvangIodineHydrates2026`.
