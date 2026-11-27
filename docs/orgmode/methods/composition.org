@@ -120,11 +120,14 @@ order:
    When that source is already registered, the probe pushes
    =Unresolved= and does not push =RegisterCurrent= again. When it is
    not, =lj_catalog_candidate= is called. That call returns nothing
-   when the Euclidean gradient norm is above 1e-5
-   (examples/lj_cluster_search.rs:6860), when =describe= fails
+   when the Euclidean gradient norm is not finite or above 1e-5
+   (examples/lj_cluster_search.rs:6860)
+   (examples/lj_cluster_search.rs:6861), when =describe= fails
    (examples/lj_cluster_search.rs:7156), or when the charged work does
-   not convert to a u64 (examples/lj_cluster_search.rs:7167). A stored
-   source is kept when every component is below =record_gradient=
+   not fit a u64 (examples/lj_cluster_search.rs:7167). The gradient
+   helper also returns nothing when the energy or a coordinate is not
+   finite, or the lengths disagree (examples/lj_cluster_search.rs:6852).
+   A stored source is kept when every component is below =record_gradient=
    (src/methods/cluster_hopping.rs:2868)
    (src/methods/cluster_hopping.rs:2885). The Lennard-Jones preset
    sets that threshold to 1e-3 per component
