@@ -42,7 +42,7 @@ Lennard-Jones, short-ranged Morse, and rigid water clusters on which a
 reference basin-hopping program at one documented input hits no seed.
 Removing the former structure templates costs hits on a short-ranged Morse
 cluster.
-On the water octamer each arm stays under its own recorded stop.
+The anneal octamer rows record no target, tolerance, budget, or stop.
 anneal's rows do not record the CREST target or budget.
 There is no paired test, and the Holm family for CREST is empty.
 \end{abstract}
@@ -897,10 +897,12 @@ Table~\ref{tab:crest} reports anneal and CREST 3.0.2 on the GFN2-xTB
 water octamer
 \cite{bannwarthGfn2xtbanAccurateBroadly2019}.
 CREST takes no seed, so its runs are not paired with those of anneal.
-On the water octamer each arm stays under its own recorded stop.
-On (H\(_2\)O)\(_8\), seeds 2000--2011 of anneal and seeds 17000--17011
-of CREST each stay under their own recorded stop.
-CREST's recorded budget is 151738.
+On (H\(_2\)O)\(_8\), seeds 2000--2011 are the anneal rows and seeds 17000--17011
+are the CREST rows.
+The anneal octamer rows record no target, tolerance, budget, or stop.
+The CREST driver stops at a budget of 151738 calls.
+The stored total\_calls is the counted calls, capped at that budget.
+Seeds 17000, 17002, and 17006 store 151538, 142740, and 139177.
 anneal's rows do not record the CREST target or budget.
 There is no paired test, and the Holm family for CREST is empty.
 The ammonia, carbon, and silicon arms are in the Supporting Information,
@@ -912,7 +914,8 @@ the CREST arms that the budget rule removes.
 % crest table: start
 \begin{table}
 \caption{anneal and CREST 3.0.2 on the GFN2-xTB water octamer.
-Each arm stays under its own recorded stop.
+The anneal octamer rows record no target, tolerance, budget, or stop.
+The CREST driver stops at a budget of 151738 calls.
 anneal's rows do not record the CREST target or budget.
 There is no paired test.
 The Holm family for CREST is empty.
@@ -924,7 +927,7 @@ The Supporting Information reports the other clusters under their own stops.}
 \toprule
 Cluster & anneal stop & CREST stop \\
 \midrule
-(H\(_2\)O)\(_8\) & not recorded & end of its run \\
+(H\(_2\)O)\(_8\) & not recorded & budget 151738 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -935,7 +938,7 @@ At arm-specific work definitions this code reaches funnel-trapped references on
 LJ\(_{98}\), M\(_{55}\) and M\(_{80}\) at \(\rho=14\), and rigid
 (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\), where the corresponding GMIN
 arms at one documented input hit no seed.
-On the water octamer each arm stays under its own recorded stop.
+The anneal octamer rows record no target, tolerance, budget, or stop.
 anneal's rows do not record the CREST target or budget.
 There is no paired test, and the Holm family for CREST is empty.
 

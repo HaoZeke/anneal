@@ -65,12 +65,11 @@ energies.
 | Size | anneal | GMIN | calls (a/g) | anneal best / median | GMIN best / median | p(U) |
 | --- | --- | --- | --- | --- | --- | --- |
 | (H₂O)₈  | 12/12 | 8/12 | 6339 / 240163 | −305.5177 / −305.5176 | −305.5189 / −305.5189 | — |
-| (H₂O)₁₅ | 7/12  | 0/12 | 1481619.5 / 2000000 | −628.3716 / −628.3713 | −622.859 / −619.933 | 3.2e-05 |
-| (H₂O)₂₀ | 6/12  | 0/12 | 1686249.5 / 2000000 | −872.9879 / −868.8666 | −860.701 / −851.443 | 3.2e-05 |
+| (H₂O)₁₅ | 7/12  | 0/12 | 1481619.5 / 2000000 | −628.3716 / −628.3713 | −622.859 / −619.933 | — |
+| (H₂O)₂₀ | 6/12  | 0/12 | 1686249.5 / 2000000 | −872.9879 / −868.8666 | −860.701 / −851.443 | — |
 | (H₂O)₂₁ | 0/12  | 0/12 | 2000000 / 2000000 | −915.774 / −914.368 | −903.760 / −895.593 | 3.2e-05 |
 
-Each arm has twelve seeds. The 8 of 12 is GMIN's hit count. The call medians count different operations, so there is no paired test. At scored sizes 15, 20,
-and 21, anneal has more hits and a lower per-seed best-energy distribution, with the Mann–Whitney p at \(3.2\times 10^{-5}\). At (H₂O)₂₁ neither arm reaches the global
+Each arm has twelve seeds. The 8 of 12 is GMIN's hit count. The call medians count different operations, so there is no paired test. At scored sizes 15 and 20, GMIN stops at the 2 M budget on every seed and anneal does not, so there is no paired test. At (H₂O)₂₁ both arms stop at the 2 M budget on every seed. At (H₂O)₂₁ neither arm reaches the global
 minimum in 2 M calls, but anneal stops 0.93 kJ/mol short of it against GMIN's
 13 kJ/mol. For size 25, anneal's best and median final energies are
 −1113.0346568571 and −1103.3447313609 kJ/mol and its median wall is
@@ -101,7 +100,7 @@ evaluations, the same twelve seeds and the same serial arm. The driver is
 `tip4p21_budget_h2h`, and the asv class is `Tip4p21BudgetHeadToHead`. GMIN at
 a (budget, seed) pair is deterministic: the 2 M GMIN rows repeat the panel's
 best and median energies, and their median wall is 75.15 s against the
-panel's 76.37 s. Summary rows are `summary-budget21.csv`
+panel's 81.09675 s. Summary rows are `summary-budget21.csv`
 and per-seed rows are `rows-budget21.csv`. `p(U)` is the two-sided
 Mann–Whitney U test on the per-seed best energies; the hit counts are 0/12 on
 both arms at every budget, so the Fisher exact p is 1.000 throughout.

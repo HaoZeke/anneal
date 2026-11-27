@@ -282,6 +282,14 @@ def render(system: str) -> tuple[str, str]:
         "median inside s | median outside s |",
         "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ])
+    def signature(arm: str) -> tuple[int, int, int]:
+        group = grouped[arm]
+        return (
+            sum(row.get("stop") == "hit" for row in group),
+            sum(row.get("stop") == "budget" for row in group),
+            sum(row.get("stop") == "wall" for row in group),
+        )
+
     stop_notes = []
     for (
         arm, hits, best, wall, inside, outside, over, back, fisher_p,
@@ -296,17 +304,31 @@ def render(system: str) -> tuple[str, str]:
                 f"{LABELS[arm].capitalize()} stopped at the wall cap on {wall_stops}/12 seeds; "
                 f"those rows charged {low_charged:,}-{high_charged:,} calls."
             )
-        # LJ38 basin hopping and minima hopping stop at the wall on every seed.
-        # Their Fisher cells are blank; the summary CSV keeps the computed p.
-        if system == "lj38" and wall_stops == 12:
+        # LJ38 keeps the wall-stop blank from the earlier report. Other systems
+        # blank a Fisher cell when the hit, budget, and wall counts differ.
+        # The summary CSV keeps the computed p.
+        if system == "lj38":
+            if wall_stops == 12:
+                report[-1] = report[-1].replace(f"| {fisher_p} |", "| — |", 1)
+        elif signature(arm) != signature("anneal"):
             report[-1] = report[-1].replace(f"| {fisher_p} |", "| — |", 1)
     recommended = next(item for item in reports if item[0] == "recommended")
     recommended_hits = recommended[1]
     recommended_versus = recommended[-1]
+    mixed_wall = any(signature(item[0]) != signature("anneal") for item in reports) or any(
+        signature(other) != signature("recommended") for other in ASE_ARMS
+    )
     if system == "lj38":
         report.extend(["", *stop_notes, "",
             "Basin hopping and minima hopping stopped at the wall on every seed.",
             "Recommended did not. The stops differ, and there is no paired test.",
+            "",
+            "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
+            "| --- | --- | --- | --- | --- |",
+        ])
+    elif mixed_wall:
+        report.extend(["", *stop_notes, "",
+            "The Fisher cells are blank where the stops differ, and there is no paired test.",
             "",
             "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
             "| --- | --- | --- | --- | --- |",
@@ -322,7 +344,10 @@ def render(system: str) -> tuple[str, str]:
         other_report = next(item for item in reports if item[0] == other)
         other_hits = other_report[1]
         fisher_text = recommended_versus[other]
-        if system == "lj38" and other_report[9] == 12 and recommended[9] != 12:
+        if system == "lj38":
+            if other_report[9] == 12 and recommended[9] != 12:
+                fisher_text = "—"
+        elif signature(other) != signature("recommended"):
             fisher_text = "—"
         wall_ratio = recommended[3] / other_report[3]
         inverse_ratio = other_report[3] / recommended[3]
@@ -332,6 +357,8 @@ def render(system: str) -> tuple[str, str]:
         )
     if system == "lj38":
         fisher_line = "The Fisher cells above are blank where one arm stopped at the wall on every seed."
+    elif mixed_wall:
+        fisher_line = "The Fisher cells above are blank where the arms do not share a stop."
     else:
         fisher_line = "Fisher is the two-sided exact test on hits under the recorded stopping rule."
     report.extend(["",

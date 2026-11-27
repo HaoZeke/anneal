@@ -729,7 +729,7 @@ it through the xtb engine of rgpot; both arms count energy and gradient
 calls.
 CREST takes no seed, so its dynamics are not paired with those of this code.
 Table~\msref{tab:crest} keeps (H\(_2\)O)\(_8\).
-On the water octamer each arm stays under its own recorded stop.
+The anneal octamer rows record no target, tolerance, budget, or stop.
 anneal's rows do not record the CREST target or budget.
 There is no paired test, and the Holm family for CREST is empty.
 The ammonia, carbon, and silicon arms are not rows of the table.
@@ -741,9 +741,12 @@ An aborted CREST run, which made no call, is dropped from its pair.
 named below.
 
 \emph{Water octamer.}
-On (H\(_2\)O)\(_8\), seeds 2000--2011 of anneal and seeds 17000--17011
-of CREST each stay under their own recorded stop.
-CREST's recorded budget is 151738.
+On (H\(_2\)O)\(_8\), seeds 2000--2011 are the anneal rows and seeds 17000--17011
+are the CREST rows.
+The anneal octamer rows record no target, tolerance, budget, or stop.
+The CREST driver stops at a budget of 151738 calls.
+The stored total\_calls is the counted calls, capped at that budget.
+Seeds 17000, 17002, and 17006 store 151538, 142740, and 139177.
 anneal's rows do not record the CREST target or budget.
 There is no paired test, and the Holm family for CREST is empty.
 The rows of this code are \path{bench/octamer-matched/h2o8/poi/results.csv}

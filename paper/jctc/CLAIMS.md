@@ -17,10 +17,10 @@ The six crest rows are single draws.
 And the draft states no success rate from them.
 The six-seed old-counter arm is called the driver-count budget.
 Its cap equals each seed's old counter.
-The 192-seed polish arm keeps the name budget-fair polish.
+The 192-seed polish arm is not in this article.
 The matched comparison.
 And the 30-start statistics are not in this article.
 The manuscript reports no CREST hit-rate win.
-On the water octamer each side stays under its own recorded stop.
+The anneal octamer rows record no target, tolerance, budget, or stop.
 The Holm family for CREST is empty.
 The deferred budget section is not in this article.

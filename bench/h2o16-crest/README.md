@@ -15,13 +15,12 @@ The rerun row is the one under hostname bench, from develop 8b4a2592.
 The hygienic panel uses that rerun in place of the original row.
 The other five seeds were already under hostname bench.
 
-The hygienic gap, anneal minus CREST, has W+ 0, W- 21, exact two-sided p
-0.03125, rank-biserial -1, median -0.003035313706 Eh.
+The hygienic gap, anneal minus CREST, has W+ 0 and W- 21, median -0.003035313706 Eh.
+The CREST rows do not record the anneal budget of 280305, so there is no paired test.
 The bootstrap of 10000 medians, seed 20261110, runs from -0.006444978869
 to -0.002255136597 Eh.
 Literature hits are 0/6 on both arms.
-The original panel, which still contains the first seed 15000 row, has p
-0.09375.
+The original panel, which still contains the first seed 15000 row, is not a paired test.
 
 wdbase-1 is an open cage: oxygen radius of gyration 3.70 angstrom, eight
 3-coordinate and eight 4-coordinate oxygens, furthest hydrogen 5.62

@@ -1574,19 +1574,22 @@ GFN2_README = "bench/covalent-h2h/README.md"
 def test_a_drifted_gfn2_paper_cell_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(GFN2_README)
-    audit.text_cache[GFN2_README] = text.replace("| 11/12 | 943.5 | 1,006 |", "| 11/12 | 944.5 | 1,006 |")
+    audit.text_cache[GFN2_README] = text.replace(
+        "| Si10 | anneal G, `f3d6a050` | 11/12 |",
+        "| Si10 | anneal G, `f3d6a050` | 10/12 |",
+    )
     audit_mod.covalent_gfn2(audit)
-    assert [r[2] for r in audit.drifts()] == ["median calls"]
+    assert [r[2] for r in audit.drifts()] == ["hits"]
 
 
 def test_a_drifted_gfn2_c20_revision_table_cell_is_reported():
     audit = audit_mod.Audit()
     text = audit.text(GFN2_README)
-    old = "| C20 | anneal G, `5351f272` | 0/12 | 100,000 |"
+    old = "| C20 | anneal G, `5351f272` | 0/12 | reference or 1e5 |"
     assert old in text
-    audit.text_cache[GFN2_README] = text.replace(old, "| C20 | anneal G, `5351f272` | 0/12 | 99,999 |")
+    audit.text_cache[GFN2_README] = text.replace(old, "| C20 | anneal G, `5351f272` | 1/12 | reference or 1e5 |")
     audit_mod.covalent_gfn2(audit)
-    assert [r[2] for r in audit.drifts()] == ["median calls"]
+    assert [r[2] for r in audit.drifts()] == ["hits"]
 
 
 def test_a_gfn2_revision_table_the_audit_cannot_find_is_reported():
@@ -1615,7 +1618,7 @@ def test_an_unnamed_gfn2_false_hit_is_reported():
     audit.rows("bench/covalent-h2h/gfn2/false-hits.csv").clear()
     audit_mod.covalent_gfn2(audit)
     drifted = {r[2] for r in audit.drifts()}
-    assert {"hits", "median calls", "best"} <= drifted
+    assert {"hits", "best"} <= drifted
 
 
 SC_N12_ROWS = ("bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv")

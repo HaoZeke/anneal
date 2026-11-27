@@ -216,79 +216,79 @@ UNVERIFIABLE = [
      '| anneal | 0/6 | 55.299841 | -396.282249 | 1.210082 | 1.000000 | 1.000000 |',
      ('0a5136605161', 'ccc22cee607b'), WHY_OLD),
     ('bench/ase-lj75/README.md',
-     '| basin hopping | 0/12 | 1 | 78 | 0.359317 | -393.72607097 | 3.76626003 | 89.907831 | 1.760879 | 0.567898 | 46.580477 | 43.358141 |',
+     '| basin hopping | 0/12 | — | — | — | -393.72607097 | 3.76626003 | 89.907831 | 1.760879 | 0.567898 | 46.580477 | 43.358141 |',
      ('162d230740f0', '8173c5e2855b'), WHY_OLD),
     ('bench/ase-lj75/README.md',
-     '| minima hopping | 0/12 | 1 | 78 | 0.359317 | -391.70068193 | 5.79164907 | 172.344747 | 3.375083 | 0.296295 | 0.943898 | 171.463289 |',
+     '| minima hopping | 0/12 | — | — | — | -391.70068193 | 5.79164907 | 172.344747 | 3.375083 | 0.296295 | 0.943898 | 171.463289 |',
      ('162d230740f0', '8173c5e2855b'), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m38r6 | for_cluster vs basin hopping | 5/12 vs 0/12 | 0.0372671 | 0.324342 | 3.083165 |',
+     '| m38r6 | for_cluster vs basin hopping | 5/12 vs 0/12 | — | 0.324342 | 3.083165 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m38r6 | for_cluster vs minima hopping | 5/12 vs 0/12 | 0.0372671 | 0.324323 | 3.083344 |',
+     '| m38r6 | for_cluster vs minima hopping | 5/12 vs 0/12 | — | 0.324323 | 3.083344 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m38r6 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | 0.025276 | 39.563762 |',
+     '| m38r6 | recommended vs basin hopping | 12/12 vs 0/12 | — | 0.025276 | 39.563762 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m38r6 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | 0.025274 | 39.566068 |',
+     '| m38r6 | recommended vs minima hopping | 12/12 vs 0/12 | — | 0.025274 | 39.566068 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m38r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | 1 | 0.314585 | 3.178786 |',
+     '| m38r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | — | 0.314585 | 3.178786 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m38r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | 1 | 0.314572 | 3.178919 |',
+     '| m38r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | — | 0.314572 | 3.178919 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m38r14 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | 0.018058 | 55.378224 |',
+     '| m38r14 | recommended vs basin hopping | 12/12 vs 0/12 | — | 0.018058 | 55.378224 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m38r14 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | 0.018057 | 55.380532 |',
+     '| m38r14 | recommended vs minima hopping | 12/12 vs 0/12 | — | 0.018057 | 55.380532 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m55r6 | for_cluster vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | 0.081985 | 12.197304 |',
+     '| m55r6 | for_cluster vs basin hopping | 12/12 vs 0/12 | — | 0.081985 | 12.197304 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m55r6 | for_cluster vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | 0.081980 | 12.198089 |',
+     '| m55r6 | for_cluster vs minima hopping | 12/12 vs 0/12 | — | 0.081980 | 12.198089 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m55r6 | recommended vs basin hopping | 12/12 vs 0/12 | 7.39602e-07 | 0.018064 | 55.359963 |',
+     '| m55r6 | recommended vs basin hopping | 12/12 vs 0/12 | — | 0.018064 | 55.359963 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m55r6 | recommended vs minima hopping | 12/12 vs 0/12 | 7.39602e-07 | 0.018062 | 55.363522 |',
+     '| m55r6 | recommended vs minima hopping | 12/12 vs 0/12 | — | 0.018062 | 55.363522 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m55r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | 1 | 0.304338 | 3.285817 |',
+     '| m55r14 | for_cluster vs basin hopping | 0/12 vs 0/12 | — | 0.304338 | 3.285817 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m55r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | 1 | 0.304323 | 3.285984 |',
+     '| m55r14 | for_cluster vs minima hopping | 0/12 vs 0/12 | — | 0.304323 | 3.285984 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m55r14 | recommended vs basin hopping | 5/12 vs 0/12 | 0.0372671 | 0.317431 | 3.150296 |',
+     '| m55r14 | recommended vs basin hopping | 5/12 vs 0/12 | — | 0.317431 | 3.150296 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/ase-nonlj/README.md',
-     '| m55r14 | recommended vs minima hopping | 5/12 vs 0/12 | 0.0372671 | 0.317414 | 3.150456 |',
+     '| m55r14 | recommended vs minima hopping | 5/12 vs 0/12 | — | 0.317414 | 3.150456 |',
      ('90b88235fe54',), WHY_OLD),
     ('bench/covalent-h2h/README.md',
-     '| Si10 | anneal G | 12/12 | 666 | 268 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |',
+     '| Si10 | anneal G | 12/12 | reference or 1e5 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |',
      ('8aeb3b0b2272', 'b22eb28536ef', 'ce1e7a46826c', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
     ('bench/covalent-h2h/README.md',
-     '| Si10 | CREST | 11/11 | 98,677 | 8,386 | -460.683718 | 2665.7 | 26.72 ms | 0.244 ms |',
+     '| Si10 | CREST | 11/11 | end of its run | -460.683718 | 2665.7 | 26.72 ms | 0.244 ms |',
      ('8aeb3b0b2272', 'b22eb28536ef', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
     ('bench/covalent-h2h/README.md',
-     '| C10 | anneal G | 11/12 | 6,350 | 6,077 | -571.322738 | 14.6 | 1.18 ms | 0.002 ms |',
+     '| C10 | anneal G | 11/12 | reference or 1e5 | -571.322738 | 14.6 | 1.18 ms | 0.002 ms |',
      ('ce1e7a46826c', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
     ('bench/covalent-h2h/README.md',
-     '| C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |',
+     '| C10 | CREST | 4/12 | end of its run | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |',
      ('ce1e7a46826c', 'e6edbcbabc34', 'eb7f899959de'), WHY_OLD),
     ('bench/covalent-h2h/README.md',
-     '| Si10 | anneal G, `ce1e7a46` | 12/12 | 665.5 | 296 | -460.683738 | 36.1 | 70.88 ms | 0.044 ms |',
+     '| Si10 | anneal G, `ce1e7a46` | 12/12 | reference or 1e5 | -460.683738 | 36.1 | 70.88 ms | 0.044 ms |',
      ('ce1e7a46',), WHY_OLD),
     ('bench/covalent-h2h/README.md',
-     '| C10 | anneal G, `ce1e7a46` | 12/12 | 2,516.5 | 1,908 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |',
+     '| C10 | anneal G, `ce1e7a46` | 12/12 | reference or 1e5 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |',
      ('ce1e7a46',), WHY_OLD),
     ('bench/covalent-h2h/README.md',
-     '| C20 | anneal G, `5351f272` | 0/12 | 100,000 | 0 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |',
+     '| C20 | anneal G, `5351f272` | 0/12 | reference or 1e5 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |',
      ('5351f272',), WHY_OLD),
     ('bench/covalent-h2h/README.md',
      'no pair below 2.23 Å. Seeds 3000 and 3007 share the next,',
@@ -1045,7 +1045,12 @@ def gmin_panel_line(audit: Audit, where: str, cells: list[str], groups: dict, sy
     audit.cell(where, "wall median", cells[5], median(col(group, "wall_s")))
     audit.cell(where, "inside median", cells[6], median(col(group, "pot_s")))
     audit.cell(where, "outside median", cells[7], median(col(group, "outside_s")))
-    if arm == "anneal" and system == "lj38":
+    def budget_stop(rows: list[dict[str, str]]) -> bool:
+        return bool(rows) and all(
+            r["hit"] != "1" and int(float(r["evals_to_hit"])) == budget for r in rows
+        )
+
+    if arm == "anneal" and (system == "lj38" or budget_stop(group) != budget_stop(other)):
         audit.cell(where, "budget", cells[0], float(budget))
         for label, cell in zip(("Fisher p", "MW p calls", "MW p wall"), cells[8:]):
             audit.cell(where, label, cell, None)
@@ -1117,6 +1122,8 @@ def gmin_panel_readme(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(GMIN_PANEL_README, GMIN_RECORD_REF)
     audit.said(GMIN_PANEL_README, "On LJ38 the pre-correction rows count different operations, "
                                   "so the Fisher and Mann-Whitney cells are blank and there is no cross-arm test.")
+    audit.said(GMIN_PANEL_README, "Where one arm stops at the budget on every seed and the other does not, "
+                                  "the Fisher and Mann-Whitney cells are blank and there is no cross-arm test.")
     audit.said(GMIN_RECORD_README, GMIN_RECORD_SHA)
     audit.said(GMIN_RECORD_README, GMIN_RECORD_PARENT)
     audit.said(GMIN_RECORD_README, GMIN_RECORD_REF)
@@ -4837,9 +4844,17 @@ def head_to_head(audit: Audit) -> None:
         audit.cell(where, "anneal pot", pot, median([float(r["pot_s"]) for r in a]))
         audit.cell(where, "anneal out", out, median([float(r["outside_s"]) for r in a]))
         audit.cell(where, "GMIN pot", row["GMIN pot"], median([float(r["pot_s"]) for r in g]))
-        audit.cell(where, "p(F)", row["p(F)"], fisher(hits_of(a), len(a), hits_of(g), len(g)))
-        audit.cell(where, "p(U), no continuity correction", row["p(U)"],
-                   mann_whitney([float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in g], continuity=False))
+        def one_stop(rows_: list[dict[str, str]]) -> str | None:
+            kinds = {"hit" if r["hit"] == "1" else "budget" for r in rows_}
+            return kinds.pop() if len(kinds) == 1 else None
+
+        if one_stop(a) is not None and one_stop(a) == one_stop(g):
+            audit.cell(where, "p(F)", row["p(F)"], fisher(hits_of(a), len(a), hits_of(g), len(g)))
+            audit.cell(where, "p(U), no continuity correction", row["p(U)"],
+                       mann_whitney([float(r["evals_to_hit"]) for r in a], [float(r["evals_to_hit"]) for r in g], continuity=False))
+        else:
+            audit.cell(where, "p(F)", row["p(F)"], None)
+            audit.cell(where, "p(U), no continuity correction", row["p(U)"], None)
     twelve = pick(water, system="tip4p12", code="anneal")
     audit.said(path, "where the median run stops within 0.25 s.")
     audit.cell(path, "median (H2O)12 anneal wall under 0.25 s", "0.229", median([float(r["wall_s"]) for r in twelve]))
@@ -4957,8 +4972,12 @@ def gfn2_table(audit: Audit, path: str, rows: list[tuple[int, dict[str, str]]],
             return median([float(r[column]) / float(r["charged"]) * 1e3 for r in group if float(r["charged"])])
 
         audit.cell(where, "hits", row["hits"], frac(group))
-        audit.cell(where, "median calls", row["median calls"], median(calls))
-        audit.cell(where, "IQR", row["IQR"], iqr(calls))
+        if "median calls" in row:
+            audit.cell(where, "median calls", row["median calls"], median(calls))
+            audit.cell(where, "IQR", row["IQR"], iqr(calls))
+        if "stop" in row:
+            want = "end of its run" if row["code"] == "CREST" else "reference or 1e5"
+            audit.cell(where, "stop", row["stop"], want)
         audit.cell(where, "best", row["best / eV"], min(float(r["best"]) for r in group))
         audit.cell(where, "median wall", row["median wall / s"], median([float(r["wall_s"]) for r in group]))
         audit.cell(where, "inside / call ms", row["inside / call"].split()[0], time_per_call("pot_s"))
@@ -4974,7 +4993,7 @@ def covalent_gfn2(audit: Audit) -> None:
     a miss at its budget and given the energy of its geometry.
     """
     path = "bench/covalent-h2h/README.md"
-    header = "system | code | hits | median calls | IQR | best / eV"
+    header = "system | code | hits | stop | best / eV"
     seeds = audit.rows("bench/covalent-h2h/gfn2/seeds.csv")
     rows = audit.rows("bench/covalent-h2h/gfn2/rows.csv")
     named = {(r["system"], r["code"], r["code_revision"], r["seed"]): r
@@ -5254,7 +5273,12 @@ def tip4p_panel(audit: Audit) -> None:
                    median([float(item["calls"]) for item in arms["anneal"]]))
         audit.cell(where, "GMIN median calls", calls_g,
                    median([float(item["calls"]) for item in arms["gmin"]]))
-        if size == "8":
+        def budget_stop(group: list[dict[str, str]]) -> bool:
+            return bool(group) and all(
+                item["hit"] != "1" and float(item["calls"]) == 2_000_000 for item in group
+            )
+
+        if size == "8" or budget_stop(arms["anneal"]) != budget_stop(arms["gmin"]):
             audit.cell(where, "p(U), no continuity correction", row["p(U)"], None)
         else:
             audit.cell(where, "p(U), no continuity correction", row["p(U)"],
@@ -5263,8 +5287,22 @@ def tip4p_panel(audit: Audit) -> None:
                            [float(item["best_energy"]) for item in arms["gmin"]],
                            continuity=False,
                        ))
+    panel_wall = median([
+        float(item["wall_s"]) for item in pick(rows, molecules="21", arm="gmin")
+    ])
+    with (ROOT / "bench/tip4p-h2h/rows-budget21.csv").open(newline="") as handle:
+        sweep_rows = list(csv.DictReader(handle))
+    sweep = [
+        float(item["wall_s"])
+        for item in sweep_rows
+        if item["code"] == "gmin" and item["budget"] == "2000000"
+    ]
     audit.said(path, "Each arm has twelve seeds. The 8 of 12 is GMIN's hit count. "
                      "The call medians count different operations, so there is no paired test.")
+    audit.said(
+        path,
+        f"their median wall is {median(sweep):.2f} s against the panel's {panel_wall:.5f} s.",
+    )
 
 
 def pinned_hf_revision(audit: Audit, path: str) -> str:
@@ -7201,24 +7239,35 @@ def _same_recorded_stop(anneal: list[dict[str, str]], crest: list[dict[str, str]
     return True
 
 
+def _win_claim(text: str) -> str | None:
+    """A comparison claim. The question of which packing wins is not a claim."""
+    if re.search(r"\bis a win\b", text):
+        return "is a win"
+    match = re.search(r"(?<!packing )\bwins\b", text)
+    return match.group(0) if match else None
+
+
 def _crest_win_sentence(audit: Audit, anneal: list[dict[str, str]], crest: list[dict[str, str]]) -> None:
     """A win sentence needs both arms to record the same target, tolerance, and budget."""
     shared = _same_recorded_stop(anneal, crest)
     for path in (TEX, SI, COVER):
         text = collapse(tex_without_comments(audit.text(path)))
-        present = "it is a win" in text
-        audit.record((not present) or shared, path,
+        present = _win_claim(text)
+        audit.record(present is None or shared, path,
                      "a win sentence needs a shared target, tolerance, and budget",
-                     "absent" if not present else "it is a win",
-                     "absent" if not present else ("shared" if shared else "stops differ"))
+                     "absent" if present is None else present,
+                     "absent" if present is None else ("shared" if shared else "stops differ"))
 
 
 def h2o8_prose(row: dict[str, object]) -> str:
-    """Each arm under its own recorded stop. The anneal file has no CREST target or budget."""
+    """The anneal file records no target, tolerance, budget, or stop."""
     return (
-        f"On (H\\(_2\\)O)\\(_8\\), seeds {row['anneal_seeds']} of anneal and seeds {row['crest_seeds']} "
-        f"of CREST each stay under their own recorded stop. "
-        f"CREST's recorded budget is {row['crest_budget']}. "
+        f"On (H\\(_2\\)O)\\(_8\\), seeds {row['anneal_seeds']} are the anneal rows and seeds {row['crest_seeds']} "
+        f"are the CREST rows. "
+        f"The anneal octamer rows record no target, tolerance, budget, or stop. "
+        f"The CREST driver stops at a budget of {row['crest_budget']} calls. "
+        f"The stored total\\_calls is the counted calls, capped at that budget. "
+        f"Seeds 17000, 17002, and 17006 store {row['call_17000']}, {row['call_17002']}, and {row['call_17006']}. "
         f"anneal's rows do not record the CREST target or budget. "
         f"There is no paired test, and the Holm family for CREST is empty."
     )
@@ -7331,6 +7380,9 @@ def octamer_records(audit: Audit) -> dict[str, dict[str, object]] | None:
         "crest_median": crest_median,
         "hit_only": hit_only,
         "crest_budget": crest_budget,
+        "call_17000": next(int(r["total_calls"]) for r in crest if r["seed"] == "17000"),
+        "call_17002": next(int(r["total_calls"]) for r in crest if r["seed"] == "17002"),
+        "call_17006": next(int(r["total_calls"]) for r in crest if r["seed"] == "17006"),
         "fisher": fisher_p,
         "u": rank_u,
         "mannwhitney": float(summary["mann_whitney"]["p_value"]),
@@ -7411,7 +7463,7 @@ def octamer_records(audit: Audit) -> dict[str, dict[str, object]] | None:
 
 
 def _ammonia_polish_stays_above(commit: str, target_ev: float, search_calls: int, polish_calls: int) -> bool:
-    """Each ammonia run.txt uses the campaign split and stays above the target."""
+    """Each ammonia run.txt uses the recorded search-plus-polish split and stays above the target."""
     listing = git("ls-tree", "-r", "--name-only", commit, "bench/octamer-matched/nh3x8/runs")
     runs = [line for line in listing.stdout.splitlines() if line.endswith("/run.txt")]
     if len(runs) < 10:
@@ -7462,7 +7514,7 @@ def removed_crest_arms(audit: Audit) -> None:
                  "4000 sits below the CREST median", f"below {_calls_text(nh3_med)}",
                  " ".join(map(str, sorted(nh3_anneal))))
     audit.said(SI, "Table~\\msref{tab:crest} keeps (H\\(_2\\)O)\\(_8\\).")
-    audit.said(SI, "On the water octamer each arm stays under its own recorded stop.")
+    audit.said(SI, "The anneal octamer rows record no target, tolerance, budget, or stop.")
     audit.said(SI, "The anneal rows of that file are not this report.")
     audit.said(SI, "Those arms are left out because the budget of this code is below the median "
                    "calls of the complete CREST runs.")
@@ -7534,10 +7586,42 @@ def holm_text(value: float) -> str:
 
 
 def _normalise_numbers(text: str) -> str:
-    """Drop thousands separators and tildes, then collapse spaces."""
+    """One digit string for a count, whatever separator the sentence used."""
     text = text.replace("~", " ")
+    text = text.replace("\\,", "")
+    text = text.replace("{,}", "")
     text = re.sub(r"(?<=\d),(?=\d)", "", text)
+    text = re.sub(r"(?<=\d)\u2212(?=\d{3}(?!\d))", "", text)
+
+    def fold_sci(match: re.Match[str]) -> str:
+        value = float(match.group(0))
+        if abs(value) < 1000 or abs(value - round(value)) > 1e-6:
+            return match.group(0)
+        return str(int(round(value)))
+
+    text = re.sub(r"(?<!\d)\d+\.\d+[eE][+-]?\d+(?!\d)", fold_sci, text)
+    text = re.sub(r"(?<!\d)(\d{1,3}) (\d{3})(?!\d)", r"\1\2", text)
     return re.sub(r"[ \t]+", " ", text)
+
+
+def _short_budget() -> str:
+    """The octamer note's charged-call cap, read from that note."""
+    text = (ROOT / "bench/h2o-octamer/README.md").read_text()
+    match = re.search(r"(\d+) calls on every seed", text)
+    if match is None:
+        raise RuntimeError("bench/h2o-octamer/README.md names no short budget")
+    return match.group(1)
+
+
+def _retired_call_tokens() -> list[str]:
+    """CREST call medians of the mixed-stop covalent rows, from the summary file."""
+    tokens = []
+    path = ROOT / "bench/covalent-h2h/gfn2/summaries.csv"
+    for row in csv.DictReader(path.open()):
+        if row["code"] != "crest" or row["system"] not in {"c10", "c20"}:
+            continue
+        tokens.append(_call_text(float(row["median_evals_to_hit"])))
+    return list(dict.fromkeys(tokens))
 
 
 def _bench_readmes() -> list[str]:
@@ -7553,39 +7637,62 @@ def _crest_stops_shared() -> bool:
     return "stop" in anneal[0] and "stop" in crest[0] and {r["stop"] for r in anneal} == {r["stop"] for r in crest}
 
 
-def _unequal_call_alignment(text: str) -> str | None:
-    """A short budget of 4000 beside a different count, or a retired mixed-stop median."""
+def _unequal_call_alignment(text: str, *, medians: bool) -> str | None:
+    """A short budget beside a different count, and, in the paper, a retired median."""
     norm = _normalise_numbers(text)
-    aligned = re.search(r"(?<!\d)4000 & (?!4000\b)\d+(?:\.\d+)?", norm)
+    budget = _short_budget()
+    aligned = re.search(rf"(?<!\d){budget} & (?!{budget}\b)\d+(?:\.\d+)?", norm)
     if aligned:
         return aligned.group(0)
-    for token in ("78367", "78581.5", "98677"):
+    if not medians:
+        return None
+    for token in _retired_call_tokens():
         if re.search(rf"(?<!\d){re.escape(token)}(?!\d)", norm):
             return token
     return None
 
 
-_P_VALUE = re.compile(r"(?i)(?:fisher|mann-whitney|mann–whitney)\s+p\s*=\s*[0-9.eE+-]+")
-_HOLM_RULE = re.compile(
-    r"form one Holm family|family for CREST is empty|Holm-adjusted value below|"
-    r"leaves its \\?\(?p\\?\)? unchanged|An unadjusted"
+_FISHER_P = re.compile(
+    r"(?i)(?:fisher(?:'s)?(?:\s+exact)?|mann[-–]whitney(?:\s+u)?)\s+p\s*(?:=|<|of)\s*"
+    r"[0-9]+(?:\.[0-9]+)?(?:[eE][+\-]?[0-9]+)?"
 )
+_GENERIC_P = re.compile(
+    r"(?i)(?<![\w\\])p\s+(?:=|<)\s*[0-9]+(?:\.[0-9]+)?(?:[eE][+\-]?[0-9]+)?|(?<![\w\\])p\s+of\s+[0-9]+(?:\.[0-9]+)?"
+)
+_HOLM_RULE = re.compile(
+    r"form one holm family|family for crest is empty|holm-adjusted value below|"
+    r"leaves its p unchanged|the adjusted value at position|an unadjusted p|"
+    r"the holm family for crest is empty",
+    re.I,
+)
+_SAME_STOP = re.compile(r"(?i)gmin|restart|tolerance|1e-6")
 # CREST has no shared-stop test, so no Holm member is allowed.
 _SHARED_STOP_FAMILY: dict[str, tuple[str, ...]] = {"CREST": ()}
 
 
 def _holm_member(sentence: str) -> str | None:
-    """A printed Holm or adjusted-p claim, or None when the sentence only states the rule."""
-    if "Holm" not in sentence and "adjusted" not in sentence.lower():
+    """A Holm or adjusted-p claim. A rule clause does not clear a claim clause."""
+    norm = _normalise_numbers(sentence).casefold()
+    if "holm" not in norm and "adjusted" not in norm and "unadjusted" not in norm:
         return None
-    if _HOLM_RULE.search(sentence):
-        return None
-    if not re.search(r"Holm family|adjusted p|Holm-adjusted p|is a win", sentence):
-        return None
-    if not (re.search(r"\d", sentence) or "is a win" in sentence or "joins" in sentence):
-        return None
-    named = re.search(r"\b(ammonia|octamer|CREST|Si10|C10|C20|hexamer)\b", sentence, re.I)
-    return named.group(1) if named else sentence[:80]
+    hit = None
+    for clause in re.split(r"[,;]|\band\b", norm):
+        clause = clause.strip()
+        if not clause or _HOLM_RULE.search(clause):
+            continue
+        claim = re.search(
+            r"holm\s*family|adjusted-p|adjusted p|holm-adjusted|joins|is a win",
+            clause,
+        )
+        if claim is None:
+            continue
+        if not (re.search(r"\d", clause) or "win" in clause or "joins" in clause):
+            continue
+        named = re.search(r"\b(ammonia|octamer|crest|si10|c10|c20|hexamer)\b", clause)
+        if named:
+            return named.group(1)
+        hit = clause[:80]
+    return hit
 
 
 def stopping_pairs(audit: Audit) -> None:
@@ -7601,9 +7708,10 @@ def stopping_pairs(audit: Audit) -> None:
                  "differ", "shared" if shared else "differ")
     paper = (TEX, SI, COVER)
     readmes = _bench_readmes()
-    for path in paper:
-        text = collapse(tex_without_comments(audit.text(path)))
-        aligned = _unequal_call_alignment(text)
+    for path in (*paper, *readmes):
+        raw = audit.text(path)
+        text = collapse(tex_without_comments(raw) if path.endswith(".tex") else raw)
+        aligned = _unequal_call_alignment(text, medians=path in paper)
         audit.record(aligned is None, path, "a mixed stopping pair stays out",
                      "absent" if aligned is None else aligned, "absent" if aligned is None else "present")
     allowed = _SHARED_STOP_FAMILY["CREST"]
@@ -7616,14 +7724,24 @@ def stopping_pairs(audit: Audit) -> None:
             member = _holm_member(sentence)
             if member is not None and (not shared or member not in allowed):
                 members.append(member)
-            p_value = _P_VALUE.search(sentence)
-            names_crest = "CREST" in sentence or "crest" in sentence
-            if p_value is not None and not shared and (path in paper or names_crest):
+            norm = _normalise_numbers(sentence)
+            fisher = _FISHER_P.search(norm)
+            generic = _GENERIC_P.search(norm) if path in paper or not _SAME_STOP.search(norm) else None
+            p_value = fisher or generic
+            if p_value is not None and not shared and (path in paper or fisher is not None):
+                if path not in paper and _SAME_STOP.search(norm):
+                    continue
                 pvalues.append(p_value.group(0))
         audit.record(not members, path, "a Holm family member is outside the shared-stop list",
                      "absent" if not members else members[0], "absent" if not members else "present")
         audit.record(not pvalues, path, "a p-value sentence needs a shared stop",
                      "absent" if not pvalues else pvalues[0], "absent" if not pvalues else "present")
+        if path in paper:
+            claim = _win_claim(text)
+            audit.record(claim is None or shared, path,
+                         "a win sentence needs a shared target, tolerance, and budget",
+                         "absent" if claim is None else claim,
+                         "absent" if claim is None else "stops differ")
     held_pareto(audit)
 
 
@@ -7673,7 +7791,7 @@ def crest_table(audit: Audit) -> None:
                  f"{hits_of(anneal)} {len(anneal)} {hits_of(crest)} {len(crest)}")
     audit.cell(TEX, "the hexamer charges one count", "1", float(len(charged)))
     for path in (TEX, SI, COVER):
-        audit.said(path, "On the water octamer each arm stays under its own recorded stop.")
+        audit.said(path, "The anneal octamer rows record no target, tolerance, budget, or stop.")
         audit.said(path, "anneal's rows do not record the CREST target or budget.")
         audit.said(path, "There is no paired test, and the Holm family for CREST is empty.")
         text = collapse(tex_without_comments(audit.text(path)))
@@ -8586,19 +8704,6 @@ def _paragraph_sentences(paragraph: list[tuple[int, str]]):
         start = joined.index(piece, at)
         at = start + len(piece)
         yield max(line_no for offset, line_no in starts if offset <= start), piece
-
-
-SENTENCE_END = re.compile(r"[.?!](?![\d])")
-
-
-def _sentences(text: str) -> list[str]:
-    prose = re.sub(r"\\begin\{tabular\}.*?\\end\{tabular\}", " ", text, flags=re.S)
-    flat, found, start = collapse(prose), [], 0
-    for end in [match.end() for match in SENTENCE_END.finditer(flat)] + [len(flat)]:
-        sentence, start = flat[start:end].strip(), end
-        if sentence:
-            found.append(sentence)
-    return found
 
 
 def _check_external_source(audit: Audit, path: str) -> None:

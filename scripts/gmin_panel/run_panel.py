@@ -791,12 +791,19 @@ def table_lines(summary: list[dict[str, str]], tex: bool) -> list[list[str]]:
     out = []
     for line in summary:
         name = LABELS[line["system"]][1 if tex else 0]
+
+        def exhausted(hits: str, median: str) -> bool:
+            return hits == "0" and float(median) == float(line["budget"])
+
+        unequal_budget = exhausted(line["anneal_hits"], line["anneal_evals_median"]) != exhausted(
+            line["gmin_hits"], line["gmin_evals_median"]
+        )
         for arm in ("anneal", "gmin"):
             label = ("this work" if tex else "anneal") if arm == "anneal" else "GMIN"
             first = arm == "anneal"
-            # LJ38 pre-correction rows count different operations, so the markdown
-            # table leaves the cross-arm tests blank. The TeX table is separate.
-            blank = first and not tex and line["system"] == "lj38"
+            # LJ38 counts different operations. A pair with one arm stopped at the
+            # budget on every seed is not one test. The TeX table is separate.
+            blank = first and not tex and (line["system"] == "lj38" or unequal_budget)
             out.append(
                 [
                     name if first else "",

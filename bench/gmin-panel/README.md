@@ -124,6 +124,8 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
 
 On LJ38 the pre-correction rows count different operations, so the Fisher and Mann-Whitney cells are blank and there is no cross-arm test.
 
+Where one arm stops at the budget on every seed and the other does not, the Fisher and Mann-Whitney cells are blank and there is no cross-arm test.
+
 <!-- gmin-panel table: start -->
 | System | Budget | Arm | Hits | Median calls | IQR | Wall (s) | Inside (s) | Outside (s) | Fisher p | MW p calls | MW p wall |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -131,9 +133,9 @@ On LJ38 the pre-correction rows count different operations, so the Fisher and Ma
 |  |  | GMIN | 7/12 | 389399 | 173127.75 | 3.658 | 2.673 | 0.979 |  |  |  |
 | LJ55 | 1000000 | anneal | 12/12 | 12242 | 22988.5 | 0.142 | 0.062 | 0.082 | 1 | 0.75 | 0.31 |
 |  |  | GMIN | 12/12 | 12764.5 | 12435.75 | 0.236 | 0.191 | 0.045 |  |  |  |
-| LJ75 | 4000000 | anneal | 12/12 | 1409229.5 | 983622 | 27.019 | 12.543 | 13.818 | 7.4e-7 | 1.0e-5 | 1.0e-5 |
+| LJ75 | 4000000 | anneal | 12/12 | 1409229.5 | 983622 | 27.019 | 12.543 | 13.818 | — | — | — |
 |  |  | GMIN | 0/12 | 4000000 | 0 | 119.9 | 102.9 | 16.952 |  |  |  |
-| LJ98 | 4000000 | anneal | 10/12 | 1511030.5 | 1985194.5 | 41.586 | 23.825 | 17.949 | 6.7e-5 | 1.3e-4 | - |
+| LJ98 | 4000000 | anneal | 10/12 | 1511030.5 | 1985194.5 | 41.586 | 23.825 | 17.949 | — | — | — |
 |  |  | GMIN | 0/12 | 4000000 | 0 | 182.5 | 161.9 | 20.311 |  |  |  |
 | LJ102 | 4000000 | anneal | 9/12 | 894801 | 3401143.75 | 27.445 | 15.463 | 11.982 | 0.21 | 0.093 | - |
 |  |  | GMIN | 5/12 | 4000000 | 2463305.5 | 194.4 | 173.8 | 20.614 |  |  |  |
@@ -147,10 +149,10 @@ On LJ38 the pre-correction rows count different operations, so the Fisher and Ma
 |  |  | GMIN | 1/12 | 1000000 | 0 | 59.384 | 56.245 | 3.135 |  |  |  |
 | M55 ρ=6 | 1000000 | anneal | 12/12 | 22596 | 51763.75 | 0.406 | 0.285 | 0.121 | 1 | 0.93 | 0.84 |
 |  |  | GMIN | 12/12 | 37047.5 | 37358.75 | 0.667 | 0.566 | 0.101 |  |  |  |
-| M55 ρ=14 | 1000000 | anneal | 9/12 | 451561.5 | 773925.5 | 7.377 | 5.656 | 1.721 | 3.4e-4 | 3.8e-4 | - |
+| M55 ρ=14 | 1000000 | anneal | 9/12 | 451561.5 | 773925.5 | 7.377 | 5.656 | 1.721 | — | — | — |
 |  |  | GMIN | 0/12 | 1000000 | 0 | 17.661 | 15.244 | 2.403 |  |  |  |
 | M80 ρ=6 | 4000000 | anneal | 12/12 | 62677 | 575467.75 | 2.265 | 1.663 | 0.602 | 1 | 0.26 | 0.29 |
 |  |  | GMIN | 12/12 | 268934 | 268091.5 | 9.666 | 8.660 | 1.005 |  |  |  |
-| M80 ρ=14 | 4000000 | anneal | 6/12 | 3901429 | 1446773 | 136.9 | 102.2 | 34.159 | 0.014 | 7.1e-3 | - |
+| M80 ρ=14 | 4000000 | anneal | 6/12 | 3901429 | 1446773 | 136.9 | 102.2 | 34.159 | — | — | — |
 |  |  | GMIN | 0/12 | 4000000 | 0 | 141.6 | 128.3 | 13.346 |  |  |  |
 <!-- gmin-panel table: end -->

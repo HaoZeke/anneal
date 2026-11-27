@@ -35,7 +35,7 @@ not say that `achemso-control` was missing.
 tectonic and pdfTeX break lines differently, so the poppler body counts
 differ slightly. On the manuscript whose receipt listed 6722 body words,
 tectonic gives 6722 and pdfTeX gives 6718. On the current receipt,
-tectonic gives 6604 and pdfTeX gives 6595. The receipt records the
+tectonic gives 6637 and pdfTeX gives 6629. The receipt records the
 tectonic count. `--check` compares pages with that receipt and does not
 ask the body counts to be equal.
 

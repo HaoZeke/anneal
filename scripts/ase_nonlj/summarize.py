@@ -308,10 +308,20 @@ def main() -> None:
                     ("ase_bh", (f_bh, w_bh, inv_bh)),
                     ("ase_mh", (f_mh, w_mh, inv_mh)),
                 ):
-                    other_hits = sum(row["hit"] == "1" for row in grouped[system][other_arm])
+                    other = grouped[system][other_arm]
+                    other_hits = sum(row["hit"] == "1" for row in other)
+
+                    def signature(rows: list[dict[str, str]]) -> tuple[int, int, int]:
+                        return (
+                            sum(row["stop"] == "hit" for row in rows),
+                            sum(row["stop"] == "budget" for row in rows),
+                            sum(row["stop"] == "wall" for row in rows),
+                        )
+
+                    shown = "—" if signature(group) != signature(other) else fp
                     vs_lines.append(
                         f"| {system} | {LABEL[arm]} vs {LABEL[other_arm]} | {hits}/12 vs {other_hits}/12 | "
-                        f"{fp} | {wr:.6f} | {ir:.6f} |"
+                        f"{shown} | {wr:.6f} | {ir:.6f} |"
                     )
 
     readme.extend(vs_lines)
@@ -321,7 +331,7 @@ def main() -> None:
             "Medians are Hyndman-Fan type 7. Wall ratios are ratios of arm medians.",
             "The Rust and NumPy random generators do not make a shared starting",
             "geometry from the same numeric seed, so seed labels are not treated as pairs.",
-            "Fisher is two-sided exact.",
+            "The Fisher cells are blank where the hit, budget, and wall stops differ.",
             "Inside is time in the potential. Outside is the rest of the wall.",
             "",
         ]

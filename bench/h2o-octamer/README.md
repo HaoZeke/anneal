@@ -29,4 +29,5 @@ quench. Seeds 17000, 17001, 17002, 17004 and 17005 reach the CREST
 energy. Seed 17003 holds the minimum 9.03e-5 Eh above it.
 
 These arms are not the (H2O)8 row of the manuscript.
-That row counts first-hit calls on both sides and is not this 4000-call comparison.
+The anneal file of that row records no target, tolerance, budget, or stop.
+This 4000-call comparison is not that row.

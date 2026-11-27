@@ -691,12 +691,12 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
   45 minutes a run, seeds 2000-2003 on core 0 and seeds 2004-2011 in
   `gfn2/rows.csv` on core 4 (`e71e5de9`). Serial, hostname `bench`.
 
-| system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
+| system | code | hits | stop | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
-| Si10 | anneal G | 12/12 | 666 | 268 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |
-| Si10 | CREST | 11/11 | 98,677 | 8,386 | -460.683718 | 2665.7 | 26.72 ms | 0.244 ms |
-| C10 | anneal G | 11/12 | 6,350 | 6,077 | -571.322738 | 14.6 | 1.18 ms | 0.002 ms |
-| C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
+| Si10 | anneal G | 12/12 | reference or 1e5 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |
+| Si10 | CREST | 11/11 | end of its run | -460.683718 | 2665.7 | 26.72 ms | 0.244 ms |
+| C10 | anneal G | 11/12 | reference or 1e5 | -571.322738 | 14.6 | 1.18 ms | 0.002 ms |
+| C10 | CREST | 4/12 | end of its run | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
 
 CREST's calls are the calls of its whole run. CREST stops at the end of its run.
 anneal stops at the reference or at 1e5 calls. The stops differ, and there is
@@ -744,10 +744,10 @@ set to the `xtb_eV` of that file. `filter_rows` in
 `scripts/covalent_h2h/gfn2_crest.py` applies this to both `--summary`
 and `--rescore`. The Si10 number for the paper is that one:
 
-| system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
+| system | code | hits | stop | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
-| Si10 | anneal G, `f3d6a050` | 11/12 | 943.5 | 1,006 | -460.683738 | 44.9 | 45.06 ms | 0.011 ms |
-| Si10 | CREST | 11/11 | 98,677 | 8,386 | -460.683718 | 2665.7 | 26.79 ms | 0.243 ms |
+| Si10 | anneal G, `f3d6a050` | 11/12 | reference or 1e5 | -460.683738 | 44.9 | 45.06 ms | 0.011 ms |
+| Si10 | CREST | 11/11 | end of its run | -460.683718 | 2665.7 | 26.79 ms | 0.243 ms |
 
 - Anneal, with the false hit counted as a miss, hits 11 of 12. It stops
   at the reference or at 1e5. CREST stops at the end of its run, and the
@@ -789,12 +789,12 @@ with hostname `bench`, and are the anneal rows of `gfn2/rows.csv` at
 that revision. CREST's rows are those of the first table, from starts
 that are identical byte for byte.
 
-| system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
+| system | code | hits | stop | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
-| Si10 | anneal G, `ce1e7a46` | 12/12 | 665.5 | 296 | -460.683738 | 36.1 | 70.88 ms | 0.044 ms |
-| Si10 | CREST | 11/11 | 98,677 | 8,386 | -460.683718 | 2665.7 | 26.72 ms | 0.244 ms |
-| C10 | anneal G, `ce1e7a46` | 12/12 | 2,516.5 | 1,908 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |
-| C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
+| Si10 | anneal G, `ce1e7a46` | 12/12 | reference or 1e5 | -460.683738 | 36.1 | 70.88 ms | 0.044 ms |
+| Si10 | CREST | 11/11 | end of its run | -460.683718 | 2665.7 | 26.72 ms | 0.244 ms |
+| C10 | anneal G, `ce1e7a46` | 12/12 | reference or 1e5 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |
+| C10 | CREST | 4/12 | end of its run | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
 
 - Si10: anneal hits 12 of 12 and stops at the reference or at 1e5.
   CREST stops at the end of its run. The zero-call seed is dropped.
@@ -836,10 +836,10 @@ valid reference yet.
   of either code has reached it: the 24 timed runs below, and six untimed
   anneal runs on seeds 3000-3005, three at 1e5 calls and three at 3e5.
   xtb 6.7.1 gives the cage the same energy from a fresh SCC, to 1e-9 Eh.
-| system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
+| system | code | hits | stop | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
-| C20 | anneal G, `5351f272` | 0/12 | 100,000 | 0 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |
-| C20 | CREST | 0/12 | 78,581.5 | 4,776.8 | -1146.770080 | 1545.1 | 19.30 ms | 0.307 ms |
+| C20 | anneal G, `5351f272` | 0/12 | reference or 1e5 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |
+| C20 | CREST | 0/12 | end of its run | -1146.770080 | 1545.1 | 19.30 ms | 0.307 ms |
 
 - C20: neither code reaches the cage. anneal stops at the reference or
   at 1e5. CREST stops at the end of its run. The stops differ, and there

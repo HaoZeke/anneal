@@ -15,20 +15,20 @@ the full call budget, so its call count is right-censored at `charged`.
 | arm | hits | Fisher p vs anneal | median best | gap to -543.665361 | median wall s | over anneal | anneal over | median inside s | median outside s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | anneal | 4/12 | 1 | -543.54672557 | 0.11863543 | 84.630861 | 1.000000 | 1.000000 | 59.056659 | 25.579015 |
-| recommended | 7/12 | 0.413649 | -543.66536077 | 0.00000023 | 78.918537 | 0.932503 | 1.072383 | 47.071047 | 31.134047 |
-| basin hopping | 0/12 | 0.0931677 | -536.02030046 | 7.64506053 | 123.012927 | 1.453523 | 0.687983 | 77.440966 | 45.571962 |
-| minima hopping | 0/12 | 0.0931677 | -532.04115348 | 11.62420752 | 299.160840 | 3.534891 | 0.282894 | 1.395366 | 297.686307 |
+| recommended | 7/12 | — | -543.66536077 | 0.00000023 | 78.918537 | 0.932503 | 1.072383 | 47.071047 | 31.134047 |
+| basin hopping | 0/12 | — | -536.02030046 | 7.64506053 | 123.012927 | 1.453523 | 0.687983 | 77.440966 | 45.571962 |
+| minima hopping | 0/12 | — | -532.04115348 | 11.62420752 | 299.160840 | 3.534891 | 0.282894 | 1.395366 | 297.686307 |
 
 Minima hopping stopped at the wall cap on 12/12 seeds; those rows charged 56,362-80,878 calls.
 
-Fisher below compares recommended with each ASE arm.
+The Fisher cells are blank where the stops differ, and there is no paired test.
 
 | comparison | hits | Fisher p | median wall ratio | inverse ratio |
 | --- | --- | --- | --- | --- |
-| recommended against basin hopping | 7/12 vs 0/12 | 0.00457666 | 0.641547 | 1.558733 |
-| recommended against minima hopping | 7/12 vs 0/12 | 0.00457666 | 0.263800 | 3.790755 |
+| recommended against basin hopping | 7/12 vs 0/12 | — | 0.641547 | 1.558733 |
+| recommended against minima hopping | 7/12 vs 0/12 | — | 0.263800 | 3.790755 |
 
-Fisher is the two-sided exact test on hits under the recorded stopping rule.
+The Fisher cells above are blank where the arms do not share a stop.
 Medians are type 7. Wall ratios are ratios of arm medians. The Rust and
 NumPy random generators do not make a shared starting geometry from the
 same numeric seed, so the report does not treat seed labels as pairs.

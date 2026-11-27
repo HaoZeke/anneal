@@ -1,8 +1,8 @@
 # Copyright (c) anneal developers
 """Write the CREST table of the manuscript from the committed GFN2-xTB rows.
 
-The printed row is the water octamer. anneal's file does not record the CREST
-target or budget, so the table names each arm's own stop and prints no hit test.
+The printed row is the water octamer. The anneal file records no target,
+tolerance, budget, or stop, and the table prints no hit test.
 
     python3 paper/jctc/scripts/crest_table.py            # rewrite the block
     python3 paper/jctc/scripts/crest_table.py --check    # exit 1 if it is stale
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import csv
 import io
-import statistics
 import subprocess
 import sys
 from pathlib import Path
@@ -78,20 +77,17 @@ def water_hexamer() -> dict[str, object]:
 
 
 def water_octamer() -> dict[str, object]:
-    """Hits and first-hit medians. The comparison is not a budget-rule row."""
+    """The octamer row. anneal records no target, tolerance, budget, or stop."""
     anneal = show_csv(H2O8_ANNEAL_COMMIT, H2O8_ANNEAL_PATH)
     crest = show_csv(H2O8_CREST_COMMIT, H2O8_CREST_PATH)
     if len(anneal) != 12 or len(crest) != 12:
-        raise SystemExit(f"h2o8 first-hit: {len(anneal)} anneal rows and {len(crest)} CREST rows")
+        raise SystemExit(f"h2o8 rows: {len(anneal)} anneal rows and {len(crest)} CREST rows")
     return {
         "system": "(H\\(_2\\)O)\\(_8\\)",
         "budget": None,
         "anneal": anneal,
         "crest": crest,
         "crest_calls": [],
-        "first_hit": True,
-        "anneal_median": statistics.median(float(r["calls_to_hit"]) for r in anneal),
-        "crest_median": statistics.median(float(r["first_hit_call"]) for r in crest),
     }
 
 
@@ -174,7 +170,8 @@ def table() -> str:
     lines = [
         "\\begin{table}",
         "\\caption{anneal and CREST 3.0.2 on the GFN2-xTB water octamer.",
-        "Each arm stays under its own recorded stop.",
+        "The anneal octamer rows record no target, tolerance, budget, or stop.",
+        "The CREST driver stops at a budget of 151738 calls.",
         "anneal's rows do not record the CREST target or budget.",
         "There is no paired test.",
         "The Holm family for CREST is empty.",
@@ -186,7 +183,7 @@ def table() -> str:
         "\\toprule",
         "Cluster & anneal stop & CREST stop \\\\",
         "\\midrule",
-        "(H\\(_2\\)O)\\(_8\\) & not recorded & end of its run \\\\",
+        "(H\\(_2\\)O)\\(_8\\) & not recorded & budget 151738 \\\\",
         "\\bottomrule",
         "\\end{tabular}",
         "\\end{table}",

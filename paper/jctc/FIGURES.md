@@ -191,15 +191,14 @@ New hash.
 
 ## What the sealed notes still say
 
-The fresh 192-seed hexamer rerun receipts are committed under
-`data/water_v45b/rerun-9a30f319/`: 121/192 anneal hits and 94/192 plain
-CREST hits.  Each arm has one unedited `status.json` receipt per seed, and
-the directory-level `SHA256SUMS` covers all 384 files.
+The 192-seed hexamer rerun is not a result of this article.
+Each arm of that rerun has its own receipt, and this article does not
+cite those hit counts.
 The earlier McNemar values do not derive from this rerun.
 No separate receipt records the LJ map energies.
 A figure that matches main has no generator in this tree.
 scripts/toc_graphic.py draws toc-graphic.pdf.
-water_crest.pdf matches the 192-seed figure on main.
+water_crest.pdf is not a figure of this article.
 scripts/water_crest_figure.py draws the six-seed counter chart.
 The chart path is figs/water_crest_counters.pdf.
 That script does not write water_crest.pdf.

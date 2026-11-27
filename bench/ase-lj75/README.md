@@ -14,19 +14,19 @@ The ASE wall cap is 167.806728 s, three times the slowest anneal
 wall, seed 2000 at 55.935576 s. A seed that reaches the cap is a
 miss. The row keeps the calls, the wall, the best energy and the cap.
 Minima hopping reached that cap on 12 of 12 seeds.
+Basin hopping stops at the budget on every seed and anneal does not.
+The stops differ, and there is no paired test.
 
 | arm | hits | Fisher p | Mann-Whitney U | Mann-Whitney p | median best | gap to -397.492331 | median wall s | over anneal | anneal over | median inside s | median outside s |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | anneal | 1/12 | 1 | 72 | 1 | -396.28224883 | 1.21008217 | 50.979432 | 1.000000 | 1.000000 | 34.003937 | 17.055697 |
-| basin hopping | 0/12 | 1 | 78 | 0.359317 | -393.72607097 | 3.76626003 | 89.907831 | 1.760879 | 0.567898 | 46.580477 | 43.358141 |
-| minima hopping | 0/12 | 1 | 78 | 0.359317 | -391.70068193 | 5.79164907 | 172.344747 | 3.375083 | 0.296295 | 0.943898 | 171.463289 |
+| basin hopping | 0/12 | — | — | — | -393.72607097 | 3.76626003 | 89.907831 | 1.760879 | 0.567898 | 46.580477 | 43.358141 |
+| minima hopping | 0/12 | — | — | — | -391.70068193 | 5.79164907 | 172.344747 | 3.375083 | 0.296295 | 0.943898 | 171.463289 |
 
 Anneal seed 2009 hit at 1913436 calls, best -397.49233098.
-Misses are censored at 4,000,000 for the rank test.
 Medians are type 7. Wall ratios are paired by seed.
 The gap is the median best minus -397.492331.
-Fisher is the two-sided exact test. Mann-Whitney is two-sided with
-the tie correction and the continuity correction.
+The Fisher and Mann-Whitney cells are blank because the stops differ.
 
 Of 930 samples taken while the minima-hopping call rate was falling,
 864 were in ComparePositions._indistinguishable_compare.
