@@ -2500,13 +2500,13 @@ def pdf_length():
     return module
 
 
-def test_the_rendered_abstract_is_counted_without_page_numbers():
+def test_the_rendered_abstract_counts_pdftotext_tokens():
     length = pdf_length()
     abstract = " ".join(["word"] * 150) + " on 9 of 13 at 0.317 and GFN2. " + "end " * 40
     text = (f"Title\nAbstract\n{abstract}\n\n1\n\f2\n\nIntroduction\n" + "body " * 6000
-            + "12 of 12\n\n3\n\fAuthor contributions\nnot counted\n")
+            + "12 of 12\n\n2\n\nThe search\n" + "3\n\fAuthor contributions\nnot counted\n")
     counts = length.measure(text)
-    assert counts == {"abstract_words": 150 + 8 + 40, "abstract_numerals": 4, "body_words": 6003}
+    assert counts == {"abstract_words": 150 + 8 + 40 + 2, "abstract_numerals": 4, "body_words": 6006}
     assert not length.problems(counts)
     assert length.problems(dict(counts, abstract_words=201, abstract_numerals=7, body_words=7001)) == [
         "abstract has 201 words, more than 200", "abstract has 7 numerals, more than 6",

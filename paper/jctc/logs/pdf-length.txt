@@ -1,7 +1,8 @@
-# abstract_words: poppler pdftotext default, abstract block only, whitespace tokens
-abstract_words=121
+# abstract_words: poppler pdftotext default, no -layout, whitespace tokens
+# a section number alone before its heading is not a word; a page number is not a numeral
+abstract_words=123
 abstract_numerals=6
-body_words=6963
+body_words=6971
 pages=27
 sha256 893eabc49ea29e4ad964fdc837287f858ee94c71253955f0554f127fe93dec35  paper/jctc/manuscript.tex
 sha256 23fc4d2c12f95c6cc39378df154c6fdc876591aecf5495b945038189cce9e80b  paper/jctc/macros.tex
