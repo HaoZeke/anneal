@@ -189,7 +189,7 @@ The block under the constructor is the example =cargo test --doc= runs.
   follow the preset when left unset: on for =recommended=, off otherwise.
   A callback may raise a =BaseException= that is not an =Exception=, such as =KeyboardInterrupt=.
   The run then stops at the next evaluation, and the exception is re-raised.
-- ~ensemble_optimize~ :: design box. Gradient → hop and quench; no gradient → portfolio.
+- ~ensemble_optimize~ :: design box. A gradient selects hop and quench; without one, the search is values-only.
 
   #+begin_src python :eval no
   ensemble_optimize(obj, low, high, budget, ..., grad_fn=None)
