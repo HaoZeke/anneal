@@ -61,6 +61,7 @@ from codata2018 import KJ_PER_KCAL  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 import revision_reach  # noqa: E402
 from gmin_pin import REVISION as GMIN_PIN_REVISION  # noqa: E402
+from machine_provenance import require_lf  # noqa: E402
 from gmin_pin import SNAPSHOT as GMIN_PIN_SNAPSHOT  # noqa: E402
 from gmin_pin import TARBALL_SHA256 as GMIN_PIN_TARBALL_SHA256  # noqa: E402
 
@@ -535,6 +536,13 @@ UNVERIFIABLE = [
 ]
 
 
+def require_row_lf(path: Path, fieldnames: object) -> None:
+    """Refuse CR when the header names a revision, host or machine column."""
+    names = set(fieldnames or ())
+    if names & {*ALL_REVISION_COLUMNS, *HOST_COLUMNS, *MACHINE_PROVENANCE_COLUMNS}:
+        require_lf(path)
+
+
 class Audit:
     def __init__(self) -> None:
         self.results: list[tuple[str, str, str, str, str]] = []
@@ -552,7 +560,10 @@ class Audit:
         if path not in self.read:
             with (ROOT / path).open(newline="") as handle:
                 lines = [line for line in handle if line.strip() and not line.startswith("#")]
-            self.read[path] = list(csv.DictReader(lines, delimiter=delimiter))
+            reader = csv.DictReader(lines, delimiter=delimiter)
+            parsed = list(reader)
+            require_row_lf(ROOT / path, reader.fieldnames)
+            self.read[path] = parsed
         return self.read[path]
 
     def text(self, path: str) -> str:
@@ -4372,7 +4383,10 @@ def side_rows(audit: Audit, path: str) -> list[dict[str, str]]:
     if cached is not None:
         return cached
     with (ROOT / path).open(newline="") as handle:
-        return list(csv.DictReader(handle))
+        reader = csv.DictReader(handle)
+        parsed = list(reader)
+    require_row_lf(ROOT / path, reader.fieldnames)
+    return parsed
 
 
 def sc_rerun_summary(audit: Audit) -> list[dict[str, str]]:

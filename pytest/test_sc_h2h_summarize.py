@@ -6,6 +6,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
     "sc_h2h_summarize", ROOT / "scripts" / "paper_rerun" / "sc_h2h_summarize.py"
@@ -49,3 +51,14 @@ def test_disagreeing_gmin_pins_are_not_printed_as_a_code_revision():
     )
     assert "| sc126-38 | gmin |  |" in text
     assert "| sc126-38 | gmin | 61fa67cf |" not in text
+
+
+def test_load_refuses_rows_with_carriage_returns(tmp_path):
+    rows = tmp_path / "rows.csv"
+    rows.write_bytes(b"system,arm,code_revision,gmin_pin\r\nsc126-38,gmin,abc,def\r\n")
+    with pytest.raises(SystemExit, match="contains CR"):
+        summarize.load(rows)
+    rows.write_bytes(b"system,arm,code_revision,gmin_pin\nsc126-38,gmin,abc,def\n")
+    assert summarize.load(rows) == [
+        {"system": "sc126-38", "arm": "gmin", "code_revision": "abc", "gmin_pin": "def"}
+    ]

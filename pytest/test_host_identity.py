@@ -9,8 +9,8 @@ a salted digest. The boot id is read in two files only,
 name, but only as the argument of ``host_label``; shell goes through
 ``machine_provenance.py``; Rust reads it only in ``host_label.rs``. A bank or
 catalog endpoint is written as ``endpoint_label``. The machine id is read
-in ``scripts/machine_provenance.py``, and the one other read, in the
-Sutton-Chen rerun, is exempt because the next line hashes it. Python, shell, batch
+in ``scripts/machine_provenance.py``. The Sutton-Chen rerun calls
+``machine_digest`` and does not read the file itself. Python, shell, batch
 scripts (``.sbatch``) and Rust are all scanned, ``experiments/`` too. A line
 that reads the host any other way fails, with no exemption for a file. A line
 that must read it raw is exempt by its exact text and a reason.
@@ -65,10 +65,6 @@ EXEMPT = {
         "scripts/gmin_panel/tuned.py",
         'for path in (Path("/etc/machine-id"), Path("/proc/sys/kernel/random/boot_id")):',
     ): TUNED_REASON + ", and both ids only feed a digest",
-    (
-        "scripts/paper_rerun/sc_h2h.py",
-        'raw = Path("/etc/machine-id").read_bytes().strip()',
-    ): "the id is read to be hashed by the next line, and only the sha256 reaches a row",
     (
         "scripts/elja_hq_sci_bankrpc.sh",
         "HOST=${BANK_HOST:-$(hostname)}",
