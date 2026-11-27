@@ -34,12 +34,24 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
    * - Name
      - Move
      - Setting
+   * - ``rkick``
+     - Shift every centre and every rotation vector by uniform steps.
+     - ``translate_step`` (0.35 A) and ``rotate_step`` (0.40 rad) in ``for_tip4p``.
    * - ``rtrans``
      - Shift every centre by a uniform step in each coordinate.
      - ``translate_step``, 0.35 angstroms in ``for_tip4p``.
    * - ``rrot``
      - Add a uniform increment to each component of every rotation vector, then fold it into the ball of radius pi.
      - ``rotate_step``, 0.40 rad in ``for_tip4p``.
+   * - ``rtrans1``
+     - Shift one centre by a uniform step. The other centres and every orientation stay fixed.
+     - Half-width is the larger of ``min_separation`` and ``translate_step``. ``min_separation`` is 2.70 A in ``for_tip4p``.
+   * - ``rreor``
+     - Compose a uniform random rotation onto three bodies when the cluster has at least three, and onto every body when it has fewer. Centres stay fixed.
+     - Offered whenever ``local`` is false. There is no step length. ``for_tip4p`` needs at least two bodies.
+   * - ``rreloc``
+     - Move one body onto a vacant contact at ``min_separation`` and draw a new orientation.
+     - ``relocate``, on in ``for_tip4p``.
    * - ``rcycle``
      - Reverse one directed cycle of hydrogen bonds.
        Each body on the cycle turns about its anchor.
@@ -56,8 +68,9 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
 - =n_molecules= :: bodies in the state.
 - =translate_step= :: half-width of the =rtrans= step, in length units.
 - =rotate_step= :: largest =rrot= increment per component, or the cap of the =rorient= angle, in radians.
-- =local= :: =true= offers =rorient= in place of =rtrans= and =rrot=.
-- =reverse_cycles= :: =true= adds =rcycle=.
+- =local= :: =true= offers =rorient= in place of =rkick=, =rtrans=, =rrot=, =rtrans1=, =rreor= and =rreloc=.
+- =relocate= :: =true=, and =local= false, adds =rreloc=.
+- =reverse_cycles= :: =true= adds =rcycle= when a geometry is set and that geometry has a contact cycle.
   The archive walk still reverses a chain from the declared bonds when that arm is absent.
   A quench from that walk, or from the shell walk, can lower the published minimum.
   It does not reset the main chain's stall clock, it does not pay the move allocator, and a stall escape returns to a minimum the main chain quenched.
@@ -65,7 +78,8 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
 
 * Presets
 
-- =Config::for_tip4p=, =Config::recommended_tip4p=, =Config::communicating_tip4p= :: =rtrans=, =rrot= and =rcycle=.
+- =Config::for_tip4p=, =Config::recommended_tip4p=, =Config::communicating_tip4p= :: =rkick=, =rtrans=, =rrot=, =rtrans1=, =rreor=, =rreloc= and =rcycle=.
+  =for_tip4p= needs at least two bodies.
 - =Config::with_rigid_bodies= :: =rorient= only.
 
 The Python =cluster_search= with =water_sites= uses these three TIP4P presets on the caller's sites.
@@ -74,8 +88,9 @@ It labels the three sites 8, 1 and 1, so =rcycle= is on there too.
 
 * =rcycle= rules
 
-- The geometry must have exactly one site of atomic number 8 and two of atomic number 1.
-  Otherwise the library does not offer =rcycle=.
+- The library offers =rcycle= for any geometry that has a contact cycle.
+  With no declared bonds, that cycle exists only when one site has atomic number 8 and two have atomic number 1.
+  A declared bond graph does not need those atomic numbers.
 - A hydrogen bond is a donor site within the body's contact of another body's anchor.
   That contact is the longest anchor-to-donor bond plus the widest donor-donor separation, and it is not tighter than the cycle move's own threshold of 2.5 angstroms.
   The TIP4P span is the O-H length plus the H-H length, about 2.47 angstroms, so the shared contact on that frame is 2.5 angstroms.
