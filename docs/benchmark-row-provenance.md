@@ -47,6 +47,8 @@ these provenance columns:
   hardware UUID (`IOPlatformUUID`) that `ioreg -rd1 -c
   IOPlatformExpertDevice` prints.  A machine that offers none of these
   raises an error; a row never records an invented identifier.
+  `machine_digest()` computes this digest.  The Sutton-Chen rerun records
+  it in `host`.
 - `cpu_model` is the first available CPU model string, with whitespace
   normalized.  On Linux it is the first of the `model name`, `Model`,
   `Processor` and `Hardware` entries of `/proc/cpuinfo` that is not empty.
@@ -61,6 +63,17 @@ these provenance columns:
   Setting only one of the two, or an `ANNEAL_MACHINE_ID` that is not a
   digest, is an error.  With neither variable set the columns describe the
   machine that runs the row.
+
+Rows written before the salted digest was in use may store the plain
+SHA-256 of `/etc/machine-id`, with no salt. The 64-hex `host` value
+`3b11c160088e7af5c4f7ebd9da95e0bfe019a34698416701bb057c15fea10873` in
+the committed bench tables is that plain digest, and so is every value
+in the `machine_id` column of `record/gmin-184/rows.csv`. That record's
+`run_record.py` hashed the file alone. The `host` label
+`machine-9eb296774121518f` in `bench/template-free2-r7` is the first 16
+hex digits of the plain SHA-256 of the raw `/etc/machine-id` bytes.
+These stored values stay as written. They are not comparable with salted
+digests.
 
 The machine fields describe the physical machine that ran the measured row.
 Summaries preserve the distinct source values, separated by semicolons.
