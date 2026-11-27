@@ -1,0 +1,259 @@
+{
+  "arms": [
+    {
+      "arm": "anneal",
+      "hits": 12,
+      "median": 4435.0,
+      "misses": 0,
+      "n": 12,
+      "budget": 151738,
+      "miss_score": 151739,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005,
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "calls": [
+        4419,
+        629,
+        4318,
+        9271,
+        3220,
+        5432,
+        6379,
+        7822,
+        2925,
+        5531,
+        4451,
+        3489
+      ],
+      "source": "bench/pareto-h2o8/rows.csv",
+      "call_column": "calls_to_first_hit",
+      "target_Eh": -40.681336013361,
+      "tolerance_Eh": 1e-06
+    },
+    {
+      "arm": "crest",
+      "hits": 7,
+      "median": 141621.5,
+      "misses": 5,
+      "n": 12,
+      "budget": 151738,
+      "miss_score": 151739,
+      "seeds": [
+        17000,
+        17001,
+        17002,
+        17003,
+        17004,
+        17005,
+        17006,
+        17007,
+        17008,
+        17009,
+        17010,
+        17011
+      ],
+      "calls": [
+        131547,
+        113009,
+        66888,
+        76037,
+        81130,
+        151739,
+        91817,
+        151739,
+        151739,
+        151739,
+        151739,
+        151696
+      ],
+      "source": "bench/h2o8-poi-vs-crest/inputs.csv",
+      "call_column": "first_hit_call",
+      "target_Eh": -40.681336013361,
+      "tolerance_Eh": 1e-06
+    }
+  ],
+  "paired_by_seed": false,
+  "fisher_exact": {
+    "alternative": "two-sided",
+    "odds_ratio": null,
+    "odds_ratio_infinite": true,
+    "p_value": 0.037267080745341616,
+    "table_hits_misses": [
+      [
+        12,
+        0
+      ],
+      [
+        7,
+        5
+      ]
+    ]
+  },
+  "mann_whitney": {
+    "alternative": "two-sided",
+    "method": "exact",
+    "p_value": 7.39602301050679e-07,
+    "u_anneal": 0.0
+  },
+  "median_ratio_anneal_over_crest": {
+    "ratio": 0.03131586658805337,
+    "ci95": [
+      0.022996687923278462,
+      0.05766491602153667
+    ],
+    "percentile": "numpy.percentile linear",
+    "resamples": 10000,
+    "rng": "numpy.random.default_rng",
+    "seed": 20261123,
+    "numerator": "anneal",
+    "denominator": "crest"
+  },
+  "seed_stability": {
+    "label": "seed-stability check",
+    "same_method": "anneal",
+    "A": {
+      "arm": "A",
+      "hits": 6,
+      "median": 4368.5,
+      "misses": 0,
+      "n": 6,
+      "budget": 151738,
+      "miss_score": 151739,
+      "seeds": [
+        2000,
+        2001,
+        2002,
+        2003,
+        2004,
+        2005
+      ],
+      "calls": [
+        4419,
+        629,
+        4318,
+        9271,
+        3220,
+        5432
+      ],
+      "target_Eh": -40.681336013361,
+      "tolerance_Eh": 1e-06
+    },
+    "B": {
+      "arm": "B",
+      "hits": 6,
+      "median": 4991.0,
+      "misses": 0,
+      "n": 6,
+      "budget": 151738,
+      "miss_score": 151739,
+      "seeds": [
+        2006,
+        2007,
+        2008,
+        2009,
+        2010,
+        2011
+      ],
+      "calls": [
+        6379,
+        7822,
+        2925,
+        5531,
+        4451,
+        3489
+      ],
+      "target_Eh": -40.681336013361,
+      "tolerance_Eh": 1e-06
+    }
+  },
+  "abba_wall": {
+    "anneal": {
+      "n": 12,
+      "wall_s_sum": "15639.847620",
+      "wall_s_median": "1301.8362105",
+      "cpu_s_sum": "15638.099226",
+      "cpu_s_median": "1301.694488",
+      "host_id": [
+        "vm0"
+      ],
+      "core": [
+        "0"
+      ]
+    },
+    "crest": {
+      "n": 12,
+      "wall_s_sum": "11695.050000",
+      "wall_s_median": "945.870000",
+      "cpu_s_sum": "11646.220000",
+      "cpu_s_median": "939.580000",
+      "host_id": [
+        "vm0"
+      ],
+      "core": [
+        "0"
+      ]
+    }
+  },
+  "rows_b_vs_poi": {
+    "poi_table": "bench/octamer-matched/h2o8/poi/results.csv",
+    "poi_column": "calls_to_hit",
+    "rows_b_column": "calls_to_first_hit",
+    "seeds": [
+      {
+        "seed": 2006,
+        "rows_b_calls_to_first_hit": 6379,
+        "poi_calls_to_hit": 6254,
+        "rows_b_best_Eh": "-40.681336013361",
+        "poi_best_Eh": "-40.681336013361"
+      },
+      {
+        "seed": 2007,
+        "rows_b_calls_to_first_hit": 7822,
+        "poi_calls_to_hit": 6258,
+        "rows_b_best_Eh": "-40.681336013361",
+        "poi_best_Eh": "-40.681336013361"
+      },
+      {
+        "seed": 2008,
+        "rows_b_calls_to_first_hit": 2925,
+        "poi_calls_to_hit": 4388,
+        "rows_b_best_Eh": "-40.681336013361",
+        "poi_best_Eh": "-40.681336013361"
+      },
+      {
+        "seed": 2009,
+        "rows_b_calls_to_first_hit": 5531,
+        "poi_calls_to_hit": 20714,
+        "rows_b_best_Eh": "-40.681336013361",
+        "poi_best_Eh": "-40.681336013361"
+      },
+      {
+        "seed": 2010,
+        "rows_b_calls_to_first_hit": 4451,
+        "poi_calls_to_hit": 8009,
+        "rows_b_best_Eh": "-40.681336013361",
+        "poi_best_Eh": "-40.681336013361"
+      },
+      {
+        "seed": 2011,
+        "rows_b_calls_to_first_hit": 3489,
+        "poi_calls_to_hit": 3951,
+        "rows_b_best_Eh": "-40.681336013361",
+        "poi_best_Eh": "-40.681336013361"
+      }
+    ],
+    "index_pairs_equal": false,
+    "energy_strings_equal": true
+  }
+}
