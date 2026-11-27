@@ -28,12 +28,15 @@ const SEED: u64 = 2000;
 const ATOMS: usize = 98;
 const BUDGET: usize = 5_000;
 
-fn trajectory_hash() -> String {
+fn trajectory_hash(packing_deferral: Option<usize>) -> String {
     // AVX2, AVX-512 and NEON dots are not the same quench. Scalar `mul_add`
     // is the path every target can run.
     let _ = rgmin::vecops::force_simd_path("scalar");
-    let cfg = Config::recommended(ATOMS);
+    let mut cfg = Config::recommended(ATOMS);
     assert!(!cfg.cap_twist, "the pinned base trajectory is flag-off");
+    if let Some(deferral) = packing_deferral {
+        cfg.packing_deferral = deferral;
+    }
     let potential = PairPotential::lennard_jones(ATOMS);
     let mut rng = StdRng::seed_from_u64(SEED);
     let start = random_cluster_in_radius(ATOMS, cfg.start_radius(), cfg.min_separation, &mut rng);
@@ -86,11 +89,37 @@ fn trajectory_hash() -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// The generic packing probe is offered after 36 hops, and this 5_000-call
+/// walk ends first. It is develop's flag-off walk, so the hash is the one
+/// develop pins.
 #[test]
 fn recommended_lj98_seed_2000_keeps_its_short_trajectory() {
     anneal_core::install_rgpot_kernels!();
-    let hash = trajectory_hash();
-    // The flag-off trajectory from the base is deterministic on every build.
+    let hash = trajectory_hash(None);
     let expected = "5cd9c95765eadc45efa5879002be9a7430a81b9d82d5bf19509dcabc5578b65c";
+    assert_eq!(hash, expected, "trajectory hash changed: {hash}");
+}
+
+/// Offered at the first pass of the hop loop, the probe's calls and the
+/// held packing change the walk. A stall branch keeps the lattice move and
+/// skips a second catalogue, so this is not the hash of a branch that
+/// dropped the lattice move. Screening each candidate against the walk's
+/// best changes what the probe charges, and so the walk after it: the
+/// unscreened probe pinned `c9b6d7d6…`. The refusals are audited before
+/// the next hop, and their calls move the walk again; with the audit
+/// never scheduled the hash is the screened probe's `63c2f410…`.
+///
+/// The hop 2 audit runs out of its budget with two refusals waiting, one
+/// of them cut. Both stay deferred, and the audit at hop 4 relaxes the
+/// untried one for 332 calls and is cut again. The walk that dropped them
+/// pinned `9a965dcd…`. The first six accepted transitions are unchanged;
+/// with 332 fewer calls the walk's hop 8 quench ends on the budget before
+/// its convergence check, 6.5e-11 above the energy it reached there, and
+/// the walk makes 8 hops where it made 9, at the same best and charge.
+#[test]
+fn recommended_lj98_seed_2000_with_the_probe_at_hop_zero_keeps_its_trajectory() {
+    anneal_core::install_rgpot_kernels!();
+    let hash = trajectory_hash(Some(0));
+    let expected = "c3a567652305c127e07504471e07471e4d2d9414d5b52d9183706a0f15d76e02";
     assert_eq!(hash, expected, "trajectory hash changed: {hash}");
 }

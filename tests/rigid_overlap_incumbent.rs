@@ -113,14 +113,11 @@ fn tetra_centres() -> Array1<f64> {
         [-1.0, 1.0, -1.0],
         [-1.0, -1.0, 1.0],
     ];
-    let edge: f64 = raw[0]
-        .iter()
-        .zip(raw[1])
-        .map(|(a, b)| {
-            let delta = a - b;
-            delta * delta
-        })
-        .sum();
+    let mut edge = 0.0_f64;
+    for (left, right) in raw[0].iter().zip(raw[1]) {
+        let delta = left - right;
+        edge += delta * delta;
+    }
     let scale = 2.8 / edge.sqrt();
     let mut state = Array1::zeros(24);
     for (body, point) in raw.iter().enumerate() {

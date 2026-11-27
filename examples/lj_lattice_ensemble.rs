@@ -126,7 +126,7 @@ fn recommended_chain(n: usize, budget: usize, seed: u64, target: Option<f64>) ->
         best: outcome.best,
         best_state: outcome.best_state.map(|s| s.to_vec()).unwrap_or_default(),
         first_hit,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
         hops: outcome.hops,
     }
 }

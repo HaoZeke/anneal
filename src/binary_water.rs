@@ -56,8 +56,11 @@ pub struct BinaryLennardJonesProblem {
 pub struct StockSearch {
     /// Lowest energy the ledger recorded.
     pub energy: f64,
-    /// Charged evaluations, one value-and-gradient at a time.
+    /// Charged evaluations, one value-and-gradient at a time, with any
+    /// settled calls that passed the budget.
     pub charged: usize,
+    /// The part of [`StockSearch::charged`] that passed the budget.
+    pub settled_beyond_cap: usize,
     /// State that attained [`StockSearch::energy`].
     pub state: Vec<f64>,
     /// The wide-ratio escape was requested and the `rgsaddle` feature is off.
@@ -178,7 +181,8 @@ where
         .unwrap_or_else(|| start.to_vec());
     StockSearch {
         energy: ledger.best,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         state,
         nve_unavailable: out.nve_unavailable,
     }
@@ -275,6 +279,7 @@ mod tests {
         let nan_run = StockSearch {
             energy: f64::NAN,
             charged: 0,
+            settled_beyond_cap: 0,
             state: Vec::new(),
             nve_unavailable: false,
         };

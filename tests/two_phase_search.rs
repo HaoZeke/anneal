@@ -54,6 +54,13 @@ fn the_relative_cutoff_reaches_the_lj38_octahedron_where_the_plain_walk_need_not
     // The 30_000-call bars above were measured at a 200-step quench.
     plain.relax_steps = 200;
     plain.move_library = MoveLibrary::LeanBurst;
+    // The generic packing probe quenches a catalogue of packings once the
+    // walk has made `Config::packing_deferral` times nine hops, 36 by
+    // default. On LJ38 it reaches the octahedron on all 16 seeds for
+    // either arm (mask 0xffff), so it would hide the surface effect this
+    // test compares. It is suppressed for both arms. The lattice move
+    // stays on, which keeps the walk develop measured.
+    plain.suppress_generic_packings = true;
     plain.trail_on_stall = false;
     plain.escape_on_stall = false;
     plain.restart_on_stall = false;

@@ -655,7 +655,7 @@ fn main() {
                         }
                     }
                     let cost = hook.cost();
-                    (r, replica_seed, ledger.spent(), outcome, cost)
+                    (r, replica_seed, ledger.charged(), outcome, cost)
                 })
             })
             .collect();

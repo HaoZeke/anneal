@@ -71,7 +71,7 @@ fn main() {
     println!("seed: {seed}");
     println!("tie: {}", args[3]);
     println!("budget: {budget}");
-    println!("charged: {}", ledger.spent());
+    println!("charged: {}", ledger.charged());
     println!("best: {:.10}", outcome.best);
     println!("generations: {}", outcome.hops);
     println!("restarts: {}", outcome.basins);

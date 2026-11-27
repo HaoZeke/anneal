@@ -93,8 +93,10 @@ pub struct ArchiveOutcome {
     pub branch_draws: u64,
     /// Charged evaluations spent inside fresh-start branches.
     pub branch_spent: usize,
-    /// Charged evaluations spent (copied from the ledger).
+    /// Charged evaluations: every settled call, [`Ledger::charged`].
     pub charged: usize,
+    /// The part of [`ArchiveOutcome::charged`] that passed the budget.
+    pub settled_beyond_cap: usize,
     /// Ledger spend when `best` last improved.
     pub best_at: usize,
     /// A requested constant-energy (NVE) escape stopped a hop.
@@ -251,7 +253,7 @@ fn paid_hop<'g, R: Rng + ?Sized>(
     let mut led = ledger.slice(take);
     let hopped = run_with_gradient(cfg, start, &mut led, relax, grad, rng);
     let used = led.spent();
-    let _ = ledger.absorb_charges(&led);
+    let _ = ledger.settle_child(&led, 0);
     let hop = hopped?;
     Ok((hop, used))
 }
@@ -672,7 +674,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
                 artn: acc.artn,
                 branch_draws: acc.branch_draws,
                 branch_spent: acc.branch_spent,
-                charged: ledger.spent(),
+                charged: ledger.charged(),
+                settled_beyond_cap: ledger.settled_beyond_cap(),
                 best_at: acc.best_at,
                 nve_unavailable: acc.nve_unavailable,
             });
@@ -717,7 +720,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
             artn: acc.artn,
             branch_draws: acc.branch_draws,
             branch_spent: acc.branch_spent,
-            charged: ledger.spent(),
+            charged: ledger.charged(),
+            settled_beyond_cap: ledger.settled_beyond_cap(),
             best_at: acc.best_at,
             nve_unavailable: acc.nve_unavailable,
         });
@@ -829,7 +833,8 @@ pub fn archive_search<'g, R: Rng + ?Sized>(
         artn: acc.artn,
         branch_draws: acc.branch_draws,
         branch_spent: acc.branch_spent,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         best_at: acc.best_at,
         nve_unavailable: acc.nve_unavailable,
     })

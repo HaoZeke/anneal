@@ -316,7 +316,7 @@ fn main() {
     println!("arm: {arm}");
     println!("budget: {budget}");
     println!("calls: {}", seen.calls.min(budget));
-    println!("charged: {}", ledger.spent());
+    println!("charged: {}", ledger.charged());
     println!("lowest: {:.10}", seen.lowest);
     println!("geometry_energy: {check:.10}");
     println!("best: {:.10}", out.best);
@@ -335,7 +335,7 @@ fn main() {
         "h2h_row system={kind}{n} code=anneal seed={seed} budget={budget} hit={} evals_to_hit={} charged={} best={:.10} wall_s={wall:.6} pot_s={pot_s:.6} outside_s={outside_s:.6} basins={}",
         u8::from(hit),
         if hit { seen.calls.min(budget) } else { budget },
-        ledger.spent(),
+        ledger.charged(),
         seen.lowest,
         out.basins,
     );

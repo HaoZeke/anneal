@@ -214,7 +214,7 @@ fn main() {
     let quenches = hit_quenches.load(Ordering::Relaxed);
     let hit = hit_e.is_some() && calls > 0;
     println!("wall_s: {wall:.6}");
-    println!("spent: {}", ledger.spent());
+    println!("spent: {}", ledger.charged());
     println!("outcome_charged: {}", outcome.charged);
     println!("best: {:.10}", outcome.best);
     println!("final_energy: {:.10}", outcome.final_energy);

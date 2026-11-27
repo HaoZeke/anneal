@@ -1628,7 +1628,7 @@ fn main() {
                 println!(
                     "  seed {seed} rec: best {:.6}  charged {}  hit_at {}{}",
                     out.best,
-                    ledger.spent(),
+                    ledger.charged(),
                     hat.map(|v| v.to_string()).unwrap_or_else(|| "-".into()),
                     if hit { "  SOLVED" } else { "" }
                 );
@@ -2582,6 +2582,8 @@ fn main() {
                     basins: b.basins,
                     screened_out: b.screened_out,
                     returned: b.returned,
+                    charged: b.charged,
+                    settled_beyond_cap: b.settled_beyond_cap,
                     ..Outcome::default()
                 }
             }
@@ -2842,7 +2844,7 @@ fn main() {
             println!("    arm {name:<10} draws {draws:>7}  accepts {accepts:>7}  best {best:.6}");
         }
         total_hops += out.hops;
-        total_charged += ledger.spent();
+        total_charged += ledger.charged();
         if let Some(portfolio) = surfaces.as_ref() {
             let portfolio = portfolio.lock().expect("surface portfolio");
             println!(
@@ -2863,7 +2865,7 @@ fn main() {
             out.best,
             out.hops,
             out.screened_out,
-            ledger.spent(),
+            ledger.charged(),
             out.basins,
             out.hops as f64 / out.basins.max(1) as f64,
             out.returned,
@@ -7561,7 +7563,7 @@ fn run_capnp_bank(
             &mut rng,
         )
         .expect("finite start");
-        ledger.charge_many(slice_led.spent());
+        ledger.settle_child(&slice_led, 0);
         if let Some(st) = slice_led.best_state.as_ref() {
             ledger.record(slice_led.best, st.view());
         }
@@ -7593,7 +7595,7 @@ fn run_capnp_bank(
         }
         println!(
             "      slice {slices} spent {} best {best:.6} null {null_starts}",
-            ledger.spent()
+            ledger.charged()
         );
         let _ = std::io::stdout().flush();
     }
@@ -7607,6 +7609,8 @@ fn run_capnp_bank(
         basins,
         screened_out,
         returned,
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         ..Outcome::default()
     }
 }

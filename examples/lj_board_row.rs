@@ -219,7 +219,7 @@ fn main() {
     };
     let wall_s = started.elapsed().as_secs_f64();
     let score = score.lock().expect("score");
-    let charged = ledger.spent();
+    let charged = ledger.charged();
     let mut hit = score.hit;
     let mut calls = if hit == 1 { score.hit_calls } else { charged };
     let mut stop_name = if hit == 1 { "hit" } else { "ceiling" };

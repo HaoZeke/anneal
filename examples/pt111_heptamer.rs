@@ -596,7 +596,7 @@ fn drive() {
         }
         println!(
             "seed {seed} best {energy:.6} charged {} hops {} converged {}/{} global_hit {global_hit} minima_matched {distinct_minima} hardware {hardware}",
-            ledger.spent(),
+            ledger.charged(),
             out.hops,
             stats.converged,
             stats.total(),

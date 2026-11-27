@@ -756,6 +756,8 @@ fn main() {
                     // Carried, or the encounter time censors every run of this
                     // arm including the ones that found the answer.
                     improvements: b.improvements.clone(),
+                    charged: b.charged,
+                    settled_beyond_cap: b.settled_beyond_cap,
                     ..Default::default()
                 },
                 anneal_core::methods::cluster_search::RelaxStats::default(),
@@ -853,11 +855,11 @@ fn main() {
                 &out,
                 r,
                 anneal_core::SEARCH_HIT_TOL,
-                ledger.spent(),
+                ledger.charged(),
             ));
         }
         deepest = deepest.min(out.best);
-        total_charged += ledger.spent();
+        total_charged += ledger.charged();
         total_hops += out.hops;
         // Transport, on every seed. A ladder can improve mixing and still not
         // find the minimum, and a solve count reports neither half.

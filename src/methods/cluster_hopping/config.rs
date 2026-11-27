@@ -1481,7 +1481,49 @@ pub struct Config {
     /// for a monoatomic cluster. The arm reads vacant sites off the
     /// current geometry and ranks them by pair energy. It does not move
     /// the least-coordinated atom onto a random surface point.
+    ///
+    /// The flag also enables the generic packing probe. When it is set, an
+    /// atomic, non-rigid, non-frozen search measures the pair minimum and
+    /// quenches the generic packings once, at the top of the hop loop after
+    /// [`Config::packing_deferral`] times nine hops: hop 36 by default, and
+    /// at most one hop below [`Config::max_hops`] when the walk is capped.
+    /// Every call of the probe is charged to the ledger. Turning the flag off
+    /// removes the lattice arm and the probe together. Set
+    /// [`Config::suppress_generic_packings`] to keep the arm without the
+    /// probe.
     pub energy_lattice: bool,
+    /// Hops the walk makes for each unit of the generic packing probe
+    /// before the probe is offered.
+    ///
+    /// The probe quenches eight structures, seven and the axial one, about
+    /// one hop each. It first measures the pair minimum, which is counted as
+    /// one more hop-sized unit. The probe is offered at the top of the hop
+    /// loop once the walk has made this many hops times nine, which is hop
+    /// 36 at the default of four. It is not run before the walk. At the
+    /// default the walk has spent about four times the probe's cost when it
+    /// is offered, so a walk that hits earlier never pays for it and one
+    /// that runs on pays about a quarter more at most. A capped walk offers
+    /// the probe at hop `max_hops - 1` at the latest, so it is offered in a
+    /// walk that makes that many hops. Zero offers it at the first pass of
+    /// the hop loop, before the first hop. The rule reads no atom count,
+    /// potential or structure.
+    ///
+    /// The probe is a known per-run cost on a walk that passes the offer
+    /// without a hit. Measured at the offer, it is 188 calls on Lennard-Jones
+    /// 38, 2069 on 75 and 2667 on 98, all charged to the ledger. A paired run
+    /// of 12 seeds against the tip before the probe read +2068 charged calls
+    /// on 75 (ratio 1.0009), +2667 on 98 (1.0034) and about +1951 per seed on
+    /// 102, with the same hits on every seed. The same probe takes the
+    /// 25 000-call Lennard-Jones 38 run from 0 of 12 hits to 12 of 12. The
+    /// offer is not skipped while the walk is still lowering its best: that
+    /// was tried, and it neither avoided the call on the larger clusters,
+    /// whose walks stall within the window, nor kept the 38 runs as fast.
+    #[serde(skip)]
+    pub packing_deferral: usize,
+    /// The parent search already quenched the generic packing catalogue.
+    /// A stall branch keeps the lattice move and does not quench it again.
+    #[serde(skip)]
+    pub suppress_generic_packings: bool,
     /// Learned portfolio of relaxation surfaces: the plain surface plus every
     /// transform listed, one drawn per hop by depth-rewarded Thompson
     /// sampling. Empty leaves the choice to `two_phase`.
@@ -2383,6 +2425,8 @@ impl Config {
             reoccupy: None,
             reoccupy_interval: 5_000,
             energy_lattice: false,
+            suppress_generic_packings: false,
+            packing_deferral: 4,
             surfaces: Vec::new(),
             // Calibrated against published minima: the largest atomic distance
             // from the centre of mass divides by N^(1/3) to between 0.46 and

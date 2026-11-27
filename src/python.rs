@@ -3443,10 +3443,55 @@ impl PyLedger {
         self.inner.spent()
     }
 
+    /// Settled evaluations that passed the budget and are not in `spent`.
+    #[getter]
+    fn settled_beyond_cap(&self) -> usize {
+        self.inner.settled_beyond_cap()
+    }
+
+    /// Every settled evaluation: `spent` plus `settled_beyond_cap`.
+    #[getter]
+    fn charged(&self) -> usize {
+        self.inner.charged()
+    }
+
     /// Charged evaluations remaining.
     #[getter]
     fn remaining(&self) -> usize {
         self.inner.remaining()
+    }
+
+    /// Whole units charged as a fraction of an evaluation, in `spent`.
+    #[getter]
+    fn priced(&self) -> usize {
+        self.inner.priced()
+    }
+
+    /// Charges `n` completed evaluations. Returns `False` when they do not
+    /// fit; the part past the budget is in `settled_beyond_cap`.
+    fn charge_many(&mut self, n: usize) -> bool {
+        self.inner.charge_many(n)
+    }
+
+    /// Charges a fraction of one evaluation. Returns `False` when the
+    /// budget is gone.
+    fn charge_frac(&mut self, frac: f64) -> bool {
+        self.inner.charge_frac(frac)
+    }
+
+    /// A child ledger with its own `budget`, to be settled with
+    /// `settle_child`.
+    fn slice(&self, budget: usize) -> Self {
+        Self {
+            inner: self.inner.slice(budget),
+        }
+    }
+
+    /// Settles a child made by `slice` onto this ledger: its spend, what it
+    /// priced and what it settled past its own budget. Returns `False` when
+    /// the work does not fit.
+    fn settle_child(&mut self, child: PyRef<'_, PyLedger>) -> bool {
+        self.inner.settle_child(&child.inner, 0)
     }
 
     /// Lowest objective value seen, or `+inf` if none.

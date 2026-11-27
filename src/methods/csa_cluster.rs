@@ -166,8 +166,10 @@ pub struct BankOutcome {
     /// Basins summed over the chains. Not distinct basins across the run: each
     /// chain keeps its own bias and its own numbering.
     pub basins: usize,
-    /// Charged evaluations spent.
+    /// Charged evaluations: every settled call, [`Ledger::charged`].
     pub charged: usize,
+    /// The part of [`BankOutcome::charged`] that passed the budget.
+    pub settled_beyond_cap: usize,
     /// Candidates that improved the member they resembled.
     pub improved: usize,
     /// Candidates that resembled nothing in the bank.
@@ -238,7 +240,7 @@ fn slice_run_inner<'g>(
         rng,
     )
     .expect("finite start");
-    ledger.absorb_charges(&slice_ledger);
+    ledger.settle_child(&slice_ledger, 0);
     if let Some(st) = slice_ledger.best_state.as_ref() {
         ledger.record(slice_ledger.best, st.view());
     }
@@ -572,7 +574,8 @@ where
         basins,
         screened_out,
         returned,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         improved,
         novel: bank.novel,
         duplicates,

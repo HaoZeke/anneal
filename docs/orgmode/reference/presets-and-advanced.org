@@ -7,6 +7,9 @@ Each constructor below is =anneal_core::methods::cluster_hopping::Config=.
 The block under the constructor is the example =cargo test --doc= runs.
 
 - =recommended(n)= :: LeanBurst at every size, a 1000-step quench, and one lattice-site exchange.
+  The lattice exchange is =energy_lattice=. It also turns on the generic packing probe
+  for atomic, non-rigid, non-frozen searches. The probe is offered at hop 36 of the walk
+  (=packing_deferral= of four, times nine), not before it, and its calls are charged to the budget.
 
   #+begin_src rust
   use anneal_core::methods::cluster_hopping::Config;

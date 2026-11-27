@@ -132,7 +132,7 @@ fn main() {
     println!(
         "arm=lean n={n} seed={seed} hit={} relaxations={full} relaxations_to_hit={to_hit} screens={screens} best={best:.6} wall_s={wall_s:.6} charged={}",
         i32::from(hit),
-        ledger.spent()
+        ledger.charged()
     );
     if outcome.is_err() && !hit && full == 0 {
         std::process::exit(1);

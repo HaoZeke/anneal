@@ -95,7 +95,7 @@ fn search(cfg: &Config, budget: usize, seed: u64, target: Option<f64>) -> Trace 
     .expect("finite start");
     Trace {
         quenches,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
         hops: out.hops,
         best: out.best.to_bits(),
     }

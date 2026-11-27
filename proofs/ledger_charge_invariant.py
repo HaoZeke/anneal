@@ -9,6 +9,8 @@ class Ledger:
     def __init__(self, budget: int) -> None:
         self.budget = budget
         self.spent = 0
+        self.settled_beyond_cap = 0
+        self.priced = 0
         self.best = float("inf")
         self._stopped = False
 
@@ -27,11 +29,33 @@ class Ledger:
     def charge_many(self, n: int) -> bool:
         # A stop closes new work: remaining() is 0. It does not void
         # evaluations already performed. The debt added is n capped by
-        # the budget still unpaid, which ignores the stop.
+        # the budget still unpaid, which ignores the stop. Settled calls
+        # that do not fit are kept in settled_beyond_cap, so spent stays
+        # within the budget (I1) and no completed evaluation is dropped.
         open_room = self.remaining()
         owed_room = max(self.budget - self.spent, 0)
-        self.spent += min(n, owed_room)
+        paid = min(n, owed_room)
+        self.spent += paid
+        self.settled_beyond_cap += n - paid
         return n <= open_room
+
+    def charge_priced(self, units: int) -> None:
+        # Whole units that settled through charge_frac: each is one
+        # charge, and it is counted as priced only when it was paid.
+        for _ in range(units):
+            if self.charge():
+                self.priced += 1
+
+    def charged(self) -> int:
+        # The count a benchmark reads: every settled call.
+        return self.spent + self.settled_beyond_cap
+
+    def settle_child(self, child: Ledger, offset: int = 0) -> bool:
+        # The child's own overrun is settled with its spend, so an
+        # evaluation past a sub-ledger's cap still reaches the parent. The
+        # units it priced are part of that spend and settle with it.
+        self.priced += child.priced
+        return self.charge_many(max(child.spent - offset, 0) + child.settled_beyond_cap)
 
     def remaining(self) -> int:
         if self.stopped():
@@ -48,7 +72,7 @@ def i1_partition(led: Ledger) -> bool:
 
 
 def test_i1_through_charges() -> bool:
-    for B in range(0, 12):
+    for B in range(12):
         led = Ledger(B)
         if not i1_partition(led):
             return False
@@ -123,6 +147,95 @@ def test_stopped_charge_many_pays_budget_room() -> bool:
     return ok
 
 
+def test_overrun_is_recorded_apart() -> bool:
+    led = Ledger(3)
+    ok = led.charge_many(3) is True
+    ok &= led.charge_many(2) is False
+    # spent holds at the budget; the two that did not fit are kept.
+    ok &= led.spent == 3 and led.settled_beyond_cap == 2
+    ok &= led.spent + led.settled_beyond_cap == 5
+    ok &= i1_partition(led)
+    # A stop does not void settled calls either.
+    stopped = Ledger(10)
+    stopped.charge_many(2)
+    stopped.stop()
+    ok &= stopped.charge_many(4) is False
+    ok &= stopped.spent == 6 and stopped.settled_beyond_cap == 0
+    ok &= stopped.charge_many(100) is False
+    ok &= stopped.spent == 10 and stopped.settled_beyond_cap == 96
+    ok &= stopped.spent + stopped.settled_beyond_cap == 2 + 4 + 100
+    ok &= i1_partition(stopped)
+    return ok
+
+
+def test_every_settled_call_is_on_one_field() -> bool:
+    for budget in range(8):
+        for batches in ([1], [3, 4], [5, 5, 5], [0, 2, 9], [4, 1, 1, 1]):
+            for stop_at in range(len(batches) + 1):
+                led = Ledger(budget)
+                total = 0
+                for index, n in enumerate(batches):
+                    if index == stop_at:
+                        led.stop()
+                    led.charge_many(n)
+                    total += n
+                    if led.spent > led.budget:
+                        return False
+                    if not led.stopped() and not i1_partition(led):
+                        return False
+                if led.spent + led.settled_beyond_cap != total:
+                    return False
+    return True
+
+
+def test_child_overrun_reaches_the_parent() -> bool:
+    for parent_budget in range(9):
+        for child_budget in range(1, 6):
+            for batches in ([2], [5, 4], [1, 1, 9], [0, 7]):
+                parent = Ledger(parent_budget)
+                child = Ledger(child_budget)
+                for n in batches:
+                    child.charge_many(n)
+                parent.settle_child(child)
+                if parent.charged() != sum(batches):
+                    return False
+                if parent.spent > parent.budget or child.spent > child.budget:
+                    return False
+                grand = Ledger(parent_budget + 3)
+                grand.settle_child(parent)
+                if grand.charged() != sum(batches):
+                    return False
+    return True
+
+
+def test_priced_is_summed_over_children() -> bool:
+    for parent_budget in range(12):
+        for plan in ([(2, 3)], [(1, 0), (4, 2)], [(0, 5), (3, 3), (2, 0)]):
+            parent = Ledger(parent_budget)
+            expected = 0
+            for units, raw in plan:
+                child = Ledger(10)
+                child.charge_priced(units)
+                child.charge_many(raw)
+                expected += child.priced
+                parent.settle_child(child)
+            if parent.priced != expected:
+                return False
+            if parent.priced > parent.charged():
+                return False
+            # A grandchild's units reach the top through the middle.
+            middle = Ledger(10)
+            inner = Ledger(10)
+            inner.charge_priced(3)
+            middle.charge_priced(1)
+            middle.settle_child(inner)
+            top = Ledger(parent_budget)
+            top.settle_child(middle)
+            if middle.priced != 4 or top.priced != 4:
+                return False
+    return True
+
+
 def all_checks() -> list[tuple[str, bool]]:
     return [
         ("I1 through charge to exhaustion", test_i1_through_charges()),
@@ -131,6 +244,10 @@ def all_checks() -> list[tuple[str, bool]]:
         ("I5 record does not charge", test_i5_record_no_charge()),
         ("I3 hard stop", test_i3_hard_stop()),
         ("stopped charge_many pays budget room", test_stopped_charge_many_pays_budget_room()),
+        ("overrun is recorded apart", test_overrun_is_recorded_apart()),
+        ("every settled call is on one field", test_every_settled_call_is_on_one_field()),
+        ("a child's overrun reaches the parent", test_child_overrun_reaches_the_parent()),
+        ("priced units are summed over children", test_priced_is_summed_over_children()),
     ]
 
 

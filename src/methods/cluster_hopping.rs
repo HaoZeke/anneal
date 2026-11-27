@@ -791,9 +791,21 @@ pub struct Ledger {
     id: u64,
     budget: usize,
     spent: usize,
+    /// Calls to [`Ledger::charge`] made after this ledger closed.
+    ///
+    /// A relaxation can use this to distinguish reaching the cap on its
+    /// final evaluation from asking for another evaluation and being cut
+    /// off there.
+    closed_charge_attempts: usize,
     /// Fractional debt accumulated by partial-system evaluations, settled
     /// into whole charged units as it crosses one.
     fract: f64,
+    /// Whole units that settled through [`Ledger::charge_frac`]. They price
+    /// work that made no call into the objective.
+    priced: usize,
+    /// Settled evaluations that did not fit under the budget. They are real
+    /// calls, kept here so that [`Ledger::spent`] stays within the budget.
+    settled_beyond_cap: usize,
     /// Lowest objective value seen.
     pub best: f64,
     /// State attaining [`Ledger::best`].
@@ -853,7 +865,7 @@ pub struct Ledger {
     encounters: Vec<(usize, f64)>,
 }
 
-struct DiagnosticQuench<'a> {
+pub(crate) struct DiagnosticQuench<'a> {
     ledger: &'a mut Ledger,
     previous: bool,
 }
@@ -886,7 +898,10 @@ impl Ledger {
             id: NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             budget,
             spent: 0,
+            closed_charge_attempts: 0,
             fract: 0.0,
+            priced: 0,
+            settled_beyond_cap: 0,
             best: f64::INFINITY,
             best_state: None,
             walker_best: f64::INFINITY,
@@ -1038,6 +1053,21 @@ impl Ledger {
         child
     }
 
+    fn side_probe(&self, room: usize) -> (Self, usize) {
+        let mut child = Self::new(self.budget);
+        child.stop = self.stop.clone();
+        child.target = self.target;
+        let offset = self.budget.saturating_sub(room.min(self.remaining()));
+        child.spent = offset;
+        // The offset is opening spend, not a new evaluation. It has to sit
+        // in the counters or the next charge fails the split check. Settle
+        // removes this unnamed seed before the real charges move.
+        if offset > 0 {
+            child.charges.add(ChargeName::Unnamed, offset);
+        }
+        (child, offset)
+    }
+
     /// Binds this ledger's stop on the running thread, if it has one.
     ///
     /// Worker threads do not see the binding. Give them [`Ledger::slice`]
@@ -1066,7 +1096,7 @@ impl Ledger {
         self.diagnostic_quench
     }
 
-    fn diagnostic_scope(&mut self) -> DiagnosticQuench<'_> {
+    pub(crate) fn diagnostic_scope(&mut self) -> DiagnosticQuench<'_> {
         let previous = std::mem::replace(&mut self.diagnostic_quench, true);
         DiagnosticQuench {
             ledger: self,
@@ -1080,12 +1110,18 @@ impl Ledger {
     /// stays equal to the counter total, including in a release build.
     pub fn charge(&mut self) -> bool {
         if self.spent >= self.budget || self.stopped() {
+            self.closed_charge_attempts = self.closed_charge_attempts.saturating_add(1);
             return false;
         }
         self.spent += 1;
         self.charges.add(self.charge_name, 1);
         self.assert_split();
         true
+    }
+
+    /// Evaluation requests refused because this ledger was closed.
+    fn closed_charge_attempts(&self) -> usize {
+        self.closed_charge_attempts
     }
 
     /// Runs `body` with charges recorded under `name`, then restores the
@@ -1171,12 +1207,86 @@ impl Ledger {
             if !self.charge() {
                 return false;
             }
+            self.priced += 1;
         }
         !self.stopped() && self.spent < self.budget
     }
 
-    /// Charges `n` units at once, returning `false` when the budget ran out
-    /// partway.
+    /// Whole units charged through [`Ledger::charge_frac`].
+    ///
+    /// That is work priced as a fraction of one evaluation, such as the
+    /// energy-lattice arm's pair sums over vacant sites. It made no call into
+    /// the objective. Every other unit on [`Ledger::spent`] is one call the
+    /// caller's relaxation or gradient made, so a caller that counts those
+    /// calls finds `calls + priced == spent` at the end of a run.
+    pub fn priced(&self) -> usize {
+        self.priced
+    }
+
+    /// Completed evaluations settled past the budget by
+    /// [`Ledger::charge_many`].
+    ///
+    /// [`Ledger::spent`] holds at most the budget. A caller that ran work on
+    /// a sub-ledger and settles more than the budget has left reads the rest
+    /// here, so `spent() + settled_beyond_cap()` counts every settled call.
+    pub fn settled_beyond_cap(&self) -> usize {
+        self.settled_beyond_cap
+    }
+
+    /// Every evaluation the run settled: [`Ledger::spent`] plus
+    /// [`Ledger::settled_beyond_cap`].
+    ///
+    /// This is the count a benchmark reads as the run's charge. It equals
+    /// `spent()` unless settled work passed the budget.
+    pub fn charged(&self) -> usize {
+        self.spent.saturating_add(self.settled_beyond_cap)
+    }
+
+    /// Settles a child ledger onto this one, returning `false` when the work
+    /// does not fit or a stop is already raised.
+    ///
+    /// `offset` is the spend the child started with, as returned by
+    /// [`Ledger::side_probe`], and zero for a [`Ledger::slice`]. The child's
+    /// own overrun is settled with its spend, so a call that passed a
+    /// sub-ledger's cap is still counted here and reaches [`Ledger::charged`]
+    /// at the top of the run.
+    ///
+    /// The units the child priced through [`Ledger::charge_frac`] are part of
+    /// its spend, and are settled onto [`Ledger::priced`] with it, so that a
+    /// caller who counts calls still finds `calls + priced == spent` for a
+    /// run that settled children. A side probe starts with none priced, so
+    /// its offset never holds any.
+    ///
+    /// The child's named split moves with the units that fit. The opening
+    /// spend of a side probe is an unnamed seed and does not move. Units
+    /// past the child's own cap have no name yet; the part that fits here
+    /// is filed as a quench so the overrun is still a named charge.
+    pub fn settle_child(&mut self, child: &Ledger, offset: usize) -> bool {
+        let calls = child
+            .spent
+            .saturating_sub(offset)
+            .saturating_add(child.settled_beyond_cap);
+        self.priced = self.priced.saturating_add(child.priced);
+        let open_room = self.remaining();
+        let owed_room = self.budget.saturating_sub(self.spent);
+        let paid = calls.min(owed_room);
+        self.spent += paid;
+        self.settled_beyond_cap = self.settled_beyond_cap.saturating_add(calls - paid);
+        let mut real = child.charges;
+        let seed = offset.min(real.unnamed);
+        real.unnamed = real.unnamed.saturating_sub(seed);
+        let named = paid.min(real.total());
+        self.charges.absorb_paid(real, named);
+        let gap = paid.saturating_sub(named);
+        if gap > 0 {
+            self.charges.add(ChargeName::Quench, gap);
+        }
+        self.assert_split();
+        calls <= open_room
+    }
+
+    /// Charges `n` completed evaluations, returning `false` when they do not
+    /// fit or a stop is already raised.
     ///
     /// For a caller that ran work against a sub-ledger and is settling up. The
     /// alternative, handing the real ledger to the inner run, makes any budget
@@ -1184,13 +1294,17 @@ impl Ledger {
     /// slice it was given.
     ///
     /// The calls were made before this settles, so a caller stop raised while
-    /// they ran does not void them: the debt is paid up to the budget, and
-    /// only the return value reports the closed ledger.
+    /// they ran does not void them. [`Ledger::spent`] never passes the budget
+    /// (invariant I1), so the debt is paid up to the budget. Any evaluation
+    /// past it is recorded in [`Ledger::settled_beyond_cap`], and every
+    /// settled call is on one of the two. Only the return value reports the
+    /// closed ledger.
     pub fn charge_many(&mut self, n: usize) -> bool {
         let open_room = self.remaining();
         let owed_room = self.budget.saturating_sub(self.spent);
         let paid = n.min(owed_room);
         self.spent += paid;
+        self.settled_beyond_cap = self.settled_beyond_cap.saturating_add(n - paid);
         self.charges.add(self.charge_name, paid);
         self.assert_split();
         n <= open_room
@@ -1279,7 +1393,7 @@ impl Ledger {
             self.best = value;
             self.best_state = Some(state.to_owned());
             if self.encounters.len() < IMPROVEMENT_CAP {
-                self.encounters.push((self.spent, value));
+                self.encounters.push((self.charged(), value));
             }
         }
         if self.answer_limit > 0 {
@@ -1365,6 +1479,17 @@ impl Ledger {
     /// Charged count and energy at each incumbent [`Ledger::record`] stored.
     pub fn encounters(&self) -> &[(usize, f64)] {
         &self.encounters
+    }
+
+    fn stamp_encounter(&mut self, value: f64, at: usize) {
+        if let Some((spent, _)) = self
+            .encounters
+            .iter_mut()
+            .rev()
+            .find(|(_, energy)| *energy == value)
+        {
+            *spent = at;
+        }
     }
 
     /// Replace the incumbent with a reoptimized geometry and its energy.
@@ -1486,8 +1611,12 @@ pub struct Outcome {
     pub screened_out: usize,
     /// Distinct basins registered.
     pub basins: usize,
-    /// Charged evaluations spent.
+    /// Charged evaluations: every settled call, that is
+    /// [`Ledger::spent`] plus [`Outcome::settled_beyond_cap`].
     pub charged: usize,
+    /// Settled calls that passed the budget. They are part of
+    /// [`Outcome::charged`], and [`Ledger::spent`] never counts them.
+    pub settled_beyond_cap: usize,
     /// Proposals closer than [`OVERLAP_SEPARATION`] before any energy call.
     ///
     /// Each one was separated, or dropped when separation failed. Neither the
@@ -5323,7 +5452,7 @@ fn large_diameter_ratio(cfg: &Config) -> bool {
 /// refuses and the screen tightens on itself: on TIP4P20 it refused 99.7 per
 /// cent of hops. Every [`ScreenDescent::AUDIT`]th refusal is relaxed in full
 /// instead, so the window also samples the population the screen judges.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct ScreenDescent {
     drops: std::collections::VecDeque<f64>,
     allowance: f64,
@@ -5715,6 +5844,36 @@ fn improvements_from_encounters(
     out
 }
 
+/// A ledger that already carries a nested overrun, for the tests of every
+/// path that reports a charge. A slice of ten settles ten calls and forty
+/// more past its own cap onto a parent of thirty, so the parent holds thirty
+/// spent, twenty past the budget and no room left.
+#[cfg(test)]
+pub(crate) fn ledger_with_nested_overrun() -> Ledger {
+    let mut parent = Ledger::new(30);
+    let mut child = parent.slice(10);
+    assert!(child.charge_many(10));
+    assert!(!child.charge_many(40));
+    parent.settle_child(&child, 0);
+    assert_eq!(parent.spent(), 30);
+    assert_eq!(parent.settled_beyond_cap(), 20);
+    assert_eq!(parent.remaining(), 0);
+    parent
+}
+
+impl Outcome {
+    /// Sets the reported charge from `ledger`.
+    ///
+    /// [`Outcome::charged`] is every settled call, [`Ledger::spent`] plus the
+    /// part that passed the budget, and [`Outcome::settled_beyond_cap`] is
+    /// that part. Every path that reports a ledger's charge goes through here,
+    /// so none drops an overrun.
+    pub fn carry_charge(&mut self, ledger: &Ledger) {
+        self.charged = ledger.charged();
+        self.settled_beyond_cap = ledger.settled_beyond_cap();
+    }
+}
+
 /// A caller stop during the opening quench is not a refused potential.
 ///
 /// The ledger may hold no finite minimum yet. The search still returns
@@ -5729,7 +5888,8 @@ fn outcome_when_start_was_stopped<const RIGID: bool>(
         best_state: ledger.best_state.clone(),
         final_state: Some(x.clone()),
         final_energy: energy,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         stop: Some(HopStop::CallerStop),
         rigid_path: RIGID.then(rigid_diag_take),
         ..Outcome::default()
@@ -5781,6 +5941,488 @@ fn lengths_of_quenched_cluster(cfg: &Config, x: ArrayView1<f64>) -> Option<Confi
     scaled.container *= factor;
     scaled.neighbour_cutoff *= factor;
     Some(scaled)
+}
+
+/// A dimer with every spectator moved to the machine-precision far field.
+///
+/// The objective keeps its full dimension. Spectators are not interpreted by
+/// species; their reciprocal separation is the square root of machine epsilon.
+fn isolated_pair(n: usize, distance: f64) -> Array1<f64> {
+    let mut point = Array1::zeros(3 * n);
+    point[0] = -0.5 * distance;
+    point[3] = 0.5 * distance;
+    let far = f64::EPSILON.sqrt().recip();
+    for atom in 2..n {
+        point[3 * atom + 1] = far * (atom - 1) as f64;
+    }
+    point
+}
+
+/// One isolated-pair evaluation.
+///
+/// The flag reports whether the potential was evaluated, which is when the
+/// ledger advanced. A non-finite energy is still an evaluation and still
+/// spent budget, so the caller must count it.
+fn pair_probe<F>(ledger: &mut Ledger, relax: &mut F, n: usize, distance: f64) -> (bool, Option<f64>)
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    if !(distance.is_finite() && distance > 0.0) || ledger.remaining() == 0 {
+        return (false, None);
+    }
+    let before = ledger.spent();
+    let (energy, _) = relax(ledger, isolated_pair(n, distance).view(), 0);
+    let evaluated = ledger.spent() != before;
+    (
+        evaluated,
+        (evaluated && energy.is_finite()).then_some(energy),
+    )
+}
+
+/// Measure the potential's isolated-pair minimum under the caller's ledger.
+///
+/// Bracketing expands geometrically from the coordinate unit, then golden
+/// section search spends at most one mantissa bit per refinement. These are
+/// numerical rules, not potential, species, motif, or atom-count thresholds.
+fn measured_pair_minimum<F>(
+    ledger: &mut Ledger,
+    relax: &mut F,
+    n: usize,
+    probe_limit: usize,
+) -> Option<f64>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    if n < 2 || probe_limit < 3 {
+        return None;
+    }
+    let used = std::cell::Cell::new(0usize);
+    let mut evaluate = |distance: f64| {
+        if used.get() >= probe_limit {
+            return None;
+        }
+        let (evaluated, value) = pair_probe(ledger, relax, n, distance);
+        if evaluated {
+            used.set(used.get() + 1);
+        }
+        value
+    };
+    let mut middle = 1.0;
+    let mut middle_energy = evaluate(middle)?;
+    let mut low = middle / 2.0;
+    let mut high = middle * 2.0;
+    let mut low_energy = evaluate(low).unwrap_or(f64::INFINITY);
+    let mut high_energy = evaluate(high).unwrap_or(f64::INFINITY);
+    while used.get() < probe_limit && (low_energy < middle_energy || high_energy < middle_energy) {
+        if low_energy <= high_energy {
+            high = middle;
+            middle = low;
+            middle_energy = low_energy;
+            low /= 2.0;
+            low_energy = evaluate(low).unwrap_or(f64::INFINITY);
+        } else {
+            low = middle;
+            middle = high;
+            middle_energy = high_energy;
+            high *= 2.0;
+            high_energy = evaluate(high).unwrap_or(f64::INFINITY);
+        }
+    }
+    if !middle_energy.is_finite() {
+        return None;
+    }
+
+    let ratio = (5.0_f64.sqrt() - 1.0) / 2.0;
+    let mut left = low;
+    let mut right = high;
+    let mut c = right - ratio * (right - left);
+    let mut d = left + ratio * (right - left);
+    let mut fc = evaluate(c).unwrap_or(f64::INFINITY);
+    let mut fd = evaluate(d).unwrap_or(f64::INFINITY);
+    while used.get() < probe_limit
+        && right - left > f64::EPSILON.sqrt() * left.abs().max(right.abs()).max(1.0)
+    {
+        if fc <= fd {
+            right = d;
+            d = c;
+            fd = fc;
+            c = right - ratio * (right - left);
+            fc = evaluate(c).unwrap_or(f64::INFINITY);
+        } else {
+            left = c;
+            c = d;
+            fc = fd;
+            d = left + ratio * (right - left);
+            fd = evaluate(d).unwrap_or(f64::INFINITY);
+        }
+    }
+    let (distance, energy) = if fc <= fd { (c, fc) } else { (d, fd) };
+    energy.is_finite().then_some(distance)
+}
+
+/// The energy screen a packing candidate passes before its full relaxation.
+///
+/// The test is the walk's own: a relaxation of [`Config::screen_steps`]
+/// and the descent the walk measured such a pass to leave undone,
+/// `ScreenDescent::allowance`. A candidate whose partial energy less that
+/// credit cannot come below the bar is not finished. The bar is the lower
+/// of the walk's incumbent and the best candidate already held, since a
+/// candidate above either is discarded after its full relaxation anyway.
+///
+/// The credit is an upper decile, not a bound, so a refusal can be wrong.
+/// A refusal defers the candidate rather than dropping it: its placement is
+/// kept, once per distinct placement, and [`audit_refused_packings`]
+/// relaxes every deferred candidate in full when the walk offers the
+/// catalogue again. The screen holds a copy of the walk's descent, and
+/// every full relaxation feeds that copy's window without moving the
+/// walk's own.
+#[derive(Debug, Clone)]
+struct PackingScreen {
+    steps: usize,
+    bar: f64,
+    descent: ScreenDescent,
+    deferred: Vec<DeferredPacking>,
+    audited: usize,
+}
+
+/// A refused packing candidate: its placement, the steps its full
+/// relaxation was to take, the energy its screening pass reached, how far
+/// that energy less the credit came above the bar that refused it, and the
+/// calls its last audit paid before the budget or a caller stop cut it,
+/// zero if none was cut.
+#[derive(Debug, Clone)]
+struct DeferredPacking {
+    point: Array1<f64>,
+    steps: usize,
+    partial: f64,
+    gap: f64,
+    cut_at: usize,
+}
+
+impl PackingScreen {
+    fn new(steps: usize, bar: f64, descent: ScreenDescent) -> Self {
+        Self {
+            steps,
+            bar,
+            descent,
+            deferred: Vec::new(),
+            audited: 0,
+        }
+    }
+
+    /// No screen: every candidate is relaxed in full, in one pass.
+    #[cfg(test)]
+    fn open() -> Self {
+        Self::new(0, f64::INFINITY, ScreenDescent::default())
+    }
+
+    fn splits(&self, bar: f64, steps: usize) -> bool {
+        bar.is_finite() && self.steps > 0 && self.steps < steps
+    }
+
+    /// Keeps a refused placement for its audit. An identical placement
+    /// already waiting is not kept twice.
+    fn defer(&mut self, point: ArrayView1<f64>, steps: usize, partial: f64, gap: f64) {
+        let same = |held: &DeferredPacking| {
+            held.point.len() == point.len()
+                && held
+                    .point
+                    .iter()
+                    .zip(point.iter())
+                    .all(|(a, b)| a.to_bits() == b.to_bits())
+        };
+        if !self.deferred.iter().any(same) {
+            self.deferred.push(DeferredPacking {
+                point: point.to_owned(),
+                steps,
+                partial,
+                gap,
+                cut_at: 0,
+            });
+        }
+    }
+}
+
+/// How far below the incumbent an adopted packing must land.
+const PACKING_IMPROVEMENT: f64 = 1e-10;
+
+fn beats(energy: f64, bar: f64) -> bool {
+    energy < bar - PACKING_IMPROVEMENT
+}
+
+/// Relax one packing candidate to `steps`, or stop after the screening pass.
+///
+/// `None` is a candidate the screen refused and deferred to its audit. Its
+/// screening pass is charged like every other call. A pass that ends the
+/// budget or meets a caller stop returns its point, as an unscreened
+/// relaxation would. A finished candidate is relaxed again from its
+/// placement: continuing from the partial point restarts the relaxer's
+/// curvature memory, and on LJ75 that ended two of the eight candidates 9
+/// and 10 epsilon above their one-pass minima.
+fn screened_relax<F>(
+    ledger: &mut Ledger,
+    relax: &mut F,
+    point: ArrayView1<f64>,
+    steps: usize,
+    screen: &mut PackingScreen,
+    held: f64,
+) -> Option<(f64, Array1<f64>)>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    let bar = screen.bar.min(held);
+    if !screen.splits(bar, steps) {
+        return Some(relax(ledger, point, steps));
+    }
+    let (partial, at) = relax(ledger, point, screen.steps);
+    if ledger.stopped() || ledger.remaining() == 0 {
+        return Some((partial, at));
+    }
+    let estimate = partial - screen.descent.allowance();
+    if !beats(estimate, bar) {
+        screen.defer(point, steps, partial, estimate - bar);
+        return None;
+    }
+    let full = relax(ledger, point, steps);
+    screen.descent.observe(partial - full.0);
+    Some(full)
+}
+
+/// Relax every candidate the screen deferred, in full, and keep the lowest
+/// that beats the lower of the screen's bar and `held`.
+///
+/// The candidate whose screening pass came closest to the bar that refused
+/// it goes first, the earlier refusal first on a tie, so a budget that ends
+/// the audit has spent it on the refusals the screen was least sure of.
+///
+/// A candidate relaxed to its full step count is audited and leaves the
+/// screen. Every call is charged to `ledger`. A relaxation that the budget
+/// or a caller stop cut short of its step count ends the audit; that
+/// candidate stays deferred with every one after it, in its place, so a
+/// later audit relaxes it in full from its placement. Its paid point is
+/// still offered like any other. From its placement the relaxation retraces
+/// the calls the cut one paid, so a cut candidate is started again only
+/// when more calls than that remain; the closest of the others goes first
+/// meanwhile. The spend at the find is counted from the ledger's spend on
+/// entry.
+fn audit_refused_packings<F>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: &mut F,
+    screen: &mut PackingScreen,
+    held: f64,
+) -> Option<(f64, Array1<f64>, usize)>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    let start = ledger.spent();
+    let mut best: Option<(f64, Array1<f64>, usize)> = None;
+    while !ledger.stopped() && ledger.remaining() > 0 {
+        let Some(closest) = (0..screen.deferred.len())
+            .filter(|&index| screen.deferred[index].cut_at < ledger.remaining())
+            .min_by(|&a, &b| screen.deferred[a].gap.total_cmp(&screen.deferred[b].gap))
+        else {
+            break;
+        };
+        let mut candidate = screen.deferred.remove(closest);
+        let steps = candidate.steps.min(ledger.remaining());
+        let paid_from = ledger.spent();
+        let closed_before = ledger.closed_charge_attempts();
+        let (energy, relaxed) = relax(ledger, candidate.point.view(), steps);
+        let closed = ledger.stopped() || ledger.remaining() == 0;
+        let cut =
+            closed && (steps < candidate.steps || ledger.closed_charge_attempts() > closed_before);
+        if cut {
+            candidate.cut_at = ledger.spent().saturating_sub(paid_from);
+            screen.deferred.insert(closest, candidate);
+        } else {
+            screen.audited += 1;
+            screen.descent.observe(candidate.partial - energy);
+        }
+        let bar = screen
+            .bar
+            .min(held)
+            .min(best.as_ref().map_or(f64::INFINITY, |(held, _, _)| *held));
+        if energy.is_finite() && quench_is_sane(cfg, energy, relaxed.view()) && beats(energy, bar) {
+            best = Some((energy, relaxed, ledger.spent().saturating_sub(start)));
+            if ledger
+                .target()
+                .is_some_and(|target| crate::energy_hits(energy, target, 0.0))
+            {
+                break;
+            }
+        }
+    }
+    best
+}
+
+struct GenericPackingProbe<'a, F: ?Sized> {
+    ledger: &'a mut Ledger,
+    relax: &'a mut F,
+    steps: usize,
+    screen: &'a mut PackingScreen,
+    held: f64,
+}
+
+impl<F> binary_geometry::QuenchProbe for GenericPackingProbe<'_, F>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    fn energy(&mut self, point: ArrayView1<f64>) -> Option<f64> {
+        if self.ledger.remaining() == 0 || self.ledger.stopped() {
+            return None;
+        }
+        let (value, _) = (self.relax)(self.ledger, point, 0);
+        value.is_finite().then_some(value)
+    }
+
+    fn quench(&mut self, point: ArrayView1<f64>) -> Option<(f64, Array1<f64>)> {
+        if self.ledger.remaining() == 0 || self.ledger.stopped() {
+            return None;
+        }
+        let result = screened_relax(
+            self.ledger,
+            self.relax,
+            point,
+            self.steps,
+            self.screen,
+            self.held,
+        )?;
+        result.0.is_finite().then_some(result)
+    }
+}
+
+/// Structures the generic packing catalogue quenches: seven in the candidate
+/// loop and the axial one after them. `binary_geometry::packing_candidates`
+/// returns all eight.
+const PACKING_CANDIDATES: usize = 8;
+
+/// Hops the walk makes before the generic packing catalogue is offered.
+///
+/// The catalogue quenches `PACKING_CANDIDATES` structures, about one hop
+/// each, after a pair-minimum search of at most one mantissa's worth of
+/// calls. The search is counted as one more hop-sized unit, so the offer
+/// comes after [`Config::packing_deferral`] times `PACKING_CANDIDATES + 1`
+/// hops. A capped walk offers it at its last hop at the latest.
+fn packing_offer_hops(cfg: &Config) -> usize {
+    packing_offer_due(cfg, 0)
+}
+
+/// The hop of the offer one deferral after `from`, at the last hop of a
+/// capped walk at the latest. The audit of the catalogue's refusals comes
+/// one deferral after the catalogue.
+fn packing_offer_due(cfg: &Config, from: usize) -> usize {
+    let wanted = from.saturating_add(cfg.packing_deferral.saturating_mul(PACKING_CANDIDATES + 1));
+    cfg.max_hops
+        .map_or(wanted, |cap| wanted.min(cap.saturating_sub(1)))
+}
+
+fn generic_packings_apply(cfg: &Config, n: usize, dim: usize) -> bool {
+    cfg.energy_lattice
+        && !cfg.suppress_generic_packings
+        && !cfg.move_library.is_molecular()
+        && !cfg.move_library.is_rigid_body()
+        && cfg.rigid_body_geometry.is_none()
+        && cfg.frozen.is_none()
+        && cfg.active_region.is_none()
+        && n >= 2
+        && dim == 3 * n
+}
+
+fn generic_packing_candidate_with_encounter<F>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: &mut F,
+    screen: &mut PackingScreen,
+) -> Option<(f64, Array1<f64>, usize)>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    let n = cfg.n_points;
+    if n < 2 || cfg.move_library.is_molecular() || cfg.move_library.is_rigid_body() {
+        return None;
+    }
+    let candidate_count = PACKING_CANDIDATES;
+    if ledger.remaining() <= candidate_count || ledger.stopped() {
+        return None;
+    }
+    let probe_start = ledger.spent();
+    let probe_limit =
+        (ledger.remaining() / (candidate_count + 2)).min(f64::MANTISSA_DIGITS as usize);
+    let nearest = measured_pair_minimum(ledger, relax, n, probe_limit)?;
+    let mut best: Option<(f64, Array1<f64>, usize)> = None;
+    let mut hit_target = false;
+    let mut candidates = binary_geometry::packing_candidates(n, nearest);
+    let axial = candidates.pop()?;
+    for (index, candidate) in candidates.iter().enumerate() {
+        if ledger.stopped() || ledger.remaining() == 0 {
+            break;
+        }
+        let candidates_left = candidates.len() - index;
+        let steps = cfg
+            .relax_steps
+            .min(ledger.remaining().saturating_sub(candidates_left));
+        let held = best.as_ref().map_or(f64::INFINITY, |(held, _, _)| *held);
+        let Some((energy, relaxed)) =
+            screened_relax(ledger, relax, candidate.view(), steps, screen, held)
+        else {
+            continue;
+        };
+        if energy.is_finite()
+            && quench_is_sane(cfg, energy, relaxed.view())
+            && best.as_ref().is_none_or(|(held, _, _)| energy < *held)
+        {
+            let found_at = ledger.spent().saturating_sub(probe_start);
+            best = Some((energy, relaxed, found_at));
+            if ledger
+                .target()
+                .is_some_and(|target| crate::energy_hits(energy, target, 0.0))
+            {
+                hit_target = true;
+                break;
+            }
+        }
+    }
+    if !hit_target && !ledger.stopped() && ledger.remaining() > 0 {
+        let steps = cfg.relax_steps.min(ledger.remaining());
+        let held = best.as_ref().map_or(f64::INFINITY, |(held, _, _)| *held);
+        let mut probe = GenericPackingProbe {
+            ledger,
+            relax,
+            steps,
+            screen,
+            held,
+        };
+        if let Some((energy, relaxed)) = binary_geometry::quench_as_placed(axial, &mut probe)
+            && quench_is_sane(cfg, energy, relaxed.view())
+            && best.as_ref().is_none_or(|(held, _, _)| energy < *held)
+        {
+            best = Some((
+                energy,
+                relaxed,
+                probe.ledger.spent().saturating_sub(probe_start),
+            ));
+        }
+    }
+    best
+}
+
+/// Quench every generic packing and retain the lowest measured energy.
+///
+/// Candidate generation itself is free. The pair search and every relaxation
+/// use the supplied ledger, so all potential evaluations are charged. No
+/// second-neighbour or potential-family switch is consulted.
+#[cfg(test)]
+pub(crate) fn generic_packing_candidate<F>(
+    cfg: &Config,
+    ledger: &mut Ledger,
+    relax: &mut F,
+) -> Option<(f64, Array1<f64>)>
+where
+    F: FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + ?Sized,
+{
+    generic_packing_candidate_with_encounter(cfg, ledger, relax, &mut PackingScreen::open())
+        .map(|(energy, state, _)| (energy, state))
 }
 
 /// Bookkeeping for a stalled rigid-body archive walk.
@@ -6738,7 +7380,9 @@ where
     let mut branch_wait = 0usize;
     let mut branch_draws = 0u64;
     let mut branch_ends: Vec<f64> = Vec::new();
-    let mut branch_held: Option<(f64, Array1<f64>, usize)> = None;
+    // Energy, geometry, the parent spend at the find, and the hop and basin
+    // count the walk had when it was found.
+    let mut branch_held: Option<(f64, Array1<f64>, usize, usize, usize)> = None;
     // A primitive basis needs four observed points. Its evidence floor is the
     // number of distinct tetrahedra the current point count can present.
     let basis_evidence = (0..4).fold(1usize, |count, chosen| {
@@ -6793,6 +7437,24 @@ where
     let mut held_cv: Option<Array1<f64>> = None;
     let mut held_seat: Option<usize> = None;
     let mut held_count: usize = 0;
+    // The hop the catalogue was offered at, and the screen that holds the
+    // candidates it refused and no audit has finished, with the hop their
+    // audit is offered at. An audit the budget cuts short hands the screen
+    // back, due one deferral later.
+    let mut packings_offered: Option<usize> = None;
+    let mut packing_audit: Option<(PackingScreen, usize)> = None;
+    // The probe runs at the top of the hop loop once the walk has made
+    // `packing_offer_hops` hops: 36 by default, fewer when `max_hops` caps
+    // the walk, and zero when `packing_deferral` is zero. A candidate that
+    // beats the incumbent is held until the walk finishes unless it already
+    // hits the stop target, so a deep wrong-funnel packing does not trap
+    // the walk at the hop where it was found.
+    // Energy, geometry, the parent spend at the find, and the hop and basin
+    // count of the find. The catalogue's charge is already on the ledger;
+    // adoption only has to record it, at the hop it was found on and not
+    // the hop the walk ends on.
+    let mut pending_packing: Option<(f64, Array1<f64>, usize, usize, usize)> = None;
+
     if cfg.polish_on_improve {
         polish_improved_incumbent(
             cfg,
@@ -6825,6 +7487,102 @@ where
         }
         if ledger.target_reached() {
             break HopStop::of_closed(ledger);
+        }
+        let packing_due = match (&packings_offered, &packing_audit) {
+            (None, _) => hops >= packing_offer_hops(cfg),
+            (Some(_), Some((_, due))) => hops >= *due,
+            (Some(_), None) => false,
+        };
+        if packing_due
+            && !escape_refused
+            && generic_packings_apply(cfg, n, x.len())
+            && ledger.remaining() > 0
+        {
+            let room = ledger.remaining().div_ceil(2);
+            let (mut probe, probe_offset) = ledger.side_probe(room);
+            let held = pending_packing
+                .as_ref()
+                .map_or(f64::INFINITY, |(energy, ..)| *energy);
+            // The walk adopts no candidate before it ends, so the catalogue's
+            // quenches are diagnostic and leave the walk's adaptive kernels
+            // as they were. The second offer finishes the candidates the
+            // first one's screen refused.
+            let offered = {
+                let mut scope = probe.diagnostic_scope();
+                if let Some((mut screen, _)) = packing_audit.take() {
+                    screen.bar = ledger.best;
+                    let audited = audit_refused_packings(cfg, &mut scope, relax, &mut screen, held);
+                    if !screen.deferred.is_empty() {
+                        packing_audit = Some((screen, packing_offer_due(cfg, hops)));
+                    }
+                    audited
+                } else {
+                    packings_offered = Some(hops);
+                    let mut screen =
+                        PackingScreen::new(cfg.screen_steps, ledger.best, descent.clone());
+                    let offered = generic_packing_candidate_with_encounter(
+                        cfg,
+                        &mut scope,
+                        relax,
+                        &mut screen,
+                    );
+                    if !screen.deferred.is_empty() {
+                        let due = packing_offer_due(cfg, hops);
+                        packing_audit = Some((screen, due));
+                    }
+                    offered
+                }
+            };
+            let before = ledger.spent();
+            let candidate = offered.filter(|(energy, state, _)| {
+                *energy < ledger.best.min(held) - PACKING_IMPROVEMENT
+                    && quench_is_sane(cfg, *energy, state.view())
+            });
+            // Certify on the side ledger so the gradient is part of the
+            // catalogue cost. The parent is charged once, below.
+            let cut_gradient = candidate.as_ref().and_then(|(_, state, _)| {
+                grad.as_deref_mut().and_then(|evaluate| {
+                    evaluate(&mut probe, state.view())
+                        .filter(|values| answer_gradient_ok(cfg, values.view(), state.len()))
+                })
+            });
+            let charged_before = ledger.spent();
+            ledger.settle_child(&probe, probe_offset);
+            charged_at_best =
+                charged_at_best.saturating_add(ledger.spent().saturating_sub(charged_before));
+            if let Some((cut_energy, cut_state, cut_at_offset)) = candidate {
+                let cut_at = before + cut_at_offset;
+                // The same contract as every other quench: a target hit or a
+                // caller stop raised inside the probe closes the run and keeps
+                // the lowest point it paid for, with or without a certifying
+                // gradient. An open run needs a converged gradient when one
+                // is required.
+                let recordable = answer_is_recordable(
+                    cfg,
+                    ledger,
+                    cut_energy,
+                    cut_state.view(),
+                    false,
+                    gradient_required,
+                    cut_gradient.is_some(),
+                );
+                if recordable {
+                    if closes_run(ledger, cut_energy) {
+                        ledger.record(cut_energy, cut_state.view());
+                        ledger.stamp_encounter(cut_energy, cut_at);
+                        if improvements.len() < 512 {
+                            improvements.push((hops, cut_at, bias.n_basins(), cut_energy));
+                        }
+                        break HopStop::of_closed(ledger);
+                    }
+                    pending_packing = Some((cut_energy, cut_state, cut_at, hops, bias.n_basins()));
+                } else {
+                    unconverged_records += 1;
+                }
+            }
+            if ledger.stopped() || ledger.target_reached() {
+                break HopStop::of_closed(ledger);
+            }
         }
         // A rigid quench creeps by far less than an isomer gap. Treating
         // that creep as a new lowest restarts the stall clock forever, so
@@ -7030,7 +7788,7 @@ where
             };
             let found = binary_geometry::polish(placed, species, &mut walk);
             let found_at = start + walk.low_at;
-            ledger.absorb_charges(&side_ledger);
+            ledger.settle_child(&side_ledger, 0);
             if reorder_from != lowest_at {
                 reorder_from = lowest_at;
                 reorder_misses = 0;
@@ -7491,6 +8249,9 @@ where
                 let mut inner_cfg = cfg.clone();
                 inner_cfg.branch_on_stall = false;
                 inner_cfg.target_energy = None;
+                // The parent already quenched the generic packing catalogue.
+                // The branch keeps the lattice move and skips a second catalogue.
+                inner_cfg.suppress_generic_packings = true;
                 let before = ledger.spent();
                 let ran = run_with_gradient(
                     &inner_cfg,
@@ -7500,13 +8261,13 @@ where
                     grad.as_deref_mut(),
                     &mut branch_rng,
                 );
-                ledger.absorb_charges(&branch);
+                ledger.settle_child(&branch, 0);
                 if branch.best.is_finite() && branch_ends.len() < BRANCH_ENDS {
                     branch_ends.push(branch.best);
                 }
                 let held_below = branch_held
                     .as_ref()
-                    .map_or(ledger.best, |(held, _, _)| held.min(ledger.best));
+                    .map_or(ledger.best, |(held, _, _, _, _)| held.min(ledger.best));
                 if ran.is_ok()
                     && branch.best < held_below - 1e-10
                     && let Some(state) = branch.best_state.clone()
@@ -7534,7 +8295,7 @@ where
                             improvements.push((hops, found_at, bias.n_basins(), energy));
                         }
                     } else {
-                        branch_held = Some((energy, state, found_at));
+                        branch_held = Some((energy, state, found_at, hops, bias.n_basins()));
                     }
                 }
                 let cost = ledger.spent().saturating_sub(before);
@@ -7667,7 +8428,7 @@ where
                     best_energy: ledger.best,
                     quench_boundaries: &ledger.quench_boundaries[checkpoint_quench_start..],
                     accepted_transitions: &accepted_transitions[checkpoint_transition_start..],
-                    charged: ledger.spent(),
+                    charged: ledger.charged(),
                     remaining: ledger.remaining(),
                     hops,
                     bias: Some(&bias),
@@ -11295,7 +12056,7 @@ where
                 } else {
                     None
                 };
-                ledger.absorb_charges(&side_ledger);
+                ledger.settle_child(&side_ledger, 0);
                 let cost = ledger.spent().saturating_sub(before);
                 observed_basis_spent = observed_basis_spent.saturating_add(cost);
                 charged_at_best = charged_at_best.saturating_add(cost);
@@ -11886,12 +12647,22 @@ where
     {
         ledger.record(energy, state.view());
     }
-    if let Some((energy, state, found_at)) = branch_held
+    if let Some((energy, state, found_at, found_hop, found_basins)) = branch_held
         && energy < ledger.best - 1e-10
     {
         ledger.record(energy, state.view());
         if improvements.len() < 512 {
-            improvements.push((hops, found_at, bias.n_basins(), energy));
+            improvements.push((found_hop, found_at, found_basins, energy));
+        }
+    }
+
+    if let Some((energy, state, found_at, found_hop, found_basins)) = pending_packing
+        && energy < ledger.best - 1e-10
+    {
+        ledger.record(energy, state.view());
+        ledger.stamp_encounter(energy, found_at);
+        if improvements.len() < 512 {
+            improvements.push((found_hop, found_at, found_basins, energy));
         }
     }
 
@@ -11926,7 +12697,8 @@ where
         hops,
         screened_out,
         basins: n_basins,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         overlap_rejected: proposal_overlaps,
         returned,
         branch_draws,
@@ -12698,6 +13470,1697 @@ mod tests {
             }
         });
         assert_eq!(allocated, 0, "an open Thompson draw built a vector");
+    }
+
+    #[test]
+    fn pair_minimum_probes_and_packing_offers_are_charged() {
+        let cfg = Config::for_cluster(12);
+        let start = Array1::from_iter((0..36).map(|index| index as f64 / 7.0));
+        let mut ledger = Ledger::new(1_000);
+        let mut calls = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _iterations: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            calls += 1;
+            let distance = (x[3] - x[0]).abs();
+            ((distance - 2.3).powi(2), x.to_owned())
+        };
+        let measured = measured_pair_minimum(&mut ledger, &mut relax, 12, 53).expect("minimum");
+        assert!((measured - 2.3).abs() < 1.0e-7, "{measured}");
+        let before = ledger.spent();
+        let (_, selected) =
+            generic_packing_candidate(&cfg, &mut ledger, &mut relax).expect("candidate");
+        assert_eq!(selected.len(), start.len());
+        assert!(
+            ledger.spent() >= before + 12,
+            "the second pair search and eight packing offers spent only {} calls",
+            ledger.spent() - before
+        );
+        assert_eq!(calls, ledger.spent());
+    }
+
+    /// One charge per step; the energy falls by one per step from `start`
+    /// and stops at `floor`.
+    fn stepped_relax(
+        start: f64,
+        floor: f64,
+        calls: &std::cell::Cell<usize>,
+    ) -> impl FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + '_ {
+        move |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let mut energy = start;
+            for _ in 0..steps.max(1) {
+                if !led.charge() {
+                    break;
+                }
+                calls.set(calls.get() + 1);
+                energy = (energy - 1.0).max(floor);
+            }
+            (energy, x.to_owned())
+        }
+    }
+
+    /// A packing screen whose descent credits `allowance`.
+    fn packing_screen(steps: usize, bar: f64, allowance: f64) -> PackingScreen {
+        let descent = ScreenDescent {
+            allowance,
+            ..ScreenDescent::default()
+        };
+        PackingScreen::new(steps, bar, descent)
+    }
+
+    /// Two atoms `1 + index` apart: a distinct placement per index.
+    fn pair_placement(index: usize) -> Array1<f64> {
+        let mut point = Array1::zeros(6);
+        point[3] = 1.0 + index as f64;
+        point
+    }
+
+    /// A relaxer whose descent from the placement of `pair_placement(i)`
+    /// starts at `starts[i]`, falls by one per charged call and stops at
+    /// `floor`. Every placement relaxed for more than `screen` steps is
+    /// recorded in `finished`.
+    fn placed_relax<'a>(
+        starts: &'a [f64],
+        floor: f64,
+        screen: usize,
+        calls: &'a std::cell::Cell<usize>,
+        finished: &'a std::cell::RefCell<Vec<Array1<f64>>>,
+    ) -> impl FnMut(&mut Ledger, ArrayView1<f64>, usize) -> (f64, Array1<f64>) + 'a {
+        move |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if steps > screen {
+                finished.borrow_mut().push(x.to_owned());
+            }
+            let index = (x[3] - 1.0).round() as usize;
+            let mut energy = starts[index];
+            for _ in 0..steps.max(1) {
+                if !led.charge() {
+                    break;
+                }
+                calls.set(calls.get() + 1);
+                energy = (energy - 1.0).max(floor);
+            }
+            (energy, x.to_owned())
+        }
+    }
+
+    /// Twelve distinct candidates, every one refused: five steps from its
+    /// start reach `start - 5`, `start - 7` with the credit of 2, all above
+    /// the bar of -10, though each relaxes to -40. Each is deferred once, a
+    /// repeated placement is not deferred twice, and the audit relaxes
+    /// every one of the twelve in full from its placement, closest to the
+    /// bar first, and keeps the first.
+    #[test]
+    fn every_distinct_refused_packing_candidate_is_audited() {
+        let cfg = Config::recommended(2);
+        let count = 12;
+        let starts: Vec<f64> = (0..count).map(|i| ((i * 5) % count) as f64).collect();
+        let calls = std::cell::Cell::new(0usize);
+        let finished = std::cell::RefCell::new(Vec::new());
+        let mut relax = placed_relax(&starts, -40.0, 5, &calls, &finished);
+        let mut ledger = Ledger::new(10_000);
+        let mut screen = packing_screen(5, -10.0, 2.0);
+        let placements: Vec<Array1<f64>> = (0..count).map(pair_placement).collect();
+        for point in placements.iter().chain([&placements[3], &placements[7]]) {
+            let refused = screened_relax(
+                &mut ledger,
+                &mut relax,
+                point.view(),
+                50,
+                &mut screen,
+                f64::INFINITY,
+            );
+            assert!(refused.is_none(), "the screen finished a refused candidate");
+        }
+        assert_eq!(ledger.spent(), 5 * (count + 2));
+        assert!(finished.borrow().is_empty(), "a refusal was finished");
+        assert_eq!(
+            screen.deferred.len(),
+            count,
+            "one deferral per distinct placement"
+        );
+
+        let before = ledger.spent();
+        let (energy, kept, found_at) =
+            audit_refused_packings(&cfg, &mut ledger, &mut relax, &mut screen, f64::INFINITY)
+                .expect("an audited candidate below the bar is kept");
+        assert_eq!(energy, -40.0, "the audit is the one-pass relaxation");
+        assert_eq!(found_at, 50, "kept at the first audit");
+        let mut closest_first: Vec<usize> = (0..count).collect();
+        closest_first.sort_by(|&a, &b| starts[a].total_cmp(&starts[b]));
+        assert_eq!(kept, placements[closest_first[0]]);
+        assert_eq!(screen.audited, count);
+        assert!(screen.deferred.is_empty());
+        let order: Vec<Array1<f64>> = closest_first
+            .iter()
+            .map(|&i| placements[i].clone())
+            .collect();
+        assert_eq!(
+            *finished.borrow(),
+            order,
+            "every distinct refusal is audited once, closest to the bar first"
+        );
+        assert_eq!(ledger.spent() - before, 50 * count);
+        assert_eq!(calls.get(), ledger.spent(), "every call charged");
+        assert_eq!(screen.descent.drops.len(), count);
+    }
+
+    /// An audit that runs out of budget ends there, charged, after the
+    /// refusals closest to the bar. With room for one full relaxation and
+    /// seven calls more, the closest is audited and the next closest is cut
+    /// at seven calls. The cut one stays deferred in its place with the two
+    /// farther ones, and its truncated descent is not fed to the window. A
+    /// second audit relaxes the three in full from their placements, the
+    /// cut one first.
+    #[test]
+    fn an_audit_out_of_budget_spends_it_on_the_closest_refusals() {
+        let cfg = Config::recommended(2);
+        let starts = [6.0, 0.0, 3.0, 9.0];
+        let calls = std::cell::Cell::new(0usize);
+        let finished = std::cell::RefCell::new(Vec::new());
+        let mut relax = placed_relax(&starts, -6.0, 5, &calls, &finished);
+        let mut ledger = Ledger::new(5 * starts.len() + 50 + 7);
+        let mut screen = packing_screen(5, -10.0, 2.0);
+        for index in 0..starts.len() {
+            let point = pair_placement(index);
+            assert!(
+                screened_relax(
+                    &mut ledger,
+                    &mut relax,
+                    point.view(),
+                    50,
+                    &mut screen,
+                    f64::INFINITY,
+                )
+                .is_none()
+            );
+        }
+        let kept =
+            audit_refused_packings(&cfg, &mut ledger, &mut relax, &mut screen, f64::INFINITY);
+        assert!(kept.is_none(), "a candidate above the bar was kept");
+        assert_eq!(ledger.remaining(), 0);
+        assert_eq!(calls.get(), ledger.spent());
+        assert_eq!(screen.audited, 1, "only the closest relaxed in full");
+        assert_eq!(screen.descent.drops.len(), 1, "a cut descent is not fed");
+        assert_eq!(
+            *finished.borrow(),
+            vec![pair_placement(1), pair_placement(2)],
+            "the start 0 finished, the start 3 was cut"
+        );
+        let waiting: Vec<f64> = screen.deferred.iter().map(|held| held.point[3]).collect();
+        assert_eq!(
+            waiting,
+            vec![1.0, 3.0, 4.0],
+            "the cut start 3 waits in its place with the starts 6 and 9"
+        );
+
+        let first = ledger.spent();
+        let mut resumed = Ledger::new(50 * waiting.len());
+        let kept =
+            audit_refused_packings(&cfg, &mut resumed, &mut relax, &mut screen, f64::INFINITY);
+        assert!(kept.is_none(), "a candidate above the bar was kept");
+        assert!(screen.deferred.is_empty(), "the second audit finished all");
+        assert_eq!(screen.audited, starts.len());
+        assert_eq!(screen.descent.drops.len(), starts.len());
+        assert_eq!(
+            *finished.borrow(),
+            [1, 2, 2, 0, 3].map(pair_placement).to_vec(),
+            "the cut refusal is relaxed again from its placement, first"
+        );
+        assert_eq!(resumed.spent(), 50 * waiting.len());
+        assert_eq!(calls.get(), first + resumed.spent(), "every call charged");
+    }
+
+    /// Warm L-BFGS can need more objective calls than its iteration limit.
+    /// When the ledger has room for that full limit but closes first, the
+    /// refused call still marks the descent as cut and hands the candidate
+    /// back to the screen.
+    #[test]
+    fn warm_lbfgs_cut_with_full_step_room_hands_candidate_back() {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+
+        let cfg = Config::recommended(2);
+        let steps = cfg.relax_steps;
+        let point = Array1::zeros(6);
+        let mut screen = packing_screen(cfg.screen_steps, -1.0, 0.0);
+        screen.defer(point.view(), steps, 0.0, 1.0);
+        let mut ledger = Ledger::new(steps);
+        assert!(ledger.remaining() >= steps);
+
+        let mut optimiser = WarmLbfgs::default();
+        optimiser.curvature = 1.0;
+        let mut calls = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
+            optimiser.forget();
+            let (energy, relaxed, _) = optimiser.minimize(x, iterations, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                calls += 1;
+                Some((v.sum(), Array1::ones(v.len())))
+            });
+            (energy, relaxed)
+        };
+
+        let offered =
+            audit_refused_packings(&cfg, &mut ledger, &mut relax, &mut screen, f64::INFINITY);
+        assert!(offered.is_some(), "the paid point was not offered");
+        assert_eq!(ledger.remaining(), 0, "the quench closes the ledger");
+        assert_eq!(calls, steps, "every available evaluation was charged");
+        assert_eq!(screen.audited, 0, "a cut quench was counted as audited");
+        assert_eq!(
+            screen.deferred.len(),
+            1,
+            "the candidate was not handed back"
+        );
+        assert_eq!(screen.deferred[0].point, point);
+        assert_eq!(screen.deferred[0].cut_at, steps);
+    }
+
+    /// A refusal the budget cut at seven calls is not started again with
+    /// seven calls, since from its placement it would be cut at the same
+    /// call. The next closest goes in its place and is cut at seven too,
+    /// then the farthest, untried. An audit with seven calls then makes
+    /// none, and one with room for all three relaxes them in full, closest
+    /// first.
+    #[test]
+    fn a_cut_refusal_waits_for_more_calls_than_its_cut_paid() {
+        let cfg = Config::recommended(2);
+        let starts = [6.0, 0.0, 3.0, 9.0];
+        let calls = std::cell::Cell::new(0usize);
+        let finished = std::cell::RefCell::new(Vec::new());
+        let mut relax = placed_relax(&starts, -6.0, 5, &calls, &finished);
+        let mut ledger = Ledger::new(5 * starts.len() + 50 + 7);
+        let mut screen = packing_screen(5, -10.0, 2.0);
+        for index in 0..starts.len() {
+            let point = pair_placement(index);
+            assert!(
+                screened_relax(
+                    &mut ledger,
+                    &mut relax,
+                    point.view(),
+                    50,
+                    &mut screen,
+                    f64::INFINITY,
+                )
+                .is_none()
+            );
+        }
+        audit_refused_packings(&cfg, &mut ledger, &mut relax, &mut screen, f64::INFINITY);
+        let cut: Vec<(f64, usize)> = screen
+            .deferred
+            .iter()
+            .map(|held| (held.point[3], held.cut_at))
+            .collect();
+        assert_eq!(cut, vec![(1.0, 0), (3.0, 7), (4.0, 0)]);
+
+        let mut seven = Ledger::new(7);
+        audit_refused_packings(&cfg, &mut seven, &mut relax, &mut screen, f64::INFINITY);
+        assert_eq!(seven.spent(), 7, "the start 6 took the seven calls");
+        let cut: Vec<(f64, usize)> = screen
+            .deferred
+            .iter()
+            .map(|held| (held.point[3], held.cut_at))
+            .collect();
+        assert_eq!(cut, vec![(1.0, 7), (3.0, 7), (4.0, 0)]);
+
+        let mut again = Ledger::new(7);
+        audit_refused_packings(&cfg, &mut again, &mut relax, &mut screen, f64::INFINITY);
+        assert_eq!(again.spent(), 7, "the untried start 9 took them");
+        let mut idle = Ledger::new(7);
+        let kept = audit_refused_packings(&cfg, &mut idle, &mut relax, &mut screen, f64::INFINITY);
+        assert!(kept.is_none());
+        assert_eq!(idle.spent(), 0, "no refusal can finish in seven calls");
+        assert_eq!(screen.deferred.len(), 3);
+        assert_eq!(screen.audited, 1);
+
+        let mut room = Ledger::new(50 * 3);
+        audit_refused_packings(&cfg, &mut room, &mut relax, &mut screen, f64::INFINITY);
+        assert!(screen.deferred.is_empty());
+        assert_eq!(screen.audited, starts.len());
+        assert_eq!(
+            *finished.borrow(),
+            [1, 2, 0, 3, 2, 0, 3].map(pair_placement).to_vec(),
+            "each cut refusal is relaxed again from its placement"
+        );
+        assert_eq!(
+            calls.get(),
+            ledger.spent() + seven.spent() + again.spent() + room.spent(),
+            "every call charged"
+        );
+    }
+
+    /// A candidate whose full relaxation stays above the bar is refused
+    /// after its screening pass, and its audit is charged and keeps
+    /// nothing.
+    #[test]
+    fn a_packing_candidate_that_cannot_beat_the_bar_stops_after_its_screen() {
+        let point = Array1::zeros(6);
+
+        // Five steps reach -5, -7 with the credit; the floor is -6.
+        let calls = std::cell::Cell::new(0usize);
+        let mut ledger = Ledger::new(1_000);
+        let mut relax = stepped_relax(0.0, -6.0, &calls);
+        let mut screen = packing_screen(5, -10.0, 2.0);
+        let refused = screened_relax(
+            &mut ledger,
+            &mut relax,
+            point.view(),
+            50,
+            &mut screen,
+            f64::INFINITY,
+        );
+        assert!(refused.is_none(), "a candidate above the bar was finished");
+        assert_eq!(ledger.spent(), 5, "only the screening pass is charged");
+        assert_eq!(calls.get(), ledger.spent());
+
+        assert_eq!(screen.deferred.len(), 1, "the refusal waits for its audit");
+        let audited = audit_refused_packings(
+            &Config::recommended(2),
+            &mut ledger,
+            &mut relax,
+            &mut screen,
+            f64::INFINITY,
+        );
+        assert!(audited.is_none(), "an audit kept a candidate above the bar");
+        assert_eq!(screen.audited, 1);
+        assert_eq!(ledger.spent(), 5 + 50, "the audit is charged");
+        assert_eq!(calls.get(), ledger.spent());
+
+        // A held candidate lowers the bar: -11 with the credit beats -10
+        // but not a held -12.
+        let calls = std::cell::Cell::new(0usize);
+        let mut ledger = Ledger::new(1_000);
+        let mut relax = stepped_relax(-4.0, -11.5, &calls);
+        let mut screen = packing_screen(5, -10.0, 2.0);
+        let refused = screened_relax(
+            &mut ledger,
+            &mut relax,
+            point.view(),
+            50,
+            &mut screen,
+            -12.0,
+        );
+        assert!(
+            refused.is_none(),
+            "a candidate above the held one was finished"
+        );
+        assert_eq!(ledger.spent(), 5);
+        assert_eq!(calls.get(), ledger.spent());
+
+        // From -4 the pass reaches -9, and -11 with the credit: finished.
+        let calls = std::cell::Cell::new(0usize);
+        let mut ledger = Ledger::new(1_000);
+        let mut relax = stepped_relax(-4.0, -40.0, &calls);
+        let mut screen = packing_screen(5, -10.0, 2.0);
+        let (energy, _) = screened_relax(
+            &mut ledger,
+            &mut relax,
+            point.view(),
+            50,
+            &mut screen,
+            f64::INFINITY,
+        )
+        .expect("a candidate that may beat the bar is finished");
+        assert_eq!(energy, -40.0, "the full relaxation is the one-pass one");
+        assert_eq!(ledger.spent(), 5 + 50, "screen and full relaxation charged");
+        assert_eq!(calls.get(), ledger.spent());
+
+        // No incumbent, no screen: one pass, as before the screen existed.
+        let calls = std::cell::Cell::new(0usize);
+        let mut ledger = Ledger::new(1_000);
+        let mut relax = stepped_relax(0.0, -40.0, &calls);
+        let mut open = packing_screen(5, f64::INFINITY, 2.0);
+        let (energy, _) = screened_relax(
+            &mut ledger,
+            &mut relax,
+            point.view(),
+            50,
+            &mut open,
+            f64::INFINITY,
+        )
+        .expect("an open screen relaxes");
+        assert_eq!(energy, -40.0);
+        assert_eq!(ledger.spent(), 50);
+        assert_eq!(calls.get(), ledger.spent());
+    }
+
+    #[test]
+    fn a_screening_pass_that_ends_the_budget_returns_its_point() {
+        let point = Array1::zeros(6);
+        let mut screen = packing_screen(5, -100.0, 0.0);
+        let calls = std::cell::Cell::new(0usize);
+        let mut ledger = Ledger::new(5);
+        let mut relax = stepped_relax(0.0, -40.0, &calls);
+        let (energy, _) = screened_relax(
+            &mut ledger,
+            &mut relax,
+            point.view(),
+            50,
+            &mut screen,
+            f64::INFINITY,
+        )
+        .expect("the paid point is returned");
+        assert_eq!(energy, -5.0);
+        assert_eq!(ledger.spent(), 5);
+        assert_eq!(calls.get(), ledger.spent());
+    }
+
+    /// The packing catalogue on a pair potential under `Config::recommended`,
+    /// relaxed with the benchmark drivers' warm L-BFGS. Returns the offer and
+    /// the potential calls it made, counted at the potential, then the audit
+    /// of its refusals on the same ledger with that audit's charge, and the
+    /// calls of both counted at the potential.
+    fn pair_catalogue(
+        potential: &crate::potentials::PairPotential,
+        n: usize,
+        screen: &mut PackingScreen,
+    ) -> (
+        Option<(f64, Array1<f64>, usize)>,
+        usize,
+        usize,
+        Option<(f64, Array1<f64>, usize)>,
+        usize,
+        usize,
+    ) {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+        let cfg = Config::recommended(n);
+        let mut ledger = Ledger::new(1_000_000);
+        let mut calls = 0usize;
+        let mut opt = WarmLbfgs::default();
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
+            opt.forget();
+            let (value, relaxed, _) = opt.minimize(x, iterations, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                calls += 1;
+                Some(potential.value_and_gradient(v))
+            });
+            (value, relaxed)
+        };
+        let offer = generic_packing_candidate_with_encounter(&cfg, &mut ledger, &mut relax, screen);
+        let spent = ledger.spent();
+        let held = offer
+            .as_ref()
+            .map_or(f64::INFINITY, |(energy, _, _)| *energy);
+        let audit = audit_refused_packings(&cfg, &mut ledger, &mut relax, screen, held);
+        let audit_spent = ledger.spent() - spent;
+        let catalogue_calls = calls - audit_spent;
+        (offer, spent, catalogue_calls, audit, audit_spent, calls)
+    }
+
+    /// The screen keeps the packing that solves LJ38 and Morse M38 at rho 6
+    /// in one offer, at the same energy and for fewer calls, and refuses
+    /// every candidate when none can beat the bar, for fewer calls than the
+    /// solving offer. The audit then relaxes each of the eight distinct
+    /// refusals in full, and none beats the bar. The bar sits two wells
+    /// above the global minimum, about where the walk stands at the offer;
+    /// the credit is zero, the strictest the walk can pass.
+    #[test]
+    fn the_packing_screen_keeps_the_lj38_and_m38_solutions_and_skips_the_rest() {
+        use crate::potentials::PairPotential;
+        // The spends of the open, the solving and the fully refused
+        // catalogues, and of the refused catalogue's audit, counted at the
+        // potential.
+        for (label, potential, reference, pinned) in [
+            (
+                "lj38",
+                PairPotential::lennard_jones(38),
+                -173.928427,
+                (1411, 309, 297, 1365),
+            ),
+            (
+                "m38r6",
+                PairPotential::morse(38, 6.0),
+                -157.477108,
+                (1374, 425, 297, 1330),
+            ),
+        ] {
+            let (open, open_spent, open_calls, _, open_audit, _) =
+                pair_catalogue(&potential, 38, &mut PackingScreen::open());
+            let (open_energy, _, _) = open.expect("the open catalogue offers a packing");
+            assert!(
+                crate::energy_hits(open_energy, reference, crate::DEFAULT_HIT_TOL),
+                "{label}: the open catalogue offered {open_energy}"
+            );
+            assert_eq!(open_calls, open_spent, "{label}: every call charged");
+            assert_eq!(open_audit, 0, "{label}: an open screen refuses nothing");
+
+            let steps = Config::recommended(38).screen_steps;
+            let mut screen = packing_screen(steps, reference + 2.0, 0.0);
+            let (kept, kept_spent, kept_calls, _, _, _) =
+                pair_catalogue(&potential, 38, &mut screen);
+            let (kept_energy, _, _) = kept.expect("the solving packing passes the screen");
+            assert_eq!(
+                kept_energy.to_bits(),
+                open_energy.to_bits(),
+                "{label}: the screened catalogue lost the solution"
+            );
+            assert_eq!(kept_calls, kept_spent, "{label}: every call charged");
+            assert!(
+                kept_spent < open_spent,
+                "{label}: the screen spent {kept_spent} against {open_spent}"
+            );
+
+            let mut beaten = packing_screen(steps, open_energy, 0.0);
+            let (none, none_spent, none_calls, audit, audit_spent, calls) =
+                pair_catalogue(&potential, 38, &mut beaten);
+            assert!(
+                none.is_none(),
+                "{label}: a candidate that cannot beat the bar was finished"
+            );
+            assert_eq!(none_calls, none_spent, "{label}: every call charged");
+            assert!(
+                none_spent < kept_spent,
+                "{label}: refusing every candidate spent {none_spent} against {kept_spent}"
+            );
+            assert!(
+                audit.is_none(),
+                "{label}: an audit kept a candidate above the bar"
+            );
+            assert_eq!(
+                beaten.audited, PACKING_CANDIDATES,
+                "{label}: every distinct refusal is audited"
+            );
+            assert!(beaten.deferred.is_empty());
+            assert_eq!(
+                calls,
+                none_spent + audit_spent,
+                "{label}: every call charged"
+            );
+            assert_eq!(
+                (open_spent, kept_spent, none_spent, audit_spent),
+                pinned,
+                "{label}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_packing_offer_waits_four_hops_per_structure_and_never_past_the_last_hop() {
+        let mut cfg = Config::recommended(26);
+        assert_eq!(cfg.packing_deferral, 4);
+        assert_eq!(packing_offer_hops(&cfg), 4 * (PACKING_CANDIDATES + 1));
+        cfg.max_hops = Some(10);
+        assert_eq!(packing_offer_hops(&cfg), 9, "the last hop at the latest");
+        cfg.max_hops = Some(1);
+        assert_eq!(packing_offer_hops(&cfg), 0);
+        cfg.max_hops = Some(0);
+        assert_eq!(packing_offer_hops(&cfg), 0);
+        cfg.max_hops = None;
+        cfg.packing_deferral = 0;
+        assert_eq!(
+            packing_offer_hops(&cfg),
+            0,
+            "zero offers before the first hop"
+        );
+    }
+
+    #[test]
+    fn a_non_finite_pair_probe_is_counted_and_charged() {
+        const PROBE_LIMIT: usize = 7;
+        let mut ledger = Ledger::new(1_000);
+        let mut calls = 0usize;
+        let mut non_finite = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _iterations: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            calls += 1;
+            let distance = (x[3] - x[0]).abs();
+            if (distance - 0.5).abs() < 1.0e-12 {
+                non_finite += 1;
+                return (f64::NAN, x.to_owned());
+            }
+            ((distance - 2.3).powi(2), x.to_owned())
+        };
+        let measured = measured_pair_minimum(&mut ledger, &mut relax, 12, PROBE_LIMIT);
+        assert!(
+            measured.is_some(),
+            "the finite probes still bracket a minimum"
+        );
+        assert_eq!(
+            non_finite, 1,
+            "the potential returned non-finite on one pair"
+        );
+        assert_eq!(
+            calls, PROBE_LIMIT,
+            "the non-finite call must count toward the probe limit"
+        );
+        assert_eq!(ledger.spent(), calls, "every pair evaluation is charged");
+
+        let mut ledger = Ledger::new(1_000);
+        let mut calls = 0usize;
+        let mut all_bad = |led: &mut Ledger, x: ArrayView1<f64>, _iterations: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            calls += 1;
+            (f64::NAN, x.to_owned())
+        };
+        assert!(measured_pair_minimum(&mut ledger, &mut all_bad, 12, PROBE_LIMIT).is_none());
+        assert_eq!(calls, 1);
+        assert_eq!(ledger.spent(), calls);
+    }
+
+    #[test]
+    fn run_with_gradient_reaches_generic_packings_on_two_species_atomic_config() {
+        let n = 23usize;
+        let mut species = vec![29u32; 11];
+        species.extend(std::iter::repeat_n(79u32, 12));
+        let mut cfg = Config::recommended(n).with_species(species, None);
+        cfg.max_hops = Some(3);
+        let mut start_rng = StdRng::seed_from_u64(11);
+        let start =
+            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut start_rng);
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+        let expected_packings = binary_geometry::packing_candidates(n, 2.0);
+        let mut seen_pair_probes = 0usize;
+        let mut seen_packing_counts = vec![0usize; expected_packings.len()];
+        let mut seen_packing_screens = vec![0usize; expected_packings.len()];
+        let mut catalogue_outside_scope = 0usize;
+        let mut walk_inside_scope = 0usize;
+        let mut walk_quenches = 0usize;
+        let screen_steps = cfg.screen_steps;
+        let total_evals = std::sync::atomic::AtomicUsize::new(0);
+        let mut ledger = Ledger::new(2_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            total_evals.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let diagnostic = led.is_diagnostic_quench();
+            let has_far_spectator = (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold);
+            if steps == 0 && has_far_spectator {
+                seen_pair_probes += 1;
+                catalogue_outside_scope += usize::from(!diagnostic);
+                let distance = (x[3] - x[0]).abs();
+                return ((distance - 2.0).powi(2), x.to_owned());
+            }
+            for (index, packing) in expected_packings.iter().enumerate() {
+                let max_diff = x
+                    .iter()
+                    .zip(packing.iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0_f64, f64::max);
+                if max_diff < 1e-4 {
+                    catalogue_outside_scope += usize::from(!diagnostic);
+                    if steps == screen_steps {
+                        seen_packing_screens[index] += 1;
+                    } else {
+                        seen_packing_counts[index] += 1;
+                    }
+                    return (-50.0 - index as f64, x.to_owned());
+                }
+            }
+            walk_quenches += 1;
+            walk_inside_scope += usize::from(diagnostic);
+            (-1.0, x.to_owned())
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            total_evals.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Some(Array1::zeros(x.len()))
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        assert!(
+            seen_pair_probes >= 3,
+            "expected pair-minimum probes through run_full, saw {seen_pair_probes}"
+        );
+        assert_eq!(
+            seen_packing_counts,
+            vec![1; expected_packings.len()],
+            "expected each of the 8 generic packings to be offered once through run_full"
+        );
+        // Each packing here lands lower than the last, so each passes its
+        // screening pass and is relaxed in full.
+        assert_eq!(
+            seen_packing_screens,
+            vec![1; expected_packings.len()],
+            "expected each of the 8 generic packings to be screened once"
+        );
+        // The catalogue's quenches are diagnostic and the walk's are not.
+        assert_eq!(
+            catalogue_outside_scope, 0,
+            "catalogue quench outside the scope"
+        );
+        assert!(walk_quenches > 0);
+        assert_eq!(walk_inside_scope, 0, "walk quench inside the scope");
+        assert!(
+            outcome.best <= -57.0 + 1e-9,
+            "expected offered generic packing to beat the opening quench, got {}",
+            outcome.best
+        );
+        let evals = total_evals.load(std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(outcome.charged, evals);
+        assert_eq!(ledger.spent(), evals);
+        assert!(outcome.charged <= 2_000);
+    }
+
+    /// A packing found at the offer is adopted when the walk ends. Its row
+    /// in `improvements` names the hop the probe ran on, not the hop the walk
+    /// stopped on.
+    #[test]
+    fn an_adopted_packing_keeps_the_hop_it_was_found_on() {
+        let n = 23usize;
+        let mut species = vec![29u32; 11];
+        species.extend(std::iter::repeat_n(79u32, 12));
+        let mut cfg = Config::recommended(n).with_species(species, None);
+        cfg.max_hops = Some(6);
+        cfg.packing_deferral = 1;
+        let offer = packing_offer_hops(&cfg);
+        assert_eq!(offer, 5, "the offer is capped one hop below max_hops");
+        let mut start_rng = StdRng::seed_from_u64(11);
+        let start =
+            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut start_rng);
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+        let packings = binary_geometry::packing_candidates(n, 2.0);
+        let mut ledger = Ledger::new(4_000);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            if steps == 0 && (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold) {
+                let distance = (x[3] - x[0]).abs();
+                return ((distance - 2.0).powi(2), x.to_owned());
+            }
+            for (index, packing) in packings.iter().enumerate() {
+                let worst = x
+                    .iter()
+                    .zip(packing.iter())
+                    .map(|(a, b)| (a - b).abs())
+                    .fold(0.0_f64, f64::max);
+                if worst < 1e-4 {
+                    return (-50.0 - index as f64, x.to_owned());
+                }
+            }
+            (-1.0, x.to_owned())
+        };
+        let mut grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| led.charge().then(|| Array1::zeros(x.len()));
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        assert_eq!(outcome.hops, 6, "the walk runs to its cap");
+        assert!(outcome.best <= -57.0 + 1e-9, "best {}", outcome.best);
+        let row = outcome
+            .improvements
+            .iter()
+            .find(|(_, _, _, energy)| *energy == outcome.best)
+            .expect("the adopted packing is listed");
+        assert_eq!(row.0, offer, "the row carries the hop of the find");
+        assert_ne!(row.0, outcome.hops);
+        assert!(row.1 <= outcome.charged, "found within the charged work");
+    }
+
+    /// An audit the budget cuts short in the walk is resumed at a later hop.
+    ///
+    /// Every packing's screening pass ends at -1, above the walk's -10, so
+    /// the screen refuses all eight. A full relaxation pays one call per
+    /// step and lands at `-50 - index`; a relaxation given fewer steps than
+    /// the walk's `relax_steps`, or cut by the budget, lands at -1. The
+    /// audit runs on half the parent's remaining budget, which here holds
+    /// about six full relaxations, so the first audit ends with candidates
+    /// waiting. The walk then hops, and the next audit relaxes the rest from
+    /// their placements. Every one of the eight is relaxed in full exactly
+    /// once, the last refused one is the walk's best, and every call is
+    /// charged.
+    #[test]
+    fn a_budget_cut_packing_audit_is_resumed_at_a_later_hop() {
+        #[derive(Debug, Clone, Copy, PartialEq)]
+        enum Event {
+            Walk,
+            Full(usize),
+            Cut(usize),
+        }
+        let n = 23usize;
+        let mut species = vec![29u32; 11];
+        species.extend(std::iter::repeat_n(79u32, 12));
+        let mut cfg = Config::recommended(n).with_species(species, None);
+        cfg.packing_deferral = 0;
+        cfg.max_hops = Some(40);
+        let full = cfg.relax_steps;
+        let screen_steps = cfg.screen_steps;
+        assert!(screen_steps < full);
+        let mut start_rng = StdRng::seed_from_u64(11);
+        let start =
+            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut start_rng);
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+        let packings = binary_geometry::packing_candidates(n, 2.0);
+        let mut events = Vec::new();
+        let evals = std::sync::atomic::AtomicUsize::new(0);
+        let mut ledger = Ledger::new(12 * full + 2 * f64::MANTISSA_DIGITS as usize);
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            let placed = packings.iter().position(|packing| {
+                x.iter()
+                    .zip(packing.iter())
+                    .all(|(a, b)| (a - b).abs() < 1e-4)
+            });
+            let pays = match placed {
+                Some(_) if steps > screen_steps => steps,
+                _ => 1,
+            };
+            let mut paid = 0usize;
+            while paid < pays && led.charge() {
+                paid += 1;
+            }
+            evals.fetch_add(paid, std::sync::atomic::Ordering::Relaxed);
+            if paid == 0 {
+                return (f64::NAN, x.to_owned());
+            }
+            if steps == 0 && (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold) {
+                let distance = (x[3] - x[0]).abs();
+                return ((distance - 2.0).powi(2), x.to_owned());
+            }
+            match placed {
+                Some(index) if steps > screen_steps => {
+                    if steps == full && paid == steps {
+                        events.push(Event::Full(index));
+                        (-50.0 - index as f64, x.to_owned())
+                    } else {
+                        events.push(Event::Cut(index));
+                        (-1.0, x.to_owned())
+                    }
+                }
+                Some(_) => (-1.0, x.to_owned()),
+                None => {
+                    events.push(Event::Walk);
+                    (-10.0, x.to_owned())
+                }
+            }
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            evals.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Some(Array1::zeros(x.len()))
+        };
+        let mut rng = StdRng::seed_from_u64(11);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        let evals = evals.load(std::sync::atomic::Ordering::Relaxed);
+        let mut trace = events.clone();
+        trace.dedup_by(|next, last| *next == Event::Walk && *last == Event::Walk);
+        let mut finished = vec![0usize; packings.len()];
+        for event in &events {
+            if let Event::Full(index) = event {
+                finished[*index] += 1;
+            }
+        }
+        assert_eq!(
+            finished,
+            vec![1; packings.len()],
+            "every refusal relaxed in full exactly once: {trace:?}"
+        );
+        let first_full = events
+            .iter()
+            .position(|event| matches!(event, Event::Full(_)))
+            .expect("an audit ran");
+        let first_audit = events[first_full..]
+            .iter()
+            .take_while(|event| !matches!(event, Event::Walk))
+            .filter(|event| matches!(event, Event::Full(_)))
+            .count();
+        assert!(
+            first_audit < packings.len(),
+            "the first audit was not cut by the budget: {trace:?}"
+        );
+        assert!(
+            events[first_full..]
+                .iter()
+                .skip_while(|event| !matches!(event, Event::Walk))
+                .any(|event| matches!(event, Event::Full(_))),
+            "no audit resumed after a hop: {trace:?}"
+        );
+        assert_eq!(
+            outcome.best,
+            -50.0 - (packings.len() - 1) as f64,
+            "the last refused packing was audited"
+        );
+        assert_eq!(outcome.charged, evals, "every call charged");
+        assert_eq!(ledger.spent(), evals);
+    }
+
+    #[test]
+    fn run_with_gradient_skips_generic_packings_on_molecular_and_rigid_configs() {
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+
+        // Molecular configuration (even if energy_lattice is toggled on).
+        let mut molecular = Config::recommended_molecular(
+            vec![8, 1, 1, 8, 1, 1],
+            vec![vec![0, 1, 2], vec![3, 4, 5]],
+            1.0,
+        );
+        molecular.energy_lattice = true;
+        molecular.max_hops = Some(2);
+        let mol_start = Array1::from_vec(vec![
+            0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0, 4.0, 0.0, 0.0, 4.96, 0.0, 0.0, 3.76,
+            0.93, 0.0,
+        ]);
+        let mut mol_probes = 0usize;
+        let mut mol_ledger = Ledger::new(400);
+        let mut mol_relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            if steps == 0 && (2..molecular.n_points).any(|a| x[3 * a + 1].abs() > far_threshold) {
+                mol_probes += 1;
+            }
+            (0.0, x.to_owned())
+        };
+        let mut mol_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| led.charge().then(|| Array1::zeros(x.len()));
+        let mut mol_rng = StdRng::seed_from_u64(13);
+        let mol_out = run_with_gradient(
+            &molecular,
+            mol_start.view(),
+            &mut mol_ledger,
+            &mut mol_relax,
+            Some(&mut mol_grad),
+            &mut mol_rng,
+        )
+        .expect("finite molecular start");
+        assert_eq!(
+            mol_probes, 0,
+            "molecular config must never run packing probes"
+        );
+        assert_eq!(mol_out.charged, mol_ledger.spent());
+
+        // Rigid-body configuration (even if energy_lattice is toggled on).
+        let geometry = crate::potentials::gmin_water_geometry();
+        let mut rigid = Config::recommended(3).with_rigid_bodies(geometry);
+        rigid.energy_lattice = true;
+        rigid.max_hops = Some(2);
+        let rigid_start = Array1::from_vec(vec![
+            -2.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0,
+        ]);
+        let mut rigid_probes = 0usize;
+        let mut rigid_ledger = Ledger::new(400);
+        let mut rigid_relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            if steps == 0 && x.iter().any(|v| v.abs() > far_threshold) {
+                rigid_probes += 1;
+            }
+            (0.0, x.to_owned())
+        };
+        let mut rigid_grad =
+            |led: &mut Ledger, x: ArrayView1<f64>| led.charge().then(|| Array1::zeros(x.len()));
+        let mut rigid_rng = StdRng::seed_from_u64(17);
+        let rigid_out = run_with_gradient(
+            &rigid,
+            rigid_start.view(),
+            &mut rigid_ledger,
+            &mut rigid_relax,
+            Some(&mut rigid_grad),
+            &mut rigid_rng,
+        )
+        .expect("finite rigid start");
+        assert_eq!(
+            rigid_probes, 0,
+            "rigid config must never run packing probes"
+        );
+        assert_eq!(rigid_out.charged, rigid_ledger.spent());
+    }
+
+    #[test]
+    fn run_with_gradient_reaches_sutton_chen_10_8_38_through_generic_packings() {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+        use crate::potentials::{SuttonChen, SuttonChenFamily};
+
+        let n = 38usize;
+        let reference = -10117.2454;
+        let cfg = Config::recommended(n);
+        assert!(cfg.species.is_none());
+        let potential = SuttonChen::new(n, SuttonChenFamily::Sc10_8);
+        let mut start_rng = StdRng::seed_from_u64(0);
+        let start =
+            random_cluster_in_radius(n, cfg.start_radius(), cfg.min_separation, &mut start_rng);
+        let mut ledger = Ledger::new(20_000);
+        ledger.stop_below(reference + crate::DEFAULT_HIT_TOL);
+        let mut opt = WarmLbfgs::default();
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, iterations: usize| {
+            opt.forget();
+            let (value, relaxed, _) = opt.minimize(x, iterations, |v| {
+                if !led.charge() {
+                    return None;
+                }
+                Some(potential.value_and_gradient(v))
+            });
+            (value, relaxed)
+        };
+        let mut grad = |led: &mut Ledger, v: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            Some(potential.value_and_gradient(v).1)
+        };
+        let mut rng = StdRng::seed_from_u64(0);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("finite start");
+        assert!(
+            crate::energy_hits(outcome.best, reference, crate::DEFAULT_HIT_TOL),
+            "expected sc108-38 hit <= {reference}, got {} in {} evals",
+            outcome.best,
+            outcome.charged
+        );
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(outcome.charged, ledger.spent());
+    }
+
+    #[test]
+    fn a_stopped_ledger_keeps_every_settled_evaluation() {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut open = Ledger::with_stop(10, std::sync::Arc::clone(&stop));
+        assert!(open.charge_many(2));
+        assert_eq!(open.spent(), 2);
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(!open.charge_many(4), "a stop must refuse further work");
+        assert_eq!(
+            open.spent(),
+            6,
+            "a stop dropped completed evaluations, spent {}",
+            open.spent()
+        );
+        assert!(
+            open.charge_many(0),
+            "settling nothing while stopped refused an empty charge"
+        );
+        assert_eq!(open.spent(), 6);
+        assert_eq!(
+            open.settled_beyond_cap(),
+            0,
+            "all of it fit under the budget"
+        );
+
+        // Invariant I1: spent never passes the budget. The two evaluations
+        // that do not fit are recorded apart, so none goes uncharged.
+        let mut dry = Ledger::new(3);
+        assert!(dry.charge_many(3));
+        assert!(!dry.charge_many(2), "a charge past the budget was accepted");
+        assert_eq!(
+            dry.spent(),
+            3,
+            "spent passed the budget, spent {}",
+            dry.spent()
+        );
+        assert_eq!(
+            dry.settled_beyond_cap(),
+            2,
+            "a spent budget dropped the overrun"
+        );
+        assert_eq!(dry.spent() + dry.settled_beyond_cap(), 5);
+        assert!(!dry.charge_many(4));
+        assert_eq!(dry.spent(), 3);
+        assert_eq!(dry.settled_beyond_cap(), 6);
+    }
+
+    #[test]
+    fn settling_a_child_carries_the_units_it_priced() {
+        let mut parent = Ledger::new(100);
+        let mut child = parent.slice(40);
+        assert!(child.charge_frac(2.5));
+        assert!(child.charge_many(5));
+        assert_eq!((child.spent(), child.priced()), (7, 2));
+        assert!(parent.settle_child(&child, 0));
+        assert_eq!((parent.spent(), parent.priced()), (7, 2));
+        assert_eq!(parent.charged(), 7);
+
+        let mut inner = parent.slice(20);
+        assert!(inner.charge_frac(3.0));
+        let mut middle = parent.slice(30);
+        assert!(middle.charge_frac(1.0));
+        assert!(middle.settle_child(&inner, 0));
+        assert_eq!(middle.priced(), 4, "a grandchild's units reach the middle");
+        assert!(parent.settle_child(&middle, 0));
+        assert_eq!(parent.priced(), 6, "and then the top");
+        assert_eq!(parent.spent(), 11);
+
+        let (probe, offset) = parent.side_probe(40);
+        let mut probe = probe;
+        assert!(probe.charge_frac(2.0));
+        assert!(parent.settle_child(&probe, offset));
+        assert_eq!(parent.priced(), 8, "a side probe prices from none");
+        assert_eq!(parent.spent(), 13);
+    }
+
+    #[test]
+    fn units_priced_in_a_child_stay_priced_when_the_parent_overruns() {
+        let mut parent = Ledger::new(5);
+        let mut child = parent.slice(10);
+        assert!(child.charge_frac(4.0));
+        assert!(child.charge_many(4));
+        assert!(!parent.settle_child(&child, 0));
+        assert_eq!(parent.spent(), 5);
+        assert_eq!(parent.settled_beyond_cap(), 3);
+        assert_eq!(parent.charged(), 8);
+        assert_eq!(parent.priced(), 4);
+    }
+
+    #[test]
+    fn the_walk_reports_an_overrun_that_the_ledger_already_carries() {
+        let n = 6;
+        let cfg = Config::for_cluster(n);
+        let mut ledger = ledger_with_nested_overrun();
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            let _ = led.charge();
+            (x.iter().map(|v| v * v).sum(), x.to_owned())
+        };
+        let start = Array1::from_iter((0..3 * n).map(|index| 0.3 * index as f64));
+        let mut rng = StdRng::seed_from_u64(3);
+        let outcome =
+            run_with_gradient(&cfg, start.view(), &mut ledger, &mut relax, None, &mut rng)
+                .expect("start");
+        assert_eq!(outcome.settled_beyond_cap, 20);
+        assert_eq!(
+            outcome.charged,
+            ledger.spent() + ledger.settled_beyond_cap()
+        );
+        assert_eq!(outcome.charged, 50);
+    }
+
+    #[test]
+    fn a_side_probe_overrun_is_settled_without_its_offset() {
+        let mut parent = Ledger::new(100);
+        let (mut probe, offset) = parent.side_probe(20);
+        assert_eq!(offset, 80);
+        assert!(probe.charge_many(20));
+        assert!(!probe.charge_many(5));
+        assert_eq!(probe.spent(), 100);
+        assert_eq!(probe.settled_beyond_cap(), 5);
+        assert!(parent.settle_child(&probe, offset));
+        assert_eq!(parent.spent(), 25);
+        assert_eq!(parent.settled_beyond_cap(), 0);
+        let mut tight = Ledger::new(22);
+        let (mut tight_probe, tight_offset) = tight.side_probe(20);
+        assert!(!tight_probe.charge_many(25));
+        assert!(!tight.settle_child(&tight_probe, tight_offset));
+        assert_eq!(tight.spent(), 22);
+        assert_eq!(tight.charged(), 25);
+    }
+
+    /// The generic packing probe and the observed-basis stall probe both
+    /// run, and each one's calls are on the ledger.
+    ///
+    /// Lennard-Jones 26, seed 2000, a 2_000-call restart patience and a
+    /// budget the run spends in full. The packing probe is recognised by
+    /// its isolated-pair evaluations and by the packing geometries it
+    /// quenches. The observed-basis probe is recognised by quenching the
+    /// basis candidate of a minimum the walk had already returned. Every
+    /// potential evaluation is counted outside the ledger, so the ledger
+    /// has to agree with that count once both probes have settled their
+    /// side calls.
+    ///
+    /// The walk uses displacement moves only. The energy-lattice arm
+    /// charges its site scans to the ledger without a potential call, which
+    /// would put the two counts apart for a reason that has nothing to do
+    /// with either probe. `energy_lattice` stays on, because it is what
+    /// admits the packing probe.
+    ///
+    /// The same walk is then run with a stop target. The target is reached
+    /// with budget left, and the ledger still holds every potential call.
+    #[test]
+    fn a_basin_probe_and_a_packing_probe_in_one_run_are_both_charged() {
+        use crate::methods::warm_lbfgs::WarmLbfgs;
+        use crate::potentials::PairPotential;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        const ATOMS: usize = 26;
+        const BUDGET: usize = 30_000;
+        const SEED: u64 = 2000;
+        const REFERENCE: f64 = -108.315616;
+
+        #[derive(Debug, PartialEq)]
+        struct Tally {
+            evaluations: usize,
+            ledger_spent: usize,
+            charged: usize,
+            hops: usize,
+            best: u64,
+            pair_probes: usize,
+            packing_quenches: usize,
+            packing_evaluations: usize,
+            basin_quenches: usize,
+            basin_evaluations: usize,
+            accepted: Vec<AcceptedTransition>,
+        }
+
+        fn same(a: ArrayView1<f64>, b: &Array1<f64>) -> bool {
+            a.len() == b.len() && a.iter().zip(b).all(|(p, q)| (p - q).abs() < 1.0e-9)
+        }
+
+        fn walk(stop_at_target: bool) -> Tally {
+            let mut cfg = Config::recommended(ATOMS);
+            cfg.restart_patience = 2_000;
+            cfg.displacement_only = true;
+            // Offered at hop 0 so both probes sit in the same short walk.
+            cfg.packing_deferral = 0;
+            let potential = PairPotential::lennard_jones(ATOMS);
+            let evaluations = AtomicUsize::new(0);
+            let far = 0.5 * f64::EPSILON.sqrt().recip();
+            let nearest = {
+                let mut opt = WarmLbfgs::default();
+                let mut side = Ledger::new(1_000);
+                let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                    opt.forget();
+                    let (value, relaxed, _) = opt.minimize(x, steps, |point| {
+                        led.charge().then(|| potential.value_and_gradient(point))
+                    });
+                    (value, relaxed)
+                };
+                measured_pair_minimum(&mut side, &mut relax, ATOMS, f64::MANTISSA_DIGITS as usize)
+                    .expect("the pair minimum")
+            };
+            let packings = binary_geometry::packing_candidates(ATOMS, nearest);
+            let mut basis_candidates: Vec<Array1<f64>> = Vec::new();
+            let mut tally = Tally {
+                evaluations: 0,
+                ledger_spent: 0,
+                charged: 0,
+                hops: 0,
+                best: 0,
+                pair_probes: 0,
+                packing_quenches: 0,
+                packing_evaluations: 0,
+                basin_quenches: 0,
+                basin_evaluations: 0,
+                accepted: Vec::new(),
+            };
+            let mut start_rng = StdRng::seed_from_u64(SEED);
+            let start = random_cluster_in_radius(
+                ATOMS,
+                cfg.start_radius(),
+                cfg.min_separation,
+                &mut start_rng,
+            );
+            let mut ledger = Ledger::new(BUDGET);
+            if stop_at_target {
+                ledger.stop_below(REFERENCE + crate::DEFAULT_HIT_TOL);
+            }
+            let mut opt = WarmLbfgs::default();
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                opt.forget();
+                let before = evaluations.load(Ordering::Relaxed);
+                let (value, relaxed, _) = opt.minimize(x, steps, |point| {
+                    if !led.charge() {
+                        return None;
+                    }
+                    evaluations.fetch_add(1, Ordering::Relaxed);
+                    Some(potential.value_and_gradient(point))
+                });
+                let spent = evaluations.load(Ordering::Relaxed) - before;
+                if steps == 0 && (2..ATOMS).any(|atom| x[3 * atom + 1].abs() > far) {
+                    tally.pair_probes += 1;
+                    tally.packing_evaluations += spent;
+                } else if packings.iter().any(|packing| same(x, packing)) {
+                    tally.packing_quenches += 1;
+                    tally.packing_evaluations += spent;
+                } else if basis_candidates.iter().any(|basis| same(x, basis)) {
+                    tally.basin_quenches += 1;
+                    tally.basin_evaluations += spent;
+                }
+                if steps > 0
+                    && value.is_finite()
+                    && let Some(basis) =
+                        crate::lattice::observed_basis_candidate(relaxed.view(), true)
+                {
+                    basis_candidates.push(basis);
+                }
+                (value, relaxed)
+            };
+            let mut grad = |led: &mut Ledger, point: ArrayView1<f64>| {
+                if !led.charge() {
+                    return None;
+                }
+                evaluations.fetch_add(1, Ordering::Relaxed);
+                Some(potential.value_and_gradient(point).1)
+            };
+            let mut rng = StdRng::seed_from_u64(SEED);
+            let outcome = run_with_gradient(
+                &cfg,
+                start.view(),
+                &mut ledger,
+                &mut relax,
+                Some(&mut grad),
+                &mut rng,
+            )
+            .expect("finite start");
+            tally.evaluations = evaluations.load(Ordering::Relaxed);
+            tally.ledger_spent = ledger.spent();
+            tally.charged = outcome.charged;
+            tally.hops = outcome.hops;
+            tally.best = outcome.best.to_bits();
+            tally.accepted = outcome.accepted_transitions;
+            tally
+        }
+
+        let first = walk(false);
+        assert!(
+            first.pair_probes > 0 && first.packing_quenches > 0,
+            "the packing probe never ran: {first:?}"
+        );
+        assert!(
+            first.basin_quenches > 0 && first.basin_evaluations > 0,
+            "the observed-basis probe never ran: {first:?}"
+        );
+        assert_eq!(first.ledger_spent, BUDGET, "the run spends its budget");
+        assert_eq!(
+            first.charged, first.ledger_spent,
+            "outcome and ledger agree"
+        );
+        assert_eq!(
+            first.evaluations, first.ledger_spent,
+            "an evaluation made inside a probe is missing from the ledger"
+        );
+        assert!(
+            first.packing_evaluations + first.basin_evaluations < first.evaluations,
+            "the probes left the walk no calls of its own"
+        );
+        assert_eq!(first, walk(false), "the run is not deterministic");
+
+        // Stopping at the target must not discount the probe. Displacement
+        // moves make no site scan, so the offset between the potential
+        // evaluation count and the ledger is exactly zero here.
+        let stopped = walk(true);
+        assert!(
+            stopped.pair_probes > 0 && stopped.packing_quenches > 0,
+            "the packing probe never ran before the stop: {stopped:?}"
+        );
+        assert!(
+            crate::energy_hits(
+                f64::from_bits(stopped.best),
+                REFERENCE,
+                crate::DEFAULT_HIT_TOL
+            ),
+            "the run did not reach the target: {stopped:?}"
+        );
+        assert!(
+            stopped.ledger_spent < BUDGET,
+            "the stop left budget unspent"
+        );
+        assert!(
+            stopped.packing_evaluations > 0,
+            "the packing probe made no potential calls"
+        );
+        assert_eq!(
+            stopped.charged, stopped.ledger_spent,
+            "outcome and ledger agree at the stop"
+        );
+        assert_eq!(
+            stopped.evaluations, stopped.ledger_spent,
+            "a stop at the target dropped potential calls from the ledger"
+        );
+        assert_eq!(stopped, walk(true), "the stopped run is not deterministic");
+    }
+
+    #[test]
+    fn a_stop_during_the_packing_probe_charges_every_completed_evaluation() {
+        let n = 6usize;
+        let mut cfg = Config::for_cluster(n);
+        cfg.energy_lattice = true;
+        cfg.max_hops = Some(1);
+        cfg.relax_steps = 1;
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(2_000, std::sync::Arc::clone(&stop));
+        let mut calls = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            calls += 1;
+            if calls >= 3 {
+                stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            (-1.0, x.to_owned())
+        };
+        let start = Array1::zeros(3 * n);
+        let mut rng = StdRng::seed_from_u64(2);
+        let outcome = run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("start");
+        assert!(calls >= 3, "the probe never charged, calls {calls}");
+        assert_eq!(
+            ledger.spent(),
+            calls,
+            "settlement dropped probe evaluations: spent {} of {calls}",
+            ledger.spent()
+        );
+        assert_eq!(outcome.charged, calls);
+        assert_eq!(outcome.stop, Some(HopStop::CallerStop));
+    }
+
+    #[test]
+    fn a_packing_target_hit_is_kept_when_the_gradient_is_not_converged() {
+        let n = 8usize;
+        let mut cfg = Config::for_cluster(n);
+        cfg.energy_lattice = true;
+        cfg.packing_deferral = 0;
+        cfg.max_hops = Some(2);
+        cfg.relax_steps = 4;
+        cfg.record_gradient = 1.0e-6;
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+        let start = Array1::from_iter((0..3 * n).map(|index| index as f64 * 0.17));
+        let mut ledger = Ledger::new(4_000);
+        ledger.stop_below(-10.0);
+        // The opening quench stays above the target. Every later full
+        // quench, including the packing offer, is at the target. A hop
+        // that records the target increments the hop count; the packing
+        // offer returns before any hop.
+        let mut relax_calls = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            relax_calls += 1;
+            let far = (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold);
+            if steps == 0 && far {
+                let distance = (x[3] - x[0]).abs();
+                return ((distance - 2.0).powi(2), x.to_owned());
+            }
+            if relax_calls == 1 {
+                return (0.0, x.to_owned());
+            }
+            (-20.0, x.to_owned())
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            Some(Array1::from_elem(x.len(), 1.0))
+        };
+        let mut rng = StdRng::seed_from_u64(5);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("start");
+        assert_eq!(outcome.best, -20.0);
+        assert_eq!(outcome.stop, Some(HopStop::Target));
+        assert_eq!(outcome.hops, 0);
+        // The opening quench is not a target and its gradient is refused, so
+        // the counter starts at one. The packing hit must not add another.
+        assert_eq!(outcome.unconverged_records, 1);
+        assert_eq!(outcome.charged, ledger.spent());
+    }
+
+    #[test]
+    fn a_caller_stop_inside_the_packing_probe_keeps_the_lower_candidate() {
+        let n = 8usize;
+        let mut cfg = Config::for_cluster(n);
+        cfg.energy_lattice = true;
+        cfg.packing_deferral = 0;
+        cfg.max_hops = Some(2);
+        cfg.relax_steps = 4;
+        cfg.record_gradient = 1.0e-6;
+        let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+        let start = Array1::from_iter((0..3 * n).map(|index| index as f64 * 0.17));
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut ledger = Ledger::with_stop(4_000, std::sync::Arc::clone(&stop));
+        // The opening quench is the first full relaxation and stays at zero,
+        // with a gradient that has not converged, so it is not recorded. The
+        // first packing quench is cut short by the caller's stop and returns
+        // a lower point. The gradient that would certify it is refused.
+        let mut full_quenches = 0usize;
+        let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+            if !led.charge() {
+                return (f64::NAN, x.to_owned());
+            }
+            let far = (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold);
+            if steps == 0 && far {
+                let distance = (x[3] - x[0]).abs();
+                return ((distance - 2.0).powi(2), x.to_owned());
+            }
+            full_quenches += 1;
+            if full_quenches == 1 {
+                return (0.0, x.to_owned());
+            }
+            stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            (-20.0, x.to_owned())
+        };
+        let mut grad = |led: &mut Ledger, x: ArrayView1<f64>| {
+            if !led.charge() {
+                return None;
+            }
+            Some(Array1::from_elem(x.len(), 1.0))
+        };
+        let mut rng = StdRng::seed_from_u64(5);
+        let outcome = run_with_gradient(
+            &cfg,
+            start.view(),
+            &mut ledger,
+            &mut relax,
+            Some(&mut grad),
+            &mut rng,
+        )
+        .expect("start");
+        assert_eq!(outcome.stop, Some(HopStop::CallerStop));
+        assert_eq!(
+            outcome.best, -20.0,
+            "a recordable lower candidate was dropped on a caller stop"
+        );
+        assert_eq!(outcome.hops, 0);
+        // Only the opening quench is unresolved: its gradient is refused.
+        // The candidate that the stop cut short must not add another.
+        assert_eq!(outcome.unconverged_records, 1);
+        assert_eq!(outcome.charged, ledger.spent());
+        let (_, _, _, energy) = *outcome.improvements.last().expect("the record is listed");
+        assert_eq!(energy, -20.0);
+    }
+
+    #[test]
+    fn a_stall_branch_does_not_rerun_packings_and_charges_a_stop() {
+        fn walk(branch: bool, stop_branch: bool) -> (usize, usize, usize, Vec<usize>, HopStop) {
+            let n = 8usize;
+            let mut cfg = Config::for_cluster(n);
+            cfg.energy_lattice = true;
+            // The parent probe is offered at hop 0 so that it runs before
+            // the stall branch spends the walk's budget.
+            cfg.packing_deferral = 0;
+            // The lattice move charges outside the relaxation. Displacement
+            // keeps every charge on the closure so the ledger can be matched
+            // to it, and the packing probe still runs.
+            cfg.displacement_only = true;
+            cfg.branch_on_stall = branch;
+            cfg.restart_patience = 1;
+            cfg.relax_steps = 4;
+            let parent_budget = 800usize;
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let mut ledger = Ledger::with_stop(parent_budget, std::sync::Arc::clone(&stop));
+            let far_threshold = 0.5 * f64::EPSILON.sqrt().recip();
+            let expected = binary_geometry::packing_candidates(n, 2.0);
+            let mut calls = 0usize;
+            let mut pair_probes = 0usize;
+            let mut branch_calls = 0usize;
+            let mut packing_counts = vec![0usize; expected.len()];
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, steps: usize| {
+                if !led.charge() {
+                    return (f64::NAN, x.to_owned());
+                }
+                calls += 1;
+                if led.budget() != parent_budget {
+                    branch_calls += 1;
+                    if stop_branch && branch_calls == 2 {
+                        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+                let far = (2..n).any(|atom| x[3 * atom + 1].abs() > far_threshold);
+                if steps == 0 && far {
+                    pair_probes += 1;
+                    let distance = (x[3] - x[0]).abs();
+                    return ((distance - 2.0).powi(2), x.to_owned());
+                }
+                for (index, packing) in expected.iter().enumerate() {
+                    let max_diff = x
+                        .iter()
+                        .zip(packing.iter())
+                        .map(|(left, right)| (left - right).abs())
+                        .fold(0.0_f64, f64::max);
+                    if max_diff < 1.0e-4 {
+                        packing_counts[index] += 1;
+                        return (-50.0 - index as f64, x.to_owned());
+                    }
+                }
+                (-1.0, x.to_owned())
+            };
+            let start = Array1::from_iter((0..3 * n).map(|index| index as f64 * 0.13));
+            let mut rng = StdRng::seed_from_u64(9);
+            let outcome =
+                run(&cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("start");
+            assert_eq!(
+                ledger.spent(),
+                calls,
+                "branch {branch} stop {stop_branch} spent {} of {calls} (branch calls {branch_calls})",
+                ledger.spent()
+            );
+            assert_eq!(outcome.charged, calls);
+            (
+                calls,
+                outcome.hops,
+                pair_probes,
+                packing_counts,
+                outcome.stop.expect("stop"),
+            )
+        }
+
+        let (_off_calls, off_hops, off_probes, off_packings, _) = walk(false, false);
+        let (_on_calls, on_hops, on_probes, on_packings, _) = walk(true, false);
+        assert!(
+            on_hops < off_hops,
+            "the stall branch did not spend, {on_hops} hops against {off_hops}"
+        );
+        assert_eq!(
+            on_probes, off_probes,
+            "a stall branch repeated pair probes: {on_probes} against {off_probes}"
+        );
+        assert_eq!(
+            on_packings, off_packings,
+            "a stall branch repeated packings: {on_packings:?} against {off_packings:?}"
+        );
+        assert!(off_probes > 0, "the parent packing probe did not run");
+
+        let (_stopped_calls, _stopped_hops, stopped_probes, stopped_packings, stopped) =
+            walk(true, true);
+        assert_eq!(stopped, HopStop::CallerStop);
+        assert_eq!(stopped_probes, off_probes);
+        assert_eq!(stopped_packings, off_packings);
     }
 
     #[test]

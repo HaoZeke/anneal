@@ -544,3 +544,132 @@ fn checkpoint_external_adopt_charges_the_work_then_moves_the_live_chain() {
     assert_eq!(external.final_state, boundary.final_state);
     assert_eq!(external.best, boundary.best);
 }
+
+fn external_work_run(
+    ledger: &mut Ledger,
+    external_calls: usize,
+) -> anneal_core::methods::cluster_hopping::Outcome {
+    let mut cfg = Config::recommended(6);
+    cfg.max_hops = Some(3);
+    cfg.relax_steps = 1;
+    let mut rng = StdRng::seed_from_u64(0xe7_7e_a1);
+    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let mut bias = fresh_bias(&cfg);
+    let mut relax = toy_relax;
+    let mut settled = false;
+    let mut checkpoint = |_: ChainCheckpoint<'_>| {
+        if settled {
+            CheckpointAction::Continue
+        } else {
+            settled = true;
+            CheckpointAction::ExternalWork { external_calls }
+        }
+    };
+    let outcome = run_with_bias_at_checkpoints(
+        &cfg,
+        start.view(),
+        ledger,
+        &mut relax,
+        None,
+        &mut bias,
+        &mut rng,
+        1,
+        &mut checkpoint,
+    )
+    .expect("finite start");
+    assert!(settled, "checkpoint did not settle the external work");
+    outcome
+}
+
+#[test]
+fn external_work_past_the_budget_is_in_the_reported_charge() {
+    const BUDGET: usize = 50;
+    const EXTERNAL_CALLS: usize = 80;
+    let mut ledger = Ledger::new(BUDGET);
+    let outcome = external_work_run(&mut ledger, EXTERNAL_CALLS);
+    assert!(
+        ledger.spent() <= BUDGET,
+        "spent {} passed the budget",
+        ledger.spent()
+    );
+    assert!(
+        ledger.settled_beyond_cap() > 0,
+        "the external work should not fit under a budget of {BUDGET}"
+    );
+    assert!(
+        outcome.charged >= EXTERNAL_CALLS,
+        "the reported charge {} dropped external calls",
+        outcome.charged
+    );
+    assert_eq!(
+        outcome.charged,
+        ledger.spent() + ledger.settled_beyond_cap()
+    );
+    assert_eq!(outcome.settled_beyond_cap, ledger.settled_beyond_cap());
+    assert_eq!(outcome.charged, ledger.charged());
+}
+
+#[test]
+fn a_sub_ledger_overrun_reaches_the_top_level_charge() {
+    const SLICE: usize = 40;
+    const EXTERNAL_CALLS: usize = 90;
+    let mut top = Ledger::new(500);
+    let mut child = top.slice(SLICE);
+    let outcome = external_work_run(&mut child, EXTERNAL_CALLS);
+    assert!(
+        child.settled_beyond_cap() > 0,
+        "the child should overrun its slice of {SLICE}"
+    );
+    assert_eq!(child.spent(), SLICE);
+    assert_eq!(outcome.charged, child.charged());
+
+    top.settle_child(&child, 0);
+    assert_eq!(
+        top.spent(),
+        child.charged(),
+        "the child's overrun was dropped on the way up, spent {}",
+        top.spent()
+    );
+    assert!(top.spent() > SLICE);
+    assert_eq!(top.settled_beyond_cap(), 0);
+    assert_eq!(top.charged(), child.charged());
+
+    let mut tight = Ledger::new(60);
+    let mut tight_child = tight.slice(SLICE);
+    external_work_run(&mut tight_child, EXTERNAL_CALLS);
+    tight.settle_child(&tight_child, 0);
+    assert_eq!(
+        tight.spent(),
+        60,
+        "spent must stay within the budget (invariant I1)"
+    );
+    assert_eq!(
+        tight.charged(),
+        tight_child.charged(),
+        "the part that does not fit under the parent's budget is kept apart"
+    );
+    assert_eq!(tight.settled_beyond_cap(), tight_child.charged() - 60);
+}
+
+#[test]
+fn an_overrun_passes_through_two_levels_of_side_ledgers() {
+    let mut top = Ledger::new(100);
+    let mut middle = top.slice(40);
+    let mut inner = middle.slice(10);
+    assert!(inner.charge_many(10));
+    assert!(!inner.charge_many(7));
+    assert_eq!((inner.spent(), inner.settled_beyond_cap()), (10, 7));
+    middle.settle_child(&inner, 0);
+    assert_eq!((middle.spent(), middle.settled_beyond_cap()), (17, 0));
+    top.settle_child(&middle, 0);
+    assert_eq!(top.charged(), 17);
+    assert_eq!(top.spent(), 17);
+
+    let mut parent = Ledger::new(8);
+    let mut probe_ledger = parent.slice(8);
+    assert!(!probe_ledger.charge_many(11));
+    assert_eq!(probe_ledger.charged(), 11);
+    parent.settle_child(&probe_ledger, 0);
+    assert_eq!((parent.spent(), parent.settled_beyond_cap()), (8, 3));
+    assert_eq!(parent.charged(), 11);
+}

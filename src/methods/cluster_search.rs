@@ -957,7 +957,13 @@ where
                 // A start the previous relaxation already certified at or below the
                 // stop has nothing left to descend, and the descent's first call
                 // would pay again for the energy and gradient on file.
-                let plain = surfaces.is_none() && !cfg.two_phase.is_some_and(|two| two.is_active());
+                // Every surface transform, the portfolio or a legacy `two_phase`
+                // without one, is chosen through `plain`, so a diagnostic quench
+                // bypasses them all. A probe quench must not move the block clock,
+                // the local-step decision, or the portfolio credit.
+                let diagnostic = led.is_diagnostic_quench();
+                let plain = diagnostic
+                    || (surfaces.is_none() && !cfg.two_phase.is_some_and(|two| two.is_active()));
                 if plain
                     && let Some(check) = prior.as_ref()
                     && largest_component(check.gradient.view()) <= opt.gtol
@@ -985,6 +991,7 @@ where
                 // that minimum to the plain relaxation below. Both phases charge.
                 let compacted;
                 let surface = match surfaces.as_mut() {
+                    _ if plain => None,
                     Some(portfolio) => portfolio.begin(screening),
                     None => cfg.two_phase.filter(|two| two.is_active()),
                 };
@@ -1067,7 +1074,8 @@ where
                         *last.borrow_mut() = Some(check);
                         return Some(answer);
                     }
-                    let clock = deciding.then(|| (led.spent(), std::time::Instant::now()));
+                    let clock =
+                        (deciding && !diagnostic).then(|| (led.spent(), std::time::Instant::now()));
                     let answered = charge_rejecting_repeat_failure(
                         objective,
                         led,
@@ -1174,6 +1182,7 @@ where
                 // A quench of a few calls times the start, not the potential.
                 if !molecular_anc
                     && deciding
+                    && !diagnostic
                     && timed_calls >= 3
                     && let Some(tric) = tric.as_ref()
                     && let Some(check) = last.borrow().as_ref()
@@ -1230,7 +1239,7 @@ where
                 // the run found. Applied again after the convergence check, which
                 // can be the call that raises the stop.
                 let (f, xr, _) = lowest_stopped_answer(led, f, xr, &best_physical);
-                if let Some(portfolio) = surfaces.as_mut() {
+                if let Some(portfolio) = surfaces.as_mut().filter(|_| !diagnostic) {
                     portfolio.observe(screening, f, target);
                 }
                 // A descent stopped on a verdict is known not to be converged, so
@@ -1511,11 +1520,11 @@ pub fn polish_recorded_answer_until<O, A>(
         },
     );
     if !reported_geometry_ok(cfg, state.view()) {
-        outcome.charged = ledger.spent();
+        outcome.carry_charge(ledger);
         return;
     }
     if !ledger.with_charge_name(ChargeName::Check, |ledger| ledger.charge()) {
-        outcome.charged = ledger.spent();
+        outcome.carry_charge(ledger);
         return;
     }
     stats.check_charged += 1;
@@ -1533,7 +1542,7 @@ pub fn polish_recorded_answer_until<O, A>(
             stats.converged += 1;
         }
     }
-    outcome.charged = ledger.spent();
+    outcome.carry_charge(ledger);
 }
 
 fn reported_geometry_ok(cfg: &Config, state: ArrayView1<f64>) -> bool {
@@ -1943,7 +1952,7 @@ fn finish_molecular_answers<O>(
         outcome.best = best_energy;
         outcome.best_state = Some(state);
     }
-    outcome.charged = ledger.spent();
+    outcome.carry_charge(ledger);
 }
 
 /// [`polish_answer`] that refuses a compressed contact before the potential.
@@ -2819,7 +2828,7 @@ where
                         best = energy;
                         best_state = Some(x.clone());
                         if improvements.len() < 512 {
-                            improvements.push((hops, ledger.spent(), bias.n_basins(), energy));
+                            improvements.push((hops, ledger.charged(), bias.n_basins(), energy));
                         }
                         start = x;
                     }
@@ -2877,7 +2886,12 @@ where
                             best = energy;
                             best_state = Some(x.clone());
                             if improvements.len() < 512 {
-                                improvements.push((hops, ledger.spent(), bias.n_basins(), energy));
+                                improvements.push((
+                                    hops,
+                                    ledger.charged(),
+                                    bias.n_basins(),
+                                    energy,
+                                ));
                             }
                         }
                         start = x;
@@ -2894,7 +2908,7 @@ where
             null_starts += 1;
             start = leave_known_packing(start.view(), cfg, &wells, ledger, &mut relax, &mut rng);
         }
-        let charged_before = ledger.spent();
+        let charged_before = ledger.charged();
         let hops_before = hops;
         let mut slice_led = ledger.slice(slice.min(ledger.remaining()));
         let out = run_with_bias(
@@ -2906,7 +2920,7 @@ where
             &mut bias,
             &mut rng,
         )?;
-        ledger.absorb_charges(&slice_led);
+        ledger.settle_child(&slice_led, 0);
         if let Some(st) = slice_led.best_state.as_ref() {
             ledger.record(slice_led.best, st.view());
         }
@@ -2963,7 +2977,8 @@ where
         basins,
         screened_out,
         returned,
-        charged: ledger.spent(),
+        charged: ledger.charged(),
+        settled_beyond_cap: ledger.settled_beyond_cap(),
         improvements,
         rigid_path,
         ..Outcome::default()
@@ -3035,13 +3050,19 @@ impl Encounter {
 /// `target` is compared under the one-sided rule `energy <= target + tolerance`,
 /// since a published minimum is quoted to six decimals and a relaxation lands
 /// near it rather than on it.
-pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, spent: usize) -> Encounter {
+///
+/// A miss is censored at [`Outcome::charged`], which includes calls that
+/// settled past the budget. The paid spend is not that total. The last
+/// argument stays so existing callers keep compiling.
+pub fn first_encounter(out: &Outcome, target: f64, tolerance: f64, _spent: usize) -> Encounter {
     for &(hops, charged, _, e) in &out.improvements {
         if crate::energy_hits(e, target, tolerance) {
             return Encounter::Found { charged, hops };
         }
     }
-    Encounter::Censored { charged: spent }
+    Encounter::Censored {
+        charged: out.charged,
+    }
 }
 
 /// Median first encounter time under censoring, by Kaplan-Meier.
@@ -3193,7 +3214,8 @@ mod tests {
     }
 
     /// Preset hashes and one recommended Lennard-Jones trace, measured on
-    /// develop ade36267 with the option off.
+    /// develop ade36267 with the option off. The packing probe adds one
+    /// later minimum to that trace.
     #[test]
     fn polish_off_presets_match_develop() {
         assert!(!Config::recommended(8).polish_on_improve);
@@ -3243,9 +3265,9 @@ mod tests {
         assert_eq!(format!("{:?}", out.stop), "Some(Budget)");
         assert_eq!(
             format!("{:?}", ledger.encounters()),
-            "[(57, -5.999999998900713), (706, -5.9999999998457785)]"
+            "[(57, -5.999999998900713), (706, -5.9999999998457785), (1288, -5.999999999999862)]"
         );
-        assert_eq!(out.best, ledger.encounters()[1].1);
+        assert_eq!(out.best, ledger.encounters().last().expect("a record").1);
     }
 
     /// A quench stopped at a loose gradient sits above the Lennard-Jones
@@ -3314,6 +3336,67 @@ mod tests {
         );
         assert_eq!(on_ledger.spent(), on_hit);
         assert!(crate::energy_hits(on_ledger.best, target, 0.0));
+    }
+
+    /// The bank walk settles slices onto the caller's ledger and builds its
+    /// own outcome. With the default answer gradient the polish returns before
+    /// it touches the charge, so the outcome has to carry the whole count
+    /// itself, including settled calls that passed the budget.
+    #[cfg(feature = "bank-rpc")]
+    #[test]
+    fn a_bank_search_reports_a_nested_overrun_in_its_charge() {
+        use crate::bank_rpc::BankClient;
+        let n = 6;
+        let potential = PairPotential::lennard_jones(n);
+        let cfg = Config::recommended(n);
+        assert!(
+            !(cfg.answer_gradient > 0.0),
+            "the default polish must be off so that it returns early"
+        );
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("a free port")
+            .local_addr()
+            .expect("its address")
+            .port();
+        let sock = format!("127.0.0.1:{port}");
+        let served = sock.clone();
+        std::thread::spawn(move || {
+            let _ = crate::bank_rpc::serve(served, 8);
+        });
+        let mut up = false;
+        for _ in 0..100 {
+            if let Ok(mut probe) = BankClient::connect(&sock)
+                && probe.snapshot().is_ok()
+            {
+                up = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        assert!(up, "the bank did not come up on {sock}");
+
+        let mut ledger = Ledger::new(30);
+        let mut child = ledger.slice(10);
+        assert!(child.with_charge_name(ChargeName::Quench, |child| child.charge_many(10)));
+        assert!(!child.with_charge_name(ChargeName::Quench, |child| child.charge_many(40)));
+        assert_eq!((child.spent(), child.settled_beyond_cap()), (10, 40));
+        ledger.settle_child(&child, 0);
+        assert_eq!(ledger.spent(), 30);
+        assert_eq!(ledger.settled_beyond_cap(), 20);
+        assert_eq!(ledger.remaining(), 0);
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(11);
+        let start =
+            crate::methods::cluster_hopping::random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+        let (outcome, _) = search_from_bank(&potential, &cfg, &mut ledger, start.view(), 7, &sock)
+            .expect("the walk runs");
+        assert_eq!(outcome.settled_beyond_cap, 20);
+        assert_eq!(
+            outcome.charged,
+            ledger.spent() + ledger.settled_beyond_cap(),
+            "the bank outcome dropped the settled overrun"
+        );
+        assert_eq!(outcome.charged, 50);
     }
 
     #[test]
@@ -3390,6 +3473,179 @@ mod tests {
         assert_eq!(screen_stats.screens, 1);
         assert!(screen_stats.screen_charged > 0);
         assert_eq!(screen_stats.full_charged, 0);
+    }
+
+    /// A probe's quenches between the walk's leave the walk's quenches as
+    /// they were. The surface portfolio's block clock and its credit belong
+    /// to the walk; the same probe quenches outside the diagnostic scope
+    /// move them, which is what this pins against.
+    #[test]
+    fn diagnostic_quenches_leave_the_walks_surface_portfolio_alone() {
+        let n = 13;
+        let cfg = Config::recommended(n);
+        assert!(!cfg.surfaces.is_empty());
+        let objective = PairPotential::lennard_jones(n);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(5);
+        let mut draw = || {
+            crate::methods::cluster_hopping::random_cluster(n, 1.2, cfg.min_separation, &mut rng)
+        };
+        let starts: Vec<Array1<f64>> = (0..400).map(|_| draw()).collect();
+        let probes: Vec<Array1<f64>> = (0..60).map(|_| draw()).collect();
+        let walk = |probe: Option<bool>| {
+            let mut stats = RelaxStats::default();
+            let mut relax = warm_relax(&objective, &cfg, &mut stats, 3);
+            let mut led = Ledger::new(1 << 30);
+            let mut side = Ledger::new(1 << 30);
+            let mut quenches = Vec::new();
+            for (hop, start) in starts.iter().enumerate() {
+                if hop == 10
+                    && let Some(diagnostic) = probe
+                {
+                    for point in &probes {
+                        for steps in [cfg.screen_steps, cfg.relax_steps] {
+                            if diagnostic {
+                                let mut scope = side.diagnostic_scope();
+                                scope.set_screening_relax(steps <= cfg.screen_steps);
+                                relax(&mut scope, point.view(), steps);
+                                scope.set_screening_relax(false);
+                            } else {
+                                side.set_screening_relax(steps <= cfg.screen_steps);
+                                relax(&mut side, point.view(), steps);
+                                side.set_screening_relax(false);
+                            }
+                        }
+                    }
+                }
+                let before = led.spent();
+                led.set_screening_relax(true);
+                let (screened, at) = relax(&mut led, start.view(), cfg.screen_steps);
+                led.set_screening_relax(false);
+                let (energy, state) = relax(&mut led, at.view(), cfg.relax_steps);
+                if energy < led.best {
+                    led.record(energy, state.view());
+                }
+                quenches.push((screened.to_bits(), energy.to_bits(), led.spent() - before));
+            }
+            quenches
+        };
+        let alone = walk(None);
+        assert_eq!(
+            walk(Some(true)),
+            alone,
+            "diagnostic quenches moved the walk's quenches"
+        );
+        assert_ne!(
+            walk(Some(false)),
+            alone,
+            "the same quenches outside the scope must reach the portfolio"
+        );
+    }
+
+    /// A diagnostic quench descends on the plain surface: it matches the
+    /// quench of a preset with no portfolio, call for call.
+    #[test]
+    fn a_diagnostic_quench_descends_on_the_plain_surface() {
+        let n = 13;
+        let cfg = Config::recommended(n);
+        assert!(!cfg.surfaces.is_empty());
+        let mut plain_cfg = cfg.clone();
+        plain_cfg.surfaces.clear();
+        let objective = PairPotential::lennard_jones(n);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(9);
+        let mut stats = RelaxStats::default();
+        let mut plain_stats = RelaxStats::default();
+        let mut relax = warm_relax(&objective, &cfg, &mut stats, 3);
+        let mut plain = warm_relax(&objective, &plain_cfg, &mut plain_stats, 3);
+        let mut led = Ledger::new(1 << 30);
+        let mut plain_led = Ledger::new(1 << 30);
+        for _ in 0..8 {
+            let start = crate::methods::cluster_hopping::random_cluster(
+                n,
+                1.2,
+                cfg.min_separation,
+                &mut rng,
+            );
+            for steps in [cfg.screen_steps, cfg.relax_steps] {
+                let before = (led.spent(), plain_led.spent());
+                let (energy, state) = {
+                    let mut scope = led.diagnostic_scope();
+                    relax(&mut scope, start.view(), steps)
+                };
+                let (plain_energy, plain_state) = plain(&mut plain_led, start.view(), steps);
+                assert_eq!(energy.to_bits(), plain_energy.to_bits());
+                assert_eq!(state, plain_state);
+                assert_eq!(led.spent() - before.0, plain_led.spent() - before.1);
+            }
+        }
+    }
+
+    /// A legacy `two_phase` with no portfolio reshapes the walk's quenches
+    /// and not a diagnostic one. The walk's and the diagnostic quenches go
+    /// through one relaxer and are charged to one ledger. Under the scope a
+    /// quench matches the same preset with `two_phase` off, energy, state
+    /// and calls; outside it, the same relaxer matches a relaxer that only
+    /// ever sees the walk's quenches, so `two_phase` still holds there and
+    /// the diagnostic quenches between them leave it alone.
+    #[test]
+    fn a_diagnostic_quench_skips_a_legacy_two_phase_surface() {
+        let n = 13;
+        let mut plain_cfg = Config::recommended(n);
+        plain_cfg.surfaces.clear();
+        plain_cfg.two_phase = None;
+        let mut cfg = plain_cfg.clone();
+        cfg.two_phase = Some(crate::methods::two_phase::TwoPhase::relative(0.7, 1.0));
+        assert!(cfg.two_phase.is_some_and(|two| two.is_active()));
+        let objective = PairPotential::lennard_jones(n);
+        let mut rng = rand::rngs::StdRng::seed_from_u64(9);
+        let mut stats = RelaxStats::default();
+        let mut plain_stats = RelaxStats::default();
+        let mut walk_stats = RelaxStats::default();
+        let mut relax = warm_relax(&objective, &cfg, &mut stats, 3);
+        let mut plain = warm_relax(&objective, &plain_cfg, &mut plain_stats, 3);
+        let mut walk_alone = warm_relax(&objective, &cfg, &mut walk_stats, 3);
+        let mut led = Ledger::new(1 << 30);
+        let mut plain_led = Ledger::new(1 << 30);
+        let mut walk_led = Ledger::new(1 << 30);
+        let mut reshaped = 0;
+        let mut charged = 0;
+        for _ in 0..8 {
+            let start = crate::methods::cluster_hopping::random_cluster(
+                n,
+                1.2,
+                cfg.min_separation,
+                &mut rng,
+            );
+            for steps in [cfg.screen_steps, cfg.relax_steps] {
+                let before = (led.spent(), plain_led.spent());
+                let (energy, state) = {
+                    let mut scope = led.diagnostic_scope();
+                    relax(&mut scope, start.view(), steps)
+                };
+                let (plain_energy, plain_state) = plain(&mut plain_led, start.view(), steps);
+                let diagnostic_calls = led.spent() - before.0;
+                assert_eq!(energy.to_bits(), plain_energy.to_bits());
+                assert_eq!(state, plain_state);
+                assert_eq!(diagnostic_calls, plain_led.spent() - before.1);
+                assert!(diagnostic_calls > 0, "a diagnostic quench is charged");
+
+                let before = (led.spent(), walk_led.spent());
+                let (walk_energy, walk_state) = relax(&mut led, start.view(), steps);
+                let (alone_energy, alone_state) = walk_alone(&mut walk_led, start.view(), steps);
+                let walk_calls = led.spent() - before.0;
+                assert_eq!(walk_energy.to_bits(), alone_energy.to_bits());
+                assert_eq!(walk_state, alone_state);
+                assert_eq!(walk_calls, walk_led.spent() - before.1);
+                if walk_energy.to_bits() != plain_energy.to_bits()
+                    || walk_state != plain_state
+                    || walk_calls != diagnostic_calls
+                {
+                    reshaped += 1;
+                }
+                charged += diagnostic_calls + walk_calls;
+            }
+        }
+        assert!(reshaped > 0, "the walk's quenches must see two_phase");
+        assert_eq!(led.spent(), charged, "both kinds charged to the one ledger");
     }
 
     #[test]
@@ -4243,16 +4499,16 @@ mod tests {
                 assert!(charged > 0 && charged <= ledger.spent());
                 assert!(hops > 0 && hops <= out.hops);
             }
-            Encounter::Censored { charged } => assert_eq!(charged, ledger.spent()),
+            Encounter::Censored { charged } => assert_eq!(charged, out.charged),
         }
 
-        // A target nothing can reach must censor at the spend, not report a
-        // time.
+        // A target nothing can reach must censor at the charged total,
+        // including calls that settled past the budget.
         let never = first_encounter(&out, -1e9, crate::DEFAULT_HIT_TOL, ledger.spent());
         assert_eq!(
             never,
             Encounter::Censored {
-                charged: ledger.spent()
+                charged: out.charged
             }
         );
 
@@ -4279,13 +4535,37 @@ mod tests {
                 hops: 3
             }
         );
+        trace.charged = 50;
+        trace.settled_beyond_cap = 20;
         assert_eq!(
-            first_encounter(&trace, f64::NAN, tol, 20),
-            Encounter::Censored { charged: 20 }
+            first_encounter(&trace, f64::NAN, tol, 30),
+            Encounter::Censored { charged: 50 }
         );
         assert_eq!(
-            first_encounter(&trace, target, f64::NAN, 20),
-            Encounter::Censored { charged: 20 }
+            first_encounter(&trace, target, f64::NAN, 30),
+            Encounter::Censored { charged: 50 }
+        );
+    }
+
+    /// A censored run reports every settled call, including those past the budget.
+    #[test]
+    fn a_censored_run_reports_calls_past_the_budget() {
+        let spent = 30;
+        let beyond = 20;
+        let out = Outcome {
+            best: -1.0,
+            charged: spent + beyond,
+            settled_beyond_cap: beyond,
+            improvements: vec![(1, spent, 1, -0.5)],
+            ..Outcome::default()
+        };
+        let reported = first_encounter(&out, -100.0, 0.0, spent);
+        assert_eq!(
+            reported,
+            Encounter::Censored {
+                charged: out.charged
+            },
+            "censored calls dropped the beyond-cap settlements"
         );
     }
 
