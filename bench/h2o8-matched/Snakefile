@@ -1,0 +1,28 @@
+# Matched (H2O)8 anneal arm. Run with one core so the seeds stay serial:
+#   snakemake -s bench/h2o8-matched/Snakefile -j1 --cores 1
+
+SEEDS = list(range(2000, 2012))
+
+
+rule all:
+    input:
+        "bench/h2o8-matched/rows.csv"
+
+
+rule seed:
+    output:
+        "bench/h2o8-matched/runs/{seed}/done.txt"
+    wildcard_constraints:
+        seed=r"20(0[0-9]|1[01])"
+    threads: 1
+    shell:
+        "python3 bench/h2o8-matched/run.py --seed {wildcards.seed}"
+
+
+rule rows:
+    input:
+        expand("bench/h2o8-matched/runs/{seed}/done.txt", seed=SEEDS)
+    output:
+        "bench/h2o8-matched/rows.csv"
+    shell:
+        "python3 bench/h2o8-matched/run.py --rows bench/h2o8-matched/rows.csv"

@@ -1,10 +1,13 @@
 //! One GFN2-xTB molecular seed for the CREST head-to-head.
 //!
-//! Usage: gfn2_mol_h2h <system> <budget> <seed> <outdir>
+//! Usage: gfn2_mol_h2h <system> <budget> <seed> <outdir> [--eh <reference> <tol>]
 //!
 //! Systems: `nh3-8`, `h2o-8`, `h2o-12`, `hf-6`, `meoh-4`, `nh3-2-h2o-4`.
 //! The search is `Config::recommended_molecular`. There is no wall and no
-//! constant set for one molecule. Monomers are GFN2-xTB 6.7.1 vtight
+//! constant set for one molecule. `--eh` is a one-sided stop in hartree:
+//! the first energy at or below `reference + tol` raises the ledger stop,
+//! and later charges are refused. The preset itself is unchanged. Unset,
+//! the search runs out the budget. Monomers are GFN2-xTB 6.7.1 vtight
 //! geometries with the first atom at the origin. `H2H_START_XYZ` shares a
 //! start. `pot_s` is time inside `value_and_gradient`.
 
@@ -14,7 +17,7 @@ mod rgpot_eindir;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -41,11 +44,11 @@ const AMMONIA: [[f64; 3]; 4] = [
     [-0.4719433871, -0.8174299251, 0.3668373931],
 ];
 /// GFN2-xTB 6.7.1 vtight water, oxygen at the origin.
-const WATER: [[f64; 3]; 3] = [
-    [0.0, 0.0, 0.0],
-    [0.7720869669, 0.5691152394, 0.0],
-    [-0.7720869668, 0.5691152394, 0.0],
-];
+const WATER: [[f64; 3]; 3] = [[0.0, 0.0, 0.0], [0.7720869669, 0.5691152394, 0.0], [
+    -0.7720869668,
+    0.5691152394,
+    0.0,
+]];
 /// GFN2-xTB 6.7.1 vtight hydrogen fluoride, fluorine at the origin.
 const HF: [[f64; 3]; 2] = [[0.0, 0.0, 0.0], [-0.9324912314, 0.0, 0.0]];
 /// GFN2-xTB 6.7.1 vtight methanol, carbon at the origin.
@@ -432,6 +435,28 @@ fn main() {
     let budget: usize = args.get(1).and_then(|v| v.parse().ok()).expect("budget");
     let seed: u64 = args.get(2).and_then(|v| v.parse().ok()).expect("seed");
     let outdir = PathBuf::from(args.get(3).expect("outdir"));
+    // Optional one-sided hartree window. The numbers are the caller's; the
+    // preset JSON is not rewritten. A hit raises the ledger stop inside the
+    // evaluation that crossed, after that evaluation has been counted.
+    let matched: Option<(f64, f64)> = match args.get(4).map(String::as_str) {
+        Some("--eh") => {
+            let reference = args
+                .get(5)
+                .and_then(|value| value.parse::<f64>().ok())
+                .expect("reference Eh");
+            let tolerance = args
+                .get(6)
+                .and_then(|value| value.parse::<f64>().ok())
+                .expect("tolerance Eh");
+            assert!(
+                reference.is_finite() && tolerance.is_finite() && tolerance >= 0.0,
+                "reference and tolerance must be finite and the tolerance non-negative"
+            );
+            Some((reference, tolerance))
+        }
+        Some(other) => panic!("expected --eh <reference> <tol>, got {other}"),
+        None => None,
+    };
     let system = systems()
         .iter()
         .find(|system| system.name == name)
@@ -474,6 +499,7 @@ fn main() {
     let mut meta = fs::File::create(outdir.join("run.txt")).expect("run.txt");
     writeln!(meta, "code: anneal").ok();
     writeln!(meta, "arm: recommended_molecular").ok();
+    writeln!(meta, "preset: recommended_molecular").ok();
     writeln!(meta, "system: {}", built.name).ok();
     writeln!(meta, "wall: none").ok();
     if cfg.orbit_complete_on_new {
@@ -513,15 +539,56 @@ fn main() {
     pot.restart();
     let pot_ns = Arc::new(AtomicU64::new(0));
     let timed_calls = Arc::new(AtomicU64::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let first_hit = Arc::new(AtomicU64::new(0));
+    let lowest_bits = Arc::new(AtomicU64::new(f64::INFINITY.to_bits()));
+    let hartree = anneal_core::catalog::molecular::hartree_ev();
     let pot_ns_eval = Arc::clone(&pot_ns);
     let timed_calls_eval = Arc::clone(&timed_calls);
+    let stop_eval = Arc::clone(&stop);
+    let first_hit_eval = Arc::clone(&first_hit);
+    let lowest_eval = Arc::clone(&lowest_bits);
+    let hit_window = matched;
     let objective = ForceObjective::new(3 * atmnrs.len(), move |coordinates| {
+        // A hit already counted refuses another potential call. The charge
+        // that would have paid for it is refused by the ledger stop.
+        if stop_eval.load(Ordering::Relaxed) {
+            return (f64::NAN, vec![f64::NAN; coordinates.len()]);
+        }
         let started = Instant::now();
         let (energy, gradient) = pot
             .wrapper()
             .value_and_gradient(ArrayView1::from(coordinates));
         pot_ns_eval.fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
-        timed_calls_eval.fetch_add(1, Ordering::Relaxed);
+        let call = timed_calls_eval.fetch_add(1, Ordering::Relaxed) + 1;
+        if energy.is_finite() {
+            let mut current = lowest_eval.load(Ordering::Relaxed);
+            loop {
+                if energy >= f64::from_bits(current) {
+                    break;
+                }
+                match lowest_eval.compare_exchange_weak(
+                    current,
+                    energy.to_bits(),
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(seen) => current = seen,
+                }
+            }
+            if let Some((reference, tolerance)) = hit_window {
+                if anneal_core::energy_hits(energy / hartree, reference, tolerance) {
+                    let _ = first_hit_eval.compare_exchange(
+                        0,
+                        call,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    );
+                    stop_eval.store(true, Ordering::Relaxed);
+                }
+            }
+        }
         let values = if gradient.is_standard_layout() {
             gradient.to_vec()
         } else {
@@ -531,7 +598,14 @@ fn main() {
     });
 
     let tolerance = component_gradient_tolerance(3 * atmnrs.len()).expect("polish tolerance");
-    let mut ledger = Ledger::new(budget);
+    let mut ledger = if matched.is_some() {
+        Ledger::with_stop(budget, Arc::clone(&stop))
+    } else {
+        Ledger::new(budget)
+    };
+    if let Some((reference, tol)) = matched {
+        ledger.stop_below((reference + tol) * hartree);
+    }
     let wall = Instant::now();
     let searched = search_from(&objective, &cfg, &mut ledger, start.view(), seed);
     let polished_from = ledger
@@ -568,6 +642,7 @@ fn main() {
         Err(error) => {
             writeln!(meta, "search_error: {error}").ok();
             writeln!(meta, "best_intact: false").ok();
+            writeln!(meta, "consistent: no").ok();
             write_xyz(
                 &outdir.join("best.xyz"),
                 start_slice,
@@ -575,7 +650,7 @@ fn main() {
                 "search failed",
             )
             .ok();
-            return;
+            std::process::exit(1);
         }
     };
     writeln!(meta, "quench: {:?}", stats.local_step).ok();
@@ -591,25 +666,88 @@ fn main() {
     let fallback = outcome.final_state.clone().unwrap_or_else(|| start.clone());
     let reported = outcome.best_state.as_ref().unwrap_or(&fallback);
     let coords = reported.as_slice().expect("best contiguous");
-    let (engine_e, gradient) = objective.value_and_gradient(reported.view());
-    let gnorm = gradient.iter().map(|v| v * v).sum::<f64>().sqrt();
     let best_intact = monomers_intact(coords, &built);
-    writeln!(meta, "engine_best_eV: {engine_e:.10}").ok();
-    writeln!(meta, "gradient_norm_eV_per_A: {gnorm:.6e}").ok();
-    let max_force = gradient
-        .iter()
-        .fold(0.0_f64, |best, value| best.max(value.abs()));
-    let verdict = if max_force.is_finite() && max_force <= FORCE_BAR_EV_PER_A {
-        "PASS"
-    } else {
-        "FAIL"
-    };
-    let line = format!(
-        "FORCE_AUDIT seed {seed} quench_gradient {max_force:.6e} bar {FORCE_BAR_EV_PER_A} {verdict}"
-    );
-    writeln!(meta, "{line}").ok();
-    println!("{line}");
     writeln!(meta, "best_intact: {best_intact}").ok();
+    if let Some((reference, tol)) = matched {
+        // No evaluation after the search. The post-run force audit would be
+        // an uncharged call, and a hit has already closed the ledger.
+        let lowest_ev = f64::from_bits(lowest_bits.load(Ordering::Relaxed));
+        let lowest_eh = lowest_ev / hartree;
+        let hit_call = first_hit.load(Ordering::Relaxed);
+        let hit = hit_call > 0;
+        let threshold = reference + tol;
+        let hop = outcome
+            .stop
+            .as_ref()
+            .map(|item| item.code())
+            .unwrap_or("none");
+        // A crossing ends the run on that evaluation. Anything else is a
+        // budget miss only when the hop ledger itself closed on the budget.
+        let stop_name = if hit {
+            "target"
+        } else if hop == "budget" || spent as u64 >= budget as u64 {
+            "budget"
+        } else {
+            hop
+        };
+        let calls_to_hit = if hit {
+            hit_call
+        } else {
+            (budget as u64).saturating_add(1)
+        };
+        let consistent = calls_timed == spent as u64
+            && if hit {
+                hit_call == calls_timed && stop_name == "target"
+            } else {
+                hit_call == 0 && stop_name == "budget"
+            };
+        writeln!(meta, "hartree_eV: {hartree:.16}").ok();
+        writeln!(meta, "reference_Eh: {reference:.12}").ok();
+        writeln!(meta, "tol_Eh: {tol:.1e}").ok();
+        writeln!(meta, "threshold_Eh: {threshold:.12}").ok();
+        writeln!(meta, "lowest_eV: {lowest_ev:.10}").ok();
+        writeln!(meta, "lowest_Eh: {lowest_eh:.12}").ok();
+        writeln!(meta, "engine_best_eV: {lowest_ev:.10}").ok();
+        if hit {
+            writeln!(meta, "first_hit_call: {hit_call}").ok();
+        } else {
+            writeln!(meta, "first_hit_call: none").ok();
+        }
+        writeln!(meta, "hit: {}", u8::from(hit)).ok();
+        writeln!(meta, "calls_to_hit: {calls_to_hit}").ok();
+        writeln!(meta, "charged: {calls_timed}").ok();
+        writeln!(meta, "hop_stop: {hop}").ok();
+        writeln!(meta, "stop: {stop_name}").ok();
+        writeln!(meta, "force_audit: not_evaluated").ok();
+        writeln!(
+            meta,
+            "consistent: {}",
+            if consistent { "yes" } else { "no" }
+        )
+        .ok();
+        if !consistent {
+            eprintln!("charged {calls_timed} spent {spent} first_hit {hit_call} disagree");
+            std::process::exit(3);
+        }
+    } else {
+        let (engine_e, gradient) = objective.value_and_gradient(reported.view());
+        let gnorm = gradient.iter().map(|v| v * v).sum::<f64>().sqrt();
+        writeln!(meta, "engine_best_eV: {engine_e:.10}").ok();
+        writeln!(meta, "gradient_norm_eV_per_A: {gnorm:.6e}").ok();
+        let max_force = gradient
+            .iter()
+            .fold(0.0_f64, |best, value| best.max(value.abs()));
+        let verdict = if max_force.is_finite() && max_force <= FORCE_BAR_EV_PER_A {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+        let line = format!(
+            "FORCE_AUDIT seed {seed} quench_gradient {max_force:.6e} bar {FORCE_BAR_EV_PER_A} {verdict}"
+        );
+        writeln!(meta, "{line}").ok();
+        println!("{line}");
+    }
     write_xyz(
         &outdir.join("best.xyz"),
         coords,
