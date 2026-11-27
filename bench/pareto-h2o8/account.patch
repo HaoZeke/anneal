@@ -1,0 +1,68 @@
+diff --git a/examples/gfn2_mol_h2h.rs b/examples/gfn2_mol_h2h.rs
+index 9e3fe82de..5b59bbc22 100644
+--- a/examples/gfn2_mol_h2h.rs
++++ b/examples/gfn2_mol_h2h.rs
+@@ -15,7 +15,7 @@ use std::fs;
+ use std::io::Write;
+ use std::path::PathBuf;
+ use std::sync::atomic::{AtomicU64, Ordering};
+-use std::sync::{Arc, Mutex};
++use std::sync::{Arc, Mutex, OnceLock};
+ use std::time::Instant;
+ 
+ use anneal_core::catalog::molecular::component_gradient_tolerance;
+@@ -29,6 +29,12 @@ use rand::SeedableRng;
+ use rand::rngs::StdRng;
+ use rgpot_eindir::RgpotObjective;
+ 
++/// Objective evaluations, and the first one at or below `H2O_HIT_EV`.
++/// Counting does not install `Ledger::stop_below`.
++static OBJECTIVE_CALLS: AtomicU64 = AtomicU64::new(0);
++static FIRST_HIT_CALL: AtomicU64 = AtomicU64::new(0);
++static HIT_EV: OnceLock<Option<f64>> = OnceLock::new();
++
+ const FORCE_BAR_EV_PER_A: f64 = 0.0514221;
+ const INTACT_H_A: f64 = 1.2;
+ const MIN_INTERMOLECULAR_A: f64 = 1.5;
+@@ -241,6 +247,22 @@ impl ForceObjective {
+         if gradient.len() != self.dim || !energy.is_finite() {
+             return (f64::NAN, Array1::from_elem(self.dim, f64::NAN));
+         }
++        let call = OBJECTIVE_CALLS.fetch_add(1, Ordering::Relaxed) + 1;
++        if let Some(target) = HIT_EV.get_or_init(|| {
++            std::env::var("H2O_HIT_EV")
++                .ok()
++                .and_then(|value| value.parse::<f64>().ok())
++                .filter(|value| value.is_finite())
++        }) {
++            if anneal_core::energy_hits(energy, *target, 0.0) {
++                let _ = FIRST_HIT_CALL.compare_exchange(
++                    0,
++                    call,
++                    Ordering::Relaxed,
++                    Ordering::Relaxed,
++                );
++            }
++        }
+         (energy, Array1::from_vec(gradient))
+     }
+ }
+@@ -548,6 +570,18 @@ fn main() {
+     writeln!(meta, "wall_s: {wall_s:.6}").ok();
+     writeln!(meta, "energy_calls: {spent}").ok();
+     writeln!(meta, "timed_calls: {calls_timed}").ok();
++    let first_hit_call = FIRST_HIT_CALL.load(Ordering::Relaxed);
++    writeln!(
++        meta,
++        "objective_calls: {}",
++        OBJECTIVE_CALLS.load(Ordering::Relaxed)
++    )
++    .ok();
++    if first_hit_call > 0 {
++        writeln!(meta, "first_hit_call: {first_hit_call}").ok();
++    } else {
++        writeln!(meta, "first_hit_call: none").ok();
++    }
+     writeln!(meta, "pot_s: {pot_s:.6}").ok();
+     writeln!(meta, "outside_s: {outside_s:.6}").ok();
+     if calls_timed > 0 {
