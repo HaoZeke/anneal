@@ -33,17 +33,14 @@ quenched structural moves, adaptive move allocation, basin-level memory, and
 stall exits to cross funneled cluster landscapes.
 The evidence is organized by claim.
 At arm-specific work definitions the search reaches Lennard-Jones, Morse,
-and rigid-water minima that trap the corresponding GMIN arms.
+and rigid-water minima on which the corresponding GMIN arms hit no seed.
 Removing the former structure templates costs hits on a short-ranged Morse
 cluster.
 Neither rescaling the preset lengths nor replacing adaptive move choice by a
 uniform draw produces a detectable hit-rate change.
-On tight-binding clusters the anneal software stops at a fixed charge of
-3021 calls and finds the water hexamer in 1 of 12 runs.
-The CREST conformer search stops at the end of its 0.90~ps run and finds
-the water hexamer in 4 of 12 runs.
-With the opt-in \texttt{polish\_on\_improve} option, both arms count
-first-hit calls and this code hits the water octamer on more seeds.
+On the water octamer both arms count first-hit calls.
+The CREST hit-rate tests are one Holm family.
+A win needs one shared stopping rule, and the only such test is not a win.
 The independently started, wall-capped comparisons with the Atomic
 Simulation Environment are reported descriptively because their arms are
 censored and do not share starts.

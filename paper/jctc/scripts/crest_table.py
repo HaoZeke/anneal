@@ -146,8 +146,9 @@ def covalent() -> list[dict[str, object]]:
 
 
 def pairs() -> list[dict[str, object]]:
+    """Table rows. The hexamer is omitted: its arms use different slopes and different stops."""
     kept = []
-    for pair in (water_hexamer(), water_octamer(), ammonia_octamer(), *covalent()):
+    for pair in (water_octamer(), ammonia_octamer(), *covalent()):
         a, c = pair["anneal"], pair["crest"]
         if pair.get("hits_only") or pair.get("first_hit"):
             pair.update(median=None, p=fisher_exact(hits(a), len(a), hits(c), len(c)))
@@ -192,7 +193,7 @@ def table() -> str:
         "\\begin{table}",
         "\\caption{This code against CREST 3.0.2 on GFN2-xTB clusters.",
         "Both arms count GFN2-xTB energy and gradient calls.",
-        "A row prints \\(p\\) only when both arms use one stopping rule.",
+        "A row prints the unadjusted Fisher exact \\(p\\) only when both arms use one stopping rule.",
         "The text names each stopping rule.",
         "The Supporting Information gives the settings, revisions, records, and the arms that",
         "the budget rule removes.}",

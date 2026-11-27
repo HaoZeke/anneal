@@ -1610,8 +1610,8 @@ def gmin_develop_prose(audit: Audit, panel: object, groups: dict) -> None:
     audit.said(TEX, "Each block runs both arms of each cluster on seeds 2000--2011 in alternating order, at the "
                     "numeric ceiling in the table, from the start this code writes for the seed.")
     audit.said(COVER, "At arm-specific work definitions the search reaches Lennard-Jones, Morse,\n"
-                      "and rigid-water minima that trap the corresponding GMIN arms.")
-    audit.said(TEX, "At arm-specific work definitions anneal reaches funnel-trapped references on")
+                      "and rigid-water minima on which the corresponding GMIN arms hit no seed.")
+    audit.said(TEX, "At arm-specific work definitions this code reaches funnel-trapped references on")
 
 
 def gmin_rerun(audit: Audit) -> None:
@@ -2086,11 +2086,6 @@ def manuscript_knockouts(audit: Audit) -> None:
     audit.cell(TEX, "tab:tip4p-gmin sizes", "8 15 20 21", " ".join(map(str, sorted(stats))))
     t = {n: stats[n][0] for n in stats}
     audit.cell(TEX, "GMIN alone hits no seed of 15 or 20", "0 0", f"{t[15][2]} {t[20][2]}")
-    audit.said(TEX, f"The hit counts for this code and GMIN are {t[8][0] + t[8][1]} and {t[8][0] + t[8][2]} on "
-                    f"(H\\(_2\\)O)\\(_8\\), {t[15][0] + t[15][1]} and {t[15][0] + t[15][2]} on "
-                    f"(H\\(_2\\)O)\\(_{{15}}\\), {t[20][0] + t[20][1]} and {t[20][0] + t[20][2]} on "
-                    f"(H\\(_2\\)O)\\(_{{20}}\\), and {t[21][0] + t[21][1]} and {t[21][0] + t[21][2]} on "
-                    f"(H\\(_2\\)O)\\(_{{21}}\\).")
     audit.cell(TEX, "neither arm hits 21", "0 0 0", " ".join(map(str, t[21][:3])))
     a25 = [float(r["best_energy"]) for r in arms[(25, "anneal")].values()]
     g25 = [float(r["best_energy"]) for r in arms[(25, "gmin")].values()]
@@ -3855,10 +3850,7 @@ def crest_equal_bench(audit: Audit) -> None:
         within = sum(abs(value - centre) <= 0.05 * centre for value in charged)
         row = next(r for r in summary if r["arm"] == arm)
         audit.cell(where, f"{arm} within 5 percent", row["within_5pct"], within)
-        audit.said(CREST_EQUAL_README, f"{within} of {len(charged)}")
         audit.said(CREST_EQUAL_README, f"{charged[0]} to {charged[-1]} calls")
-        if arm == "crest":
-            audit.said(CREST_EQUAL_README, f"{charged[0] / centre:.2f} to {charged[-1] / centre:.2f} of anneal's {centre:g}")
     audit.said(CREST_EQUAL_README, f"The most any CREST row was charged is {max(int(r['charged']) for r in rows if r['arm'] == 'crest')}")
     walls = {arm: sorted(float(r["wall_s"]) for r in rows if r["arm"] == arm) for arm in panel.ARMS}
     middle = {arm: (w[len(w) // 2 - 1] + w[len(w) // 2]) / 2 for arm, w in walls.items()}
@@ -3886,8 +3878,10 @@ def crest_equal_bench(audit: Audit) -> None:
                  f"1e-{exponent}", f"{panel.HIT_TOL_EH:.3g}")
     audit.said(SI, f"within \\(10^{{-{exponent}}}\\)~Eh of the prism")
     audit.said(SI, f"seed {unconverged[0]} of this code, whose polish did not converge, is a miss.")
-    audit.said(SI, f"A CREST arm at {panel.CREST_WALL_LEN_PS:.2f}~ps, the shortest length that finished,")
-    audit.said(SI, f"The table prints the {panel.CREST_LEN_PS:.2f}~ps arm.")
+    audit.said(SI, f"A CREST arm at {panel.CREST_WALL_LEN_PS:.2f}~ps is the shortest length that finished.")
+    audit.said(SI, f"That length is not the {panel.CREST_LEN_PS:.2f}~ps length.")
+    audit.said(SI, "The two hit counts are not a comparison.")
+    audit.said(SI, "The slopes differ and the stops differ.")
 
 
 def gad_published(audit: Audit) -> None:
@@ -5886,9 +5880,9 @@ def cover_letter(audit: Audit) -> None:
         found = sentence in manuscript
         audit.record(found, COVER, "a cover-letter sentence with a number is a sentence of the abstract",
                      sentence[:70], sentence[:70] if found else "not in the manuscript")
-    audit.record(checked == len(COVER_OTHER) + 2, COVER,
+    audit.record(checked == len(COVER_OTHER), COVER,
                  "the numbered cover-letter claims are the numbered abstract claims",
-                 str(len(COVER_OTHER) + 2), str(checked))
+                 str(len(COVER_OTHER)), str(checked))
     for word in ("\\rerun", "Zenodo", "DOI", "pending", "being run", "rerun"):
         audit.record(word not in audit.text(COVER), COVER, f"the cover letter carries no process note ({word})",
                      "absent", "absent" if word not in audit.text(COVER) else "present")
@@ -7141,7 +7135,8 @@ H2O8_CREST_COMMIT = "7ad8eab67d61f1d5835a9ce7b67e7b2cb2b4ede9"
 H2O8_CREST_TREE = "e161694dae3f663d407763dd1f415127b9bedb69"
 NH3_RECORD_COMMIT = "d3c3e351e2bfd8c26a279943a26e5a8230467284"
 NH3_RECORD_TREE = "47353ceea9816654aa80b95d35062d482be10dba"
-_STALE_H2O8 = ("15.47", "8253.5", "8 of 8", "8/8", "91817")
+# 91817 is the median of the seven hits. The prose names it as that median.
+_STALE_H2O8 = ("15.47", "8253.5", "8 of 8", "8/8")
 
 
 def _record_text(commit: str, path: str) -> str:
@@ -7180,14 +7175,15 @@ def h2o8_prose(row: dict[str, object]) -> str:
         f"On (H\\(_2\\)O)\\(_8\\), seeds {row['anneal_seeds']} of this code run with the "
         f"opt-in polish-on-improvement option (\\texttt{{polish\\_on\\_improve}}), and CREST uses "
         f"seeds {row['crest_seeds']}. "
-        f"Medians are over all {row['anneal_n']} runs. A miss counts as the budget plus one. "
         f"CREST budget is {row['crest_budget']}. "
         f"This code hits {row['anneal_hits']} of {row['anneal_n']} seeds at a first-hit median of "
-        f"{_call_text(float(row['anneal_median']))}, and CREST hits {row['crest_hits']} of {row['crest_n']} "
-        f"at a first-hit median of {_call_text(float(row['crest_median']))}. "
+        f"{_call_text(float(row['anneal_median']))}. "
+        f"CREST hits {row['crest_hits']} of {row['crest_n']} at an all-run first-hit median of "
+        f"{_call_text(float(row['crest_median']))}, and a miss is the budget plus one. "
+        f"The median of those hits is {_call_text(float(row['hit_only']))}. "
         f"\\texttt{{calls\\_to\\_hit}} includes polish-on-improve calls; "
         f"\\texttt{{charged\\_calls}}, the run total, is larger on every seed. "
-        f"The two-sided Fisher exact test gives \\(p={float(row['fisher']):.4f}\\). "
+        f"The unadjusted two-sided Fisher exact test gives \\(p={float(row['fisher']):.4f}\\). "
         f"Mann--Whitney \\(U={int(row['u'])}\\) for this code against CREST, pairs with its call larger, "
         f"is complete separation (\\(p={pp(float(row['mannwhitney']))}\\)): "
         f"its runs hit in fewer calls than every CREST run. "
@@ -7292,6 +7288,7 @@ def octamer_records(audit: Audit) -> dict[str, dict[str, object]] | None:
         "crest_n": len(crest),
         "anneal_median": anneal_median,
         "crest_median": crest_median,
+        "hit_only": hit_only,
         "crest_budget": crest_budget,
         "fisher": fisher_p,
         "u": rank_u,
@@ -7367,7 +7364,7 @@ def removed_crest_arms(audit: Audit) -> None:
     audit.record(4000 in nh3_anneal and 4000 < nh3_med, "bench/nh3-tetramer/results.csv",
                  "4000 sits below the CREST median", f"below {_calls_text(nh3_med)}",
                  " ".join(map(str, sorted(nh3_anneal))))
-    audit.said(SI, "Table~\\msref{tab:crest} keeps (H\\(_2\\)O)\\(_6\\), (H\\(_2\\)O)\\(_8\\), "
+    audit.said(SI, "Table~\\msref{tab:crest} keeps (H\\(_2\\)O)\\(_8\\), "
                    "(NH\\(_3\\))\\(_8\\), C\\(_{10}\\), Si\\(_{10}\\), and C\\(_{20}\\).")
     audit.said(SI, "(H\\(_2\\)O)\\(_8\\) counts first-hit calls on both sides.")
     audit.said(SI, "The anneal rows of that file are not this comparison.")
@@ -7396,8 +7393,15 @@ def removed_crest_arms(audit: Audit) -> None:
     anneal_hits = sum(any(float(row["delta_Eh"]) <= tol for row in group) for group in matched.values())
     crest_hits = sum(hits_of([row]) for row in h2o_crest if row["seed"] in matched)
     seed_word = NUMBER_WORDS[len(matched)] if len(matched) < len(NUMBER_WORDS) else str(len(matched))
-    audit.said(SI, f"holds {seed_word} seeds, and this code hits {anneal_hits} of {len(matched)} and CREST "
-                   f"{crest_hits} of {len(matched)}.")
+    audit.said(SI, f"holds {seed_word} seeds.")
+    audit.record(len(matched) == 2 and anneal_hits == 1 and crest_hits == 2, "bench/h2o-octamer/ladder.csv",
+                 "the two ladder seeds are not a printed comparison", "1 2",
+                 f"{anneal_hits} {crest_hits}")
+    for path in (TEX, SI, COVER):
+        text = collapse(tex_without_comments(audit.text(path)))
+        shown = bool(re.search(r"(?<!\d)1 of 2(?!\d)", text) or re.search(r"(?<!\d)2 of 2(?!\d)", text))
+        audit.record(not shown, path, "1 of 2 against 2 of 2 stays out", "absent",
+                     "present" if shown else "absent")
     for path in ("bench/h2o16-crest/seeds.csv", "bench/water-h2o16/results.csv"):
         columns = set(audit.rows(path)[0])
         audit.record("calls" not in columns and "charged" not in columns, path, "no call column",
@@ -7428,6 +7432,26 @@ MIXED_STOPS = (
 )
 
 
+def holm(named: list[tuple[str, float]]) -> dict[str, float]:
+    """Step-down Holm adjustment. Equal raw values keep the name order."""
+    ordered = sorted(named, key=lambda item: (item[1], item[0]))
+    adjusted: dict[str, float] = {}
+    running = 0.0
+    size = len(ordered)
+    for index, (name, raw) in enumerate(ordered):
+        running = max(running, min(1.0, (size - index) * raw))
+        adjusted[name] = running
+    return adjusted
+
+
+def holm_text(value: float) -> str:
+    if value >= 0.999:
+        return "1"
+    if value >= 0.1:
+        return f"{value:.3f}"
+    return f"{value:.4f}"
+
+
 def stopping_pairs(audit: Audit) -> None:
     """A removed pairing of unlike stopping rules stays out of the paper."""
     for path in (TEX, SI, COVER):
@@ -7446,7 +7470,9 @@ def crest_table(audit: Audit) -> None:
     audit.record(block == fresh, TEX, "tab:crest is the output of crest_table.py", "equal",
                  "equal" if block == fresh else "differs")
     pairs = {re.sub(r"\\[()]|[_{}\\]", "", p["system"]): p for p in table.pairs()}
-    audit.cell(TEX, "the clusters of tab:crest", "(H2O)6 (H2O)8 (NH3)8 C10 Si10 C20", " ".join(pairs))
+    audit.cell(TEX, "the clusters of tab:crest", "(H2O)8 (NH3)8 C10 Si10 C20", " ".join(pairs))
+    audit.record("(H2O)6" not in pairs, TEX, "the water hexamer is not a table row", "absent",
+                 "present" if "(H2O)6" in pairs else "absent")
 
     def counts(name: str) -> tuple[int, int, int, int]:
         a, c = pairs[name]["anneal"], pairs[name]["crest"]
@@ -7456,33 +7482,44 @@ def crest_table(audit: Audit) -> None:
     revision = next(r["code_revision"] for r in reversed(rows) if r["arm"] == "anneal")
     anneal = [r for r in rows if r["arm"] == "anneal" and r["code_revision"] == revision]
     crest = [r for r in rows if r["arm"] == "crest"]
-    audit.cell(TEX, "hexamer hits of this code", f"{counts('(H2O)6')[0]}/{counts('(H2O)6')[1]}", frac(anneal))
-    audit.cell(TEX, "hexamer hits of CREST at 0.90 ps", f"{counts('(H2O)6')[2]}/{counts('(H2O)6')[3]}", frac(crest))
     charged = sorted({int(r["charged"]) for r in anneal})
     length = {float(r["crest_len_ps"]) for r in crest if r["crest_len_ps"]}
     audit.record(len(charged) == 1 and len(length) == 1, "bench/crest-equal/rows.csv",
                  "the hexamer has one charge and one CREST length", "one",
                  f"{charged} {sorted(length)}")
-    audit.said(TEX, f"This code stops at a fixed charge of {charged[0]} calls and hits the water hexamer "
-                    f"on {hits_of(anneal)} of {len(anneal)} runs.")
-    audit.said(TEX, f"CREST stops at the end of its {next(iter(length)):.2f}~ps run and hits the water hexamer on "
-                    f"{hits_of(crest)} of {len(crest)} runs.")
+    audit.record(hits_of(anneal) == 1 and len(anneal) == 12 and hits_of(crest) == 4 and len(crest) == 12,
+                 "bench/crest-equal/rows.csv", "the hexamer hit counts stay on their own rows", "1 12 4 12",
+                 f"{hits_of(anneal)} {len(anneal)} {hits_of(crest)} {len(crest)}")
     audit.cell(TEX, "the hexamer charges one count", "1", float(len(charged)))
-    records = octamer_records(audit)
+    named = [(name, fisher(*counts(name))) for name in pairs]
+    adjusted = holm(named)
+    shared = [name for name, pair in pairs.items() if pair.get("first_hit") and not pair.get("separate")]
+    audit.record(shared == ["(H2O)8"], TEX, "one CREST row shares a stopping rule", "(H2O)8", " ".join(shared))
+    audit.record(len(adjusted) == 5, TEX, "the CREST family has the five remaining tests", "5", str(len(adjusted)))
+    same_tail = holm_text(adjusted["(NH3)8"]) == holm_text(adjusted["Si10"]) == holm_text(adjusted["C20"])
+    audit.record(same_tail, TEX, "ammonia, Si10, and C20 share one adjusted value", "1",
+                 " ".join(holm_text(adjusted[name]) for name in ("(NH3)8", "Si10", "C20")))
+    family = (f"The adjusted values are {holm_text(adjusted['(H2O)8'])} on the water octamer, "
+              f"{holm_text(adjusted['C10'])} on C\\(_{{10}}\\), and {holm_text(adjusted['(NH3)8'])} "
+              f"on the ammonia octamer, Si\\(_{{10}}\\), and C\\(_{{20}}\\).")
+    for path in (TEX, SI):
+        audit.said(path, "The five remaining hit-rate tests are one Holm family")
+        audit.said(path, "A win is a shared-stop test whose adjusted value is below 0.05.")
+        audit.said(path, family)
+        audit.said(path, "Only the water octamer shares one stopping rule, and that adjusted value is not below 0.05.")
+        audit.said(path, "The C\\(_{10}\\) arms do not share a stopping rule.")
+    audit.said(SI, "On C\\(_{10}\\) the target is the lowest energy any run reached.")
     for path in (TEX, COVER):
-        audit.said(path, f"On tight-binding clusters the anneal software stops at a fixed charge of {charged[0]} "
-                         f"calls and finds the water hexamer in {hits_of(anneal)} of {len(anneal)} runs.")
-        audit.said(path, f"The CREST conformer search stops at the end of its {next(iter(length)):.2f}~ps run and finds "
-                         f"the water hexamer in {hits_of(crest)} of {len(crest)} runs.")
-        audit.said(path, "With the opt-in \\texttt{polish\\_on\\_improve} option, both arms count "
-                         "first-hit calls and this code hits the water octamer on more seeds.")
+        audit.said(path, "The CREST hit-rate tests are one Holm family.")
+        audit.said(path, "A win needs one shared stopping rule, and the only such test is not a win.")
+        audit.said(path, "On the water octamer both arms count first-hit calls.")
+    audit.said(TEX, "The water octamer is the CREST test whose arms share a stopping rule, and its Holm-adjusted "
+                    "value is not below 0.05.")
+    audit.said(SI, "The water hexamer is not a row.")
+    audit.said(SI, "For one family of \\(m\\) tests, order the unadjusted \\(p\\) values")
+    records = octamer_records(audit)
     if records is not None:
-        water, nh3 = records["h2o8"], records["nh3"]
-        audit.said(TEX, f"On GFN2-xTB clusters this code stops at a fixed charge of {charged[0]} calls and "
-                        f"hits the water hexamer on {hits_of(anneal)} of {len(anneal)} runs.")
-        audit.said(TEX, "With the opt-in polish-on-improvement option both arms count first-hit calls, and this code "
-                        f"hits the water octamer on {water['anneal_hits']} of {water['anneal_n']} seeds and CREST on "
-                        f"{water['crest_hits']} of {water['crest_n']}.")
+        nh3 = records["nh3"]
         audit.said(TEX, f"CREST hits that cluster on {nh3['crest_hits']} of {nh3['crest_n']} full runs.")
     c10, si10, c20 = counts("C10"), counts("Si10"), counts("C20")
     audit.said(TEX, f"This code stops at the reference or at \\(10^{{5}}\\) calls and hits the "
@@ -7499,10 +7536,11 @@ def crest_table(audit: Audit) -> None:
     audit.said(SI, "The 1 of 12 is the hit count on that reversed GFN2 slope.")
     audit.said(SI, "The 4 of 12 is the hit count on the GFN2 slope the wrapper put back.")
     wall = [r for r in rows if r["arm"] == "crest-wall"]
-    audit.said(SI, f"hits {hits_of(wall)} of {len(wall)}.")
+    audit.record(len(wall) == 12 and hits_of(wall) == 0, "bench/crest-equal/rows.csv",
+                 "the shorter CREST length is not a printed hit count", "0", str(hits_of(wall)))
     audit.said(SI, "CREST stops at the end of its run.")
     stopping_pairs(audit)
-    for gone in ("next measurement", "void, not a miss", "Holm"):
+    for gone in ("next measurement", "void, not a miss"):
         for path in (TEX, SI, COVER):
             found = gone.lower() in collapse(audit.text(path)).lower()
             audit.record(not found, path, f"the text does not say {gone}", "absent", "present" if found else "absent")

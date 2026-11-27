@@ -730,15 +730,24 @@ CREST 3.0.2 runs GFN2-xTB through its legacy xtb driver, and this code runs
 it through the xtb engine of rgpot; both arms count energy and gradient
 calls.
 CREST takes no seed, so its dynamics are not paired with those of this code.
-Table~\msref{tab:crest} keeps (H\(_2\)O)\(_6\), (H\(_2\)O)\(_8\),
+Table~\msref{tab:crest} keeps (H\(_2\)O)\(_8\),
 (NH\(_3\))\(_8\), C\(_{10}\), Si\(_{10}\), and C\(_{20}\).
 (H\(_2\)O)\(_8\) counts first-hit calls on both sides.
 (NH\(_3\))\(_8\) stops at the target or at 332675 calls on this code, and its
 CREST side is a full run.
 C\(_{10}\), Si\(_{10}\), and C\(_{20}\) stop at the reference or at \(10^{5}\)
 calls on this code, and CREST stops at the end of its run.
-(H\(_2\)O)\(_6\) stops at a fixed charge of 3021 calls on this code and at the
-end of a 0.90~ps run on CREST.
+The water hexamer is not a row.
+This code stops at a fixed charge of 3021 calls, and CREST stops at the end
+of a 0.90~ps run.
+The slopes differ and the stops differ.
+The five remaining hit-rate tests are one Holm family~\cite{holm1979}.
+A win is a shared-stop test whose adjusted value is below 0.05.
+The adjusted values are 0.149 on the water octamer, 0.0471 on C\(_{10}\),
+and 1 on the ammonia octamer, Si\(_{10}\), and C\(_{20}\).
+Only the water octamer shares one stopping rule, and that adjusted value
+is not below 0.05.
+The C\(_{10}\) arms do not share a stopping rule.
 A budget pair is kept only when the budget of this code is at least the
 median calls of the complete CREST runs.
 An aborted CREST run, which made no call, is dropped from its pair.
@@ -762,20 +771,22 @@ the sign of the GFN2-xTB gradient before commit \texttt{94a37da7}.
 The CREST wrapper at that revision negated the gradient it served.
 The 1 of 12 is the hit count on that reversed GFN2 slope.
 The 4 of 12 is the hit count on the GFN2 slope the wrapper put back.
-A CREST arm at 0.11~ps, the shortest length that finished, hits 0 of 12.
-The table prints the 0.90~ps arm.
+The two hit counts are not a comparison.
+A CREST arm at 0.11~ps is the shortest length that finished.
+That length is not the 0.90~ps length.
 
 \emph{Water octamer.}
 On (H\(_2\)O)\(_8\), seeds 2000--2011 of this code run with the opt-in
 polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
 seeds 17000--17011.
-Medians are over all 12 runs. A miss counts as the budget plus one.
 CREST budget is 151738.
-This code hits 12 of 12 seeds at a first-hit median of 6193, and CREST hits 7 of 12
-at a first-hit median of 141621.5.
+This code hits 12 of 12 seeds at a first-hit median of 6193.
+CREST hits 7 of 12 at an all-run first-hit median of 141621.5, and a miss is
+the budget plus one.
+The median of those hits is 91817.
 \texttt{calls\_to\_hit} includes polish-on-improve calls;
 \texttt{charged\_calls}, the run total, is larger on every seed.
-The two-sided Fisher exact test gives \(p=0.0373\).
+The unadjusted two-sided Fisher exact test gives \(p=0.0373\).
 Mann--Whitney \(U=0\) for this code against CREST, pairs with its call larger,
 is complete separation (\(p=7.4\times 10^{-7}\)):
 its runs hit in fewer calls than every CREST run.
@@ -804,6 +815,7 @@ This code runs the general configuration of
 reference.
 CREST stops at the end of its run.
 A hit is within \(10^{-3}\)~eV of the lowest minimum any run reached.
+On C\(_{10}\) the target is the lowest energy any run reached.
 On C\(_{10}\) both arms are the rows of \path{seeds.csv}, which name no
 revision.
 On Si\(_{10}\) the rows of this code are those of \path{rows.csv} at
@@ -824,7 +836,7 @@ Those arms are left out because the budget of this code is below the median
 calls of the complete CREST runs.
 (NH\(_3\))\(_4\) has no other comparison in the table.
 At the calls of each seed's CREST run, \path{bench/h2o-octamer/ladder.csv}
-holds two seeds, and this code hits 1 of 2 and CREST 2 of 2.
+holds two seeds.
 The (H\(_2\)O)\(_{16}\) and (H\(_2\)O)\(_{20}\) records give no CREST call
 count, and the Si\(_{13}\) record has no valid reference.
 
@@ -833,6 +845,12 @@ count, and the Si\(_{13}\) record has no valid reference.
 Every test below is two-sided.
 \path{scripts/paired_stats.py} implements the paired tests, and the
 generators of the tables call it.
+
+\emph{Holm adjustment.}
+For one family of \(m\) tests, order the unadjusted \(p\) values so that
+\(p_{(1)}\le \cdots\le p_{(m)}\) \cite{holm1979}.
+The adjusted value at position \(i\) is
+\(\min\bigl(1,\max_{j\le i}(m-j+1)p_{(j)}\bigr)\).
 
 \emph{Paired outcome table.}
 Two arms run on the same seeds from the same start give a pair of hit flags

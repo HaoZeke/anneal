@@ -4149,13 +4149,12 @@ def test_a_stale_gmin_single_session_claim_is_reported():
     }
 
 
-def test_a_drifted_crest_hexamer_count_is_reported():
+def test_a_drifted_crest_holm_sentence_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = ("On GFN2-xTB clusters this code stops at a fixed charge of 3021 calls and "
-           "hits the water hexamer on 1 of 12 runs.")
+    old = "Only the water octamer shares one stopping rule, and that adjusted value is not below 0.05."
     assert audit_mod.collapse(tex).count(old) == 1
-    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("1 of 12", "3 of 12"))
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("not below 0.05", "below 0.05"))
     audit_mod.crest_table(audit)
     assert [r[2] for r in audit.drifts()] == ["prose"]
 
