@@ -33,8 +33,8 @@ atoms, and the (H2O)16 starts sit outside it.
 
 Widening that sphere by default does not land.
 On develop, (H2O)8 seed 17000 at 4000 calls finishes at
--1106.9955472624 eV, and (NH3)8 seed 17000 at 4000 calls finishes at
--965.1559715057 eV.
+-1106.9955472624 eV.
+The ammonia octamer at 4000 calls finishes at -965.1559715057 eV.
 Setting the sphere from the group contact, and widening it to a quench
 that does not fit, both leave that opening quench and then finish
 higher: (H2O)8 at -1106.9930881701 eV and (NH3)8 at -965.1325107976 eV.

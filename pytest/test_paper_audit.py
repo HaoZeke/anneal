@@ -61,6 +61,10 @@ CHECKS = (
     audit_mod.supporting_numbers,
     audit_mod.crest_equal,
     audit_mod.crest_equal_bench,
+    audit_mod.crest_table,
+    audit_mod.gmin_tuned,
+    audit_mod.morse_m70_pair,
+    audit_mod.rerun_summaries,
     audit_mod.outside_session,
     audit_mod.g3_session,
     audit_mod.manuscript_new,
@@ -77,6 +81,7 @@ CHECKS = (
     audit_mod.conversion_literals,
     audit_mod.own_references,
     audit_mod.build_receipts,
+    audit_mod.cross_document_equations,
     audit_mod.selection_tables,
     audit_mod.gmin_panel_drivers,
     audit_mod.prior_switches,
@@ -778,12 +783,12 @@ def test_a_move_choice_success_claim_is_reported():
 def test_a_modal_hedge_fails_both_audits():
     for strict in (False, True):
         audit = audit_mod.Audit()
-        tex = audit.text(audit_mod.TEX)
+        si = audit.text(audit_mod.SI)
         old = "and both algorithms return an assignment of the optimal cost."
-        assert tex.count(old) == 1
-        audit.text_cache[audit_mod.TEX] = tex.replace(old, old + "\nA tie may break differently.")
+        assert si.count(old) == 1
+        audit.text_cache[audit_mod.SI] = si.replace(old, old + "\nA tie may break differently.")
         audit_mod.todo_check(audit, pre_submission=strict)
-        assert [(r[1], r[2], r[4]) for r in audit.drifts()] == [(audit_mod.TEX, "no modal hedge", "may")]
+        assert [(r[1], r[2], r[4]) for r in audit.drifts()] == [(audit_mod.SI, "no modal hedge", "may")]
 
 
 def test_a_rendered_rerun_fails_both_audits():
@@ -841,7 +846,7 @@ def test_a_cover_sentence_off_the_abstract_is_reported():
     audit_mod.cover_letter(audit)
     assert [r[2] for r in audit.drifts()] == [
         "a cover-letter sentence with a number is a sentence of the abstract",
-        "the numbered cover-letter claims match the two abstract claims"]
+        "the numbered cover-letter claim matches the one numbered abstract claim"]
 
 
 def test_a_drifted_gmin_panel_summary_cell_is_reported():
@@ -1174,7 +1179,7 @@ def test_the_paired_newcombe_interval_matches_the_published_example():
 def test_a_title_across_funnels_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "Template-free basin hopping with adaptive moves for funnelled cluster landscapes"
+    old = "Template-free basin hopping with adaptive moves for funneled cluster landscapes"
     assert old in audit_mod.collapse(tex)
     audit.text_cache[audit_mod.TEX] = replace_collapsed(
         tex,
@@ -3993,7 +3998,7 @@ def test_default_screen_cannot_be_described_as_the_margin_path():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
     old = ("For every other proposal, the preset uses the Bayesian screen of\n"
-           "equation~\\ref{eq:bayes-screen}.")
+           "equation~\\sieqref{eq:bayes-screen}.")
     assert old in tex
     audit.text_cache[audit_mod.TEX] = tex.replace(
         old, "For every other proposal, the preset uses the margin screen.")
@@ -4075,11 +4080,11 @@ def test_a_stray_gmin_patch_line_is_reported():
 
 def test_a_second_gate_claim_is_reported():
     audit = audit_mod.Audit()
-    tex = audit.text(audit_mod.TEX)
+    si = audit.text(audit_mod.SI)
     old = "For atomic clusters the preset has one atom-count gate:"
-    assert old in audit_mod.collapse(tex)
-    audit.text_cache[audit_mod.TEX] = replace_collapsed(
-        tex,
+    assert old in audit_mod.collapse(si)
+    audit.text_cache[audit_mod.SI] = replace_collapsed(
+        si,
         old, "For atomic clusters the preset has two atom-count gates, both at 98 atoms:")
     audit_mod.count_gates(audit, "c2de652dca0bc75e2b0cb4afffac91fd656404e4")
     assert sorted(r[2] for r in audit.drifts()) == ["prose", "retired gate wording stays out: two atom-count gates"]
@@ -4109,12 +4114,14 @@ def test_a_stale_gmin_single_session_claim_is_reported():
     }
 
 
-def test_crest_outside_the_related_searches_is_reported():
+def test_a_drifted_crest_hexamer_count_is_reported():
     audit = audit_mod.Audit()
-    si = audit.text(audit_mod.SI)
-    audit.text_cache[audit_mod.SI] = si.replace("\\section{Statistical methods}", "CREST.\n\\section{Statistical methods}", 1)
-    audit_mod.withdrawn_benchmarks(audit)
-    assert [r[2] for r in audit.drifts()] == ["CREST is named only among the searches that report no comparable rate"]
+    tex = audit.text(audit_mod.TEX)
+    old = "CREST hits the water hexamer on 4 of 12 runs and this code"
+    assert audit_mod.collapse(tex).count(old) == 1
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("4 of 12", "3 of 12"))
+    audit_mod.crest_table(audit)
+    assert [r[2] for r in audit.drifts()] == ["prose"]
 
 
 def test_a_banned_word_is_reported():
@@ -4408,3 +4415,47 @@ def test_a_merged_branch_that_no_alias_names_is_not_required(monkeypatch, tmp_pa
     with_tip = index()
     assert with_tip.on_remote(optional), "a present optional tip did not join the closure"
     assert not with_tip.on_remote(unnamed), "an unnamed remote branch joined the closure"
+
+
+def test_cross_document_equation_references_name_their_document():
+    audit = audit_mod.Audit()
+    audit_mod.cross_document_equations(audit)
+    assert not audit.drifts(), "\n".join(
+        f"{where}  shown={shown}  computed={value}" for _, where, _, shown, value in audit.drifts())
+
+
+def test_stripping_the_si_equation_prefix_is_reported():
+    audit = audit_mod.Audit()
+    macros = audit.text("paper/jctc/macros.tex")
+    assert "\\@sieqref@strip" not in macros
+    audit.text_cache["paper/jctc/macros.tex"] = macros + "\n\\def\\@sieqref@strip S#1\\@nil{#1}\n"
+    audit_mod.cross_document_equations(audit)
+    drifts = [where for _, where, label, _, _ in audit.drifts()
+              if label == "an SI equation reference keeps its S or names the SI"]
+    assert drifts
+    assert all(where.startswith("paper/jctc/manuscript.tex:") for where in drifts)
+
+
+def test_an_si_qualifier_covers_a_stripped_equation_reference():
+    audit = audit_mod.Audit()
+    macros = audit.text("paper/jctc/macros.tex")
+    tex = audit.text("paper/jctc/manuscript.tex")
+    audit.text_cache["paper/jctc/macros.tex"] = macros + "\n\\def\\@sieqref@strip S#1\\@nil{#1}\n"
+    audit.text_cache["paper/jctc/manuscript.tex"] = tex.replace(
+        "equation~\\sieqref{", "SI equation~\\sieqref{").replace(
+        "Equation~\\sieqref{", "SI equation~\\sieqref{")
+    audit_mod.cross_document_equations(audit)
+    assert not [where for _, where, label, _, _ in audit.drifts()
+                if label == "an SI equation reference keeps its S or names the SI"]
+
+
+def test_a_main_text_equation_without_its_name_is_reported():
+    audit = audit_mod.Audit()
+    si = audit.text("paper/jctc/si.tex")
+    assert "of the main text" in si
+    audit.text_cache["paper/jctc/si.tex"] = si.replace(" of the main text", "")
+    audit_mod.cross_document_equations(audit)
+    drifts = [where for _, where, label, _, _ in audit.drifts()
+              if label == "a manuscript equation reference names the main text"]
+    assert drifts
+    assert all(where.startswith("paper/jctc/si.tex:") for where in drifts)

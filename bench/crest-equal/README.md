@@ -11,8 +11,8 @@ given a seed of its own, so its dynamics are not paired with anneal's.
 ## What the rows at 723b7c23 show
 
 - Revision `723b7c23` contains `acf5f0aa`, which flipped the GFN2 gradient sign
-  before `94a37da7`, and the CREST wrapper negated the served gradient; no
-  hit-rate claim is drawn from these rows, and the paper does not cite them.
+  before `94a37da7`, and the CREST wrapper negated the served gradient.
+  The paper cites the committed hit counts of these rows.
 - The CREST rows are charged the calls the driver served. CREST's own
   `Total number of energy+grad calls` line was not read and no CREST log was
   kept, so these rows cannot show that CREST spent no more than it was
