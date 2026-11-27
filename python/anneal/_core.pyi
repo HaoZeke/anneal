@@ -588,6 +588,7 @@ class Config:
         self,
         value: str | tuple[str, int] | dict[str, Any],
     ) -> None: ...
+    detected_symmetry: bool
     surface_hop_on_best: bool
     replicas: int
     swap_period: int

@@ -95,6 +95,7 @@ def test_with_scales_defaults_match_rust_config_exactly():
     assert cfg.symmetrise_core_fraction == 0.6
     assert cfg.point_symmetrise_every_accept is False
     assert cfg.continuous_symmetry == {"group": "off"}
+    assert cfg.detected_symmetry is False
     assert cfg.symmetrise_patience == 2_000
     assert cfg.tabu_on_stall is False
     assert cfg.tabu_capacity == 8
