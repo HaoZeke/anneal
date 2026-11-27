@@ -60,10 +60,12 @@ checkpoint fires:
   well-tempered basin bias jointly decide whether the quenched trial
   becomes the new live state. A tabu quarantine can refuse a return to
   a stalled funnel.
-- *Stall response*: if the chain has gone longer without a lower
-  minimum than its own longest prior quiet stretch, a soft-mode climb,
-  symmetrise, path attempt, trail-on-stall, or restart-on-stall may
-  fire, in the order the config flags set.
+- *Stall response*: the chain is stalled once =quiet= reaches the
+  larger of =escape_stall_patience= and =escape_stall_factor= times
+  =longest_quiet= (src/methods/cluster_hopping.rs:5097). Those defaults
+  are 5000 and 2.0 (src/methods/cluster_hopping/config.rs:2331). When
+  more than one stall arm is enabled, the arm is drawn
+  (src/methods/cluster_hopping.rs:11048).
 
 None of this loop body talks to the coordinator. It is the same code
 path a solo run takes. The cooperative layer only enters at a
@@ -75,7 +77,17 @@ The closure passed as =checkpoint= (examples/lj_cluster_search.rs:4691)
 receives a =ChainCheckpoint= (src/methods/cluster_hopping.rs:226), a
 read-only snapshot of the live chain: current state, best state, and
 every quench boundary and accepted transition since the last
-checkpoint. It runs, in order:
+checkpoint.
+
+When =CATALOG_EVIDENCE_ONLY= is =1=, unsettled charged work is recorded
+and the closure returns =CheckpointAction::Continue=
+(examples/lj_cluster_search.rs:4790 and
+examples/lj_cluster_search.rs:4796). That return is before
+=DescriptorSpace::describe= (examples/lj_cluster_search.rs:5158), before
+a probe (examples/lj_cluster_search.rs:5185), and before the population
+barrier (examples/lj_cluster_search.rs:5429). It does not call
+=record_slice=. The steps below are the other checkpoints. They run, in
+order:
 
 1. *Charge the cooperative ledger.* Each quench boundary in the
    snapshot is recorded as =ChargeKind::BasinEscape=. Charged work that
@@ -91,10 +103,13 @@ checkpoint. It runs, in order:
    the same work twice.
 
 2. *Register local-topology evidence.* =adaptive_catalog_operations=
-   (examples/lj_cluster_search.rs:7261) turns unadopted probe
-   transitions into =RegisterCurrent=, =Adopt= and =Unresolved=
-   operations, posted with =post_record_current= and
-   =post_record_transition=
+   (examples/lj_cluster_search.rs:7261) reads unadopted probe
+   transitions. A failed probe with a source gradient pushes
+   =Unresolved=, and =RegisterCurrent= unless that source is already
+   registered (examples/lj_cluster_search.rs:7273). =Adopt= is pushed
+   only after a validated transition (examples/lj_cluster_search.rs:7311
+   and examples/lj_cluster_search.rs:7375). Those operations are posted
+   with =post_record_current= and =post_record_transition=
    (examples/lj_cluster_search.rs:4949-4996). The occupied minimum is
    sent only when it has changed
    (examples/lj_cluster_search.rs:4997-5016), because every registration
@@ -105,17 +120,18 @@ checkpoint. It runs, in order:
    =lj_catalog_candidate= (examples/lj_cluster_search.rs:7144). The
    candidate is kept only when the gradient norm is at most 1e-5
    (examples/lj_cluster_search.rs:6861). One offer is made per
-   checkpoint: the lowest-energy one, and only for a minimum not
-   offered before. It is posted with
+   checkpoint, the lowest-energy one. It is skipped only when its
+   energy is within 1e-9 of =last_offered= and the coordinates match
+   (examples/lj_cluster_search.rs:5072). It is posted with
    =CooperativeRun::post_offer_candidate=
    (examples/lj_cluster_search.rs:5063-5079). The coordinator runs
    candidate validation (=CandidateValidator=, catalog.org "system
    signature and candidate validation") and, if it passes, attempts
    admission into =BasinCatalog= (catalog.org "active basin catalog").
 
-4. *Report the current position.* Before any phase that can leave the
-   checkpoint, it asks =DescriptorSpace::describe= for the descriptor
-   of the current state (examples/lj_cluster_search.rs:5158). A failed
+4. *Report the current position.* It asks =DescriptorSpace::describe=
+   for the descriptor of the current state
+   (examples/lj_cluster_search.rs:5158). A failed
    describe returns at once. This runs on the checkpoints that reach
    it, including those that later reconfigure. It is not an identity
    claim: it reports wherever the chain stands, mid-hop or not. Only
@@ -174,10 +190,11 @@ checkpoint. It runs, in order:
    examples/lj_cluster_search.rs:6624-6663). =Leave= can reseed or move
    to another catalog entry (action =catalog_leave=).
 
-10. *Record the slice trace.* Whatever happened, a =SliceTrace=
-    (catalog.org "CooperativeRun composition layer") is recorded via
-    =CooperativeRun::record_slice= before the checkpoint returns, so
-    =CooperativeRun::json_lines= has one complete entry per checkpoint.
+10. *Record the slice trace.* Paths that reach a policy decision record
+    a =SliceTrace= (catalog.org "CooperativeRun composition layer") via
+    =CooperativeRun::record_slice= before they return
+    (examples/lj_cluster_search.rs:6670), so =json_lines= can carry that
+    checkpoint. The evidence-only return does not call =record_slice=.
 
 * Polish and offer
 
@@ -185,14 +202,19 @@ Separately from the checkpoint cadence, =Config.polish_records=
 (src/methods/cluster_hopping/config.rs:1373) is a step count. It
 lengthens the relaxation of a new record, and of a basin visit, not
 of every hop. =run_capnp_catalog= sets it to =relax_steps=
-(examples/lj_cluster_search.rs:4442), one full quench.
-=Config::recommended= uses 1000 steps. With the count above zero, the
-extra steps run when the record moves, and also when a basin visit
-falls due after four times that many evaluations since the last polish
-(src/methods/cluster_hopping.rs:11467). A target or a caller stop skips
-both. A solo run leaves ~polish_records = 0~, which skips this path.
-An offer in step 3 is kept only when the gradient norm is at most
-1e-5 (examples/lj_cluster_search.rs:6861).
+(examples/lj_cluster_search.rs:4442). =recommended_with_scales= sets
+=relax_steps= to 1000 (src/methods/cluster_hopping/config.rs:1965) and
+leaves =polish_records= at 0 (src/methods/cluster_hopping/config.rs:2369).
+With the count above zero, the extra steps run when the record moves,
+and also when a basin visit falls due after four times that many
+charged spent since the last polish
+(src/methods/cluster_hopping.rs:11468). That visit wait ignores branch
+charges and observed-basis charges (src/methods/cluster_hopping.rs:7543
+and src/methods/cluster_hopping.rs:11302). A target or a caller stop
+skips both (src/methods/cluster_hopping.rs:11470). The visit test does
+not read =remaining()=. A solo run leaves ~polish_records = 0~, which
+skips this path. An offer in step 3 is kept only when the gradient
+norm is at most 1e-5 (examples/lj_cluster_search.rs:6861).
 
 * Population epoch: reconfiguration
 
@@ -222,10 +244,14 @@ resumes at step 1.
 
 The loop ends when the ledger reaches its target, the caller stop
 is raised, or =remaining()= is zero
-(src/methods/cluster_hopping.rs:6815). A finished checkpoint interval
-is still delivered when nothing remains to charge. The same three
-tests skip a side call (src/methods/cluster_hopping.rs:3746) and skip
-record polish (src/methods/cluster_hopping.rs:5829). =Ledger::spent=
+(src/methods/cluster_hopping.rs:6815). When =max_hops= is set, it also
+ends once =hops= reaches that cap (src/methods/cluster_hopping.rs:6823).
+A finished checkpoint interval is still delivered when nothing remains
+to charge. The same three tests skip a side call
+(src/methods/cluster_hopping.rs:3746). =polish_records= skips on a
+target or a caller stop only (src/methods/cluster_hopping.rs:11470).
+=polish_on_improve= also returns when nothing remains
+(src/methods/cluster_hopping.rs:5829). =Ledger::spent=
 (src/methods/cluster_hopping.rs:1405) is the charged count. The example
 writes =CooperativeRun::json_lines= to =CATALOG_TRACE= when that
 variable names a path, and otherwise to stderr
