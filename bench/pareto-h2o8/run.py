@@ -2,8 +2,11 @@
 # Copyright (c) anneal developers
 """Full-budget (H2O)8 polish-on-improve rows for two shards.
 
-``--shard A`` is the force-call logger used for seeds 2000-2005.
-``--shard B`` is the patched first-hit counter used for seeds 2006-2011.
+``calls_to_first_hit`` is ``first_hit_call`` from ``account.patch`` applied to
+``examples/gfn2_mol_h2h.rs`` at ``b35601b7``. That is the first finite
+objective evaluation at or below the harness threshold. ``H2O_TARGET_EV`` is
+left unset, so ``Ledger::stop_below`` is not installed. The crossing index
+does not depend on that stop.
 """
 
 from __future__ import annotations
@@ -47,77 +50,6 @@ ROW_FIELDS = [
     "core",
     "cpu_model",
 ]
-
-LOGGER_C = r"""
-/* Copyright (c) anneal developers */
-/* Forward libxtb_engine.so and number each successful finite force call. */
-#define _GNU_SOURCE
-#include <dlfcn.h>
-#include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-typedef struct RgpotXtbPot RgpotXtbPot;
-
-static void *real_lib;
-static FILE *out;
-static long calls;
-
-static void *sym(const char *name) {
-  if (!real_lib) {
-    const char *path = getenv("XTB_ENGINE_LOG_REAL");
-    real_lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-    if (!real_lib) {
-      fprintf(stderr, "xtb forward: %s\n", dlerror());
-      abort();
-    }
-    out = fopen(getenv("XTB_ENGINE_LOG_OUT"), "w");
-    if (!out) {
-      perror("xtb forward log");
-      abort();
-    }
-    setvbuf(out, NULL, _IONBF, 0);
-  }
-  return dlsym(real_lib, name);
-}
-
-int rgpot_xtb_abi_version(void) {
-  return ((int (*)(void))sym("rgpot_xtb_abi_version"))();
-}
-int rgpot_xtb_available(void) {
-  return ((int (*)(void))sym("rgpot_xtb_available"))();
-}
-RgpotXtbPot *rgpot_xtb_create(const void *cfg, char *err, size_t len) {
-  return ((RgpotXtbPot * (*)(const void *, char *, size_t))sym(
-      "rgpot_xtb_create"))(cfg, err, len);
-}
-void rgpot_xtb_destroy(RgpotXtbPot *p) {
-  ((void (*)(RgpotXtbPot *))sym("rgpot_xtb_destroy"))(p);
-}
-void rgpot_xtb_reset(RgpotXtbPot *p) {
-  ((void (*)(RgpotXtbPot *))sym("rgpot_xtb_reset"))(p);
-}
-void rgpot_xtb_set_warm_move(RgpotXtbPot *p, double a) {
-  ((void (*)(RgpotXtbPot *, double))sym("rgpot_xtb_set_warm_move"))(p, a);
-}
-double rgpot_xtb_warm_move(const RgpotXtbPot *p) {
-  return ((double (*)(const RgpotXtbPot *))sym("rgpot_xtb_warm_move"))(p);
-}
-int rgpot_xtb_reused_wavefunction(const RgpotXtbPot *p) {
-  return ((int (*)(const RgpotXtbPot *))sym("rgpot_xtb_reused_wavefunction"))(p);
-}
-int rgpot_xtb_force(RgpotXtbPot *p, long n, const double *pos, const int *z,
-                    double *f, double *e, double *var, const double *box) {
-  int rc = ((int (*)(RgpotXtbPot *, long, const double *, const int *, double *,
-                     double *, double *, const double *))sym("rgpot_xtb_force"))(
-      p, n, pos, z, f, e, var, box);
-  if (rc == 0 && e && isfinite(*e)) {
-    calls += 1;
-    fprintf(out, "%ld %.17g\n", calls, *e);
-  }
-  return rc;
-}
-"""
 
 
 def energy_hits(energy: float, target: float, tol: float) -> bool:
@@ -188,17 +120,6 @@ def need(name: str) -> str:
     return found
 
 
-def compile_logger(directory: Path) -> Path:
-    source = directory / "engine_log.c"
-    library = directory / "libxtb_engine_log.so"
-    source.write_text(LOGGER_C)
-    subprocess.run(
-        [need("gcc"), "-O2", "-shared", "-fPIC", "-o", str(library), str(source), "-ldl"],
-        check=True,
-    )
-    return library
-
-
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -219,8 +140,11 @@ def base_env_a(libdir: Path, revision: str) -> dict[str, str]:
     ):
         env[name] = "1"
     env["H2H_POLISH_ON_IMPROVE"] = "1"
+    env["H2O_HIT_EV"] = f"{THRESHOLD_EV:.17g}"
     env["ANNEAL_SOURCE_COMMIT"] = revision
     env["ANNEAL_SOURCE_TREE"] = ENGINE_TREE
+    env.pop("H2O_TARGET_EV", None)
+    env.pop("H2H_START_ONLY", None)
     previous = env.get("LD_LIBRARY_PATH", "")
     env["LD_LIBRARY_PATH"] = str(libdir) if not previous else str(libdir) + os.pathsep + previous
     return env
@@ -265,14 +189,14 @@ def parse_time(path: Path) -> tuple[float, float]:
 
 def finished_run(out: Path, budget: int) -> bool:
     run_txt = out / "run.txt"
-    calls = out / "calls.txt"
     timing = out / "time.txt"
-    if not (run_txt.is_file() and calls.is_file() and timing.is_file()):
+    if not (run_txt.is_file() and timing.is_file()):
         return False
     fields = read_fields_a(run_txt)
     return (
         fields.get("polish_on_improve") == "true"
         and fields.get("objective_best_eV") is not None
+        and fields.get("first_hit_call") is not None
         and fields.get("energy_calls") == str(budget)
         and fields.get("config_sha256") == EXPECTED_CONFIG
     )
@@ -281,7 +205,6 @@ def finished_run(out: Path, budget: int) -> bool:
 def run_seed(
     binary: Path,
     engine: Path,
-    logger: Path,
     libdir: Path,
     seed: int,
     budget: int,
@@ -290,9 +213,7 @@ def run_seed(
 ) -> None:
     out.mkdir(parents=True, exist_ok=True)
     env = base_env_a(libdir, ENGINE_COMMIT)
-    env["RGPOT_XTB_ENGINE"] = str(logger)
-    env["XTB_ENGINE_LOG_REAL"] = str(engine)
-    env["XTB_ENGINE_LOG_OUT"] = str(out / "calls.txt")
+    env["RGPOT_XTB_ENGINE"] = str(engine)
     command = [
         need("taskset"),
         "-c",
@@ -329,10 +250,16 @@ def row_from(
     best_eV = float(fields["objective_best_eV"])
     best_Eh = best_eV / HARTREE_EV
     charged = int(fields["energy_calls"])
-    lines = (out / "calls.txt").read_text().splitlines()
-    if len(lines) < charged:
-        raise SystemExit(f"seed {seed} logged {len(lines)} force calls, charged {charged}")
-    hit_at, _scored = scan_calls(lines[:charged], THRESHOLD_EV)
+    first = fields.get("first_hit_call")
+    if first is None:
+        raise SystemExit(
+            f"seed {seed} run.txt has no first_hit_call; account.patch applies to "
+            "examples/gfn2_mol_h2h.rs at b35601b7"
+        )
+    hit_at = None if first == "none" else int(first)
+    best_eV_hit = energy_hits(best_eV, THRESHOLD_EV, 0.0)
+    if best_eV_hit and hit_at is None:
+        raise SystemExit(f"seed {seed} final energy hits and first_hit_call is none")
     wall_s, cpu_s = parse_time(out / "time.txt")
     session = {
         "seed": seed,
@@ -349,7 +276,7 @@ def row_from(
         "host_id_hash": host,
         "core": core,
         "cpu_model": model,
-        "engine_calls": len(lines),
+        "engine_calls": int(fields["objective_calls"]) if fields.get("objective_calls") else charged,
         "intact": fields.get("best_intact"),
         "config_sha256": fields["config_sha256"],
         "polish_on_improve": fields["polish_on_improve"],
@@ -375,7 +302,7 @@ def row_from(
 
 def write_tables(rows: list[dict[str, str]], sessions: list[dict], rows_path: Path, sessions_path: Path) -> None:
     with rows_path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS)
+        writer = csv.DictWriter(handle, fieldnames=ROW_FIELDS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     with sessions_path.open("w") as handle:
@@ -391,7 +318,6 @@ def campaign_a(args: argparse.Namespace) -> None:
     runs = args.runs.resolve()
     runs.mkdir(parents=True, exist_ok=True)
     preflight(binary, libdir, runs, args.core)
-    logger = compile_logger(runs)
     host = host_id_hash()
     model = cpu_model_a()
     rows = []
@@ -400,7 +326,7 @@ def campaign_a(args: argparse.Namespace) -> None:
         out = runs / str(seed)
         if not finished_run(out, args.budget):
             print(f"SEED {seed} start budget {args.budget}", flush=True)
-            run_seed(binary, engine, logger, libdir, seed, args.budget, out, args.core)
+            run_seed(binary, engine, libdir, seed, args.budget, out, args.core)
         row = row_from(out, seed, args.budget, args.core, host, model, engine)
         rows.append(row)
         sessions.append(json.loads((out / "session.json").read_text()))
@@ -591,7 +517,7 @@ def session_record(row: dict[str, str], fields: dict[str, str]) -> dict[str, obj
 
 def write_outputs(rows: list[dict[str, str]], sessions: list[dict[str, object]], rows_path: Path, sessions_path: Path) -> None:
     with rows_path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=COLUMNS)
+        writer = csv.DictWriter(handle, fieldnames=COLUMNS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
     with sessions_path.open("w") as handle:

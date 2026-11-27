@@ -5,16 +5,44 @@
 Shard A is seeds 2000-2005. Shard B is seeds 2006-2011.
 The budget is 151738 calls. A miss is scored as 151739.
 
+## calls_to_first_hit
+
+`calls_to_first_hit` is the first finite objective evaluation at or below the harness threshold, or 151739.
+The threshold is reference `-40.681336013150` Eh plus `1e-6` Eh, times `27.211386245988`.
+Polish evaluations count. The comparison is `energy <= threshold`.
+The index is `first_hit_call` from `account.patch` applied to `examples/gfn2_mol_h2h.rs` at `b35601b7`, not the kit base.
+`run.py` leaves `H2O_TARGET_EV` unset, so `Ledger::stop_below` (`src/methods/cluster_hopping.rs:797` at that commit) is not installed.
+That function only stores a threshold. The quench watch (`src/methods/cluster_search.rs:1043`) and the polish stop (`src/methods/cluster_search.rs:1982`) read it after an evaluation, so the crossing index is the same whether or not the stop is armed. The next evaluation can differ.
+
+Seeds 2001, 2005, and 2009 were rerun on this definition with `H2H_POLISH_ON_IMPROVE=1`, config `985afef7`, and `H2O_HIT_EV` set to the threshold.
+With `H2O_TARGET_EV` set, `first_hit_call` was 627, 28376, and 20714, and charged calls were 1276, 30338, and 22666.
+Without `H2O_TARGET_EV`, the per-call log matched through that index and the next line differed (628, 28377, 20715). Seed 2005 then ran the full budget and recorded `first_hit_call` 28376.
+Those three indices are the `calls_to_hit` values in `bench/octamer-matched/h2o8/poi/results.csv`.
+
+The previous column is not that crossing. On the reproduced seed 2005 trace, call 5432 is 0.576 eV above the threshold and an earlier call is already lower. On seed 2009, call 5531 is 1.012 eV above the threshold and call 3170 is already lower. Seed 2001's previous 629 is two evaluations after the crossing.
+Seeds other than 2001, 2005, and 2009 were not rerun. Their column is the octamer-matched `calls_to_hit` for the same definition.
+
+seed octamer-matched calls_to_hit calls_to_first_hit
+2000 5874 5874
+2001 627 627
+2002 15513 15513
+2003 6132 6132
+2004 4070 4070
+2005 28376 28376
+2006 6254 6254
+2007 6258 6258
+2008 4388 4388
+2009 20714 20714
+2010 8009 8009
+2011 3951 3951
+
 ## Harness
 
 Shard A used `python3 bench/pareto-h2o8/run.py --shard A --binary BINARY --engine ENGINE --libdir LIBDIR`.
-That path compiles the force-call logger, sets `H2H_POLISH_ON_IMPROVE=1`, and does not set `H2O_HIT_EV`.
-`calls_to_first_hit` is the first logged finite force call at or below the harness threshold, or 151739.
-The harness threshold is reference `-40.681336013150` Eh plus `1e-6` Eh.
-The host label in `rows-A.csv` column `host_id_hash` is `vm-A`.
-
 Shard B used `python3 bench/pareto-h2o8/run.py --shard B --binary BINARY --xtb-engine ENGINE --xtb-lib LIBDIR`.
-That path runs the binary with `account.patch` applied, sets `H2H_POLISH_ON_IMPROVE=1` and `H2O_HIT_EV`, and reads `first_hit_call`.
+Both set `H2H_POLISH_ON_IMPROVE=1` and `H2O_HIT_EV`, leave `H2O_TARGET_EV` unset, and read `first_hit_call`.
+The binary includes `account.patch` on `examples/gfn2_mol_h2h.rs` at `b35601b7`.
+The host label in `rows-A.csv` column `host_id_hash` is `vm-A`.
 The host label in `rows-B.csv` column `host_id` is `vm0`.
 
 `abba.py` calls the shard B anneal functions and `crest_run.py`.
@@ -27,18 +55,11 @@ The host column is `vm0`.
 Anneal wall_s sum 15639.847620, median 1301.8362105.
 CREST wall_s sum 11695.050000, median 945.870000.
 
-## rows-B and the stored stop-at-hit POI indices
+## CREST geometry
 
-`calls_to_first_hit` in `rows-B.csv` and `calls_to_hit` in `bench/octamer-matched/h2o8/poi/results.csv`:
-
-seed 2006 rows-B 6379 POI 6254 best_Eh -40.681336013361 -40.681336013361
-seed 2007 rows-B 7822 POI 6258 best_Eh -40.681336013361 -40.681336013361
-seed 2008 rows-B 2925 POI 4388 best_Eh -40.681336013361 -40.681336013361
-seed 2009 rows-B 5531 POI 20714 best_Eh -40.681336013361 -40.681336013361
-seed 2010 rows-B 4451 POI 8009 best_Eh -40.681336013361 -40.681336013361
-seed 2011 rows-B 3489 POI 3951 best_Eh -40.681336013361 -40.681336013361
-
-The rows-B first-hit indices differ from the stored stop-at-hit POI indices. The final energies match.
+`crest_run.py` compares seed 17000's `total_calls` with `RECORDED_17000` 151538, the value in `bench/h2o8-poi-vs-crest/inputs.csv`.
+An optimization cycle at or below the threshold with no optimized geometry is not a hit. The event records `geometry_missing` when such a cycle was skipped.
+No committed row was scored by that function. `inputs.csv` records source commits `42e708289` and `7ad8eab67`. `rows-abba.csv` has no call column.
 
 ## Methods
 
@@ -49,15 +70,15 @@ CREST first-hit calls are the 12 rows with `source` crest in `bench/h2o8-poi-vs-
 CREST seeds are 17000-17011. Those seeds differ from 2000-2011. The arms are not paired by seed.
 The CREST call column is `first_hit_call`.
 A hit is `best_Eh` within `1e-6` Eh of `-40.681336013361`. A miss in the call median is scored as budget+1.
-Anneal hits 12. Median 4435.0.
+Anneal hits 12. Median 6193.0.
 CREST hits 7. Median 141621.5.
 Two-sided Fisher exact table [[12, 0], [7, 5]]. p_value 0.037267080745341616. odds_ratio_infinite true.
 Two-sided exact Mann-Whitney U_anneal 0.0. p_value 7.39602301050679e-07.
-Median ratio anneal over CREST 0.03131586658805337. Bootstrap 95% CI 0.022996687923278462 to 0.05766491602153667, 10000 draws, numpy default_rng seed 20261123.
+Median ratio anneal over CREST 0.04372923602701567. Bootstrap 95% CI 0.028926273599831243 to 0.09657737850843338, 10000 draws, numpy default_rng seed 20261123.
 
 ## Seed stability
 
 Shard A and shard B are the same anneal method on different seeds.
 This block is a seed-stability check.
-Shard A hits 6. Median 4368.5.
-Shard B hits 6. Median 4991.0.
+Shard A hits 6. Median 6003.0.
+Shard B hits 6. Median 6256.0.

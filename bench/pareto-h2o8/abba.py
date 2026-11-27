@@ -120,7 +120,7 @@ def crest_once(binary: Path, crest: Path, xtb: Path, xtb_lib: Path, crest_lib: P
 
 def write_table(rows: list[dict[str, str]], path: Path) -> None:
     with path.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=COLUMNS)
+        writer = csv.DictWriter(handle, fieldnames=COLUMNS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 

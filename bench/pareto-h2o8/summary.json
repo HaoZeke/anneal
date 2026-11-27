@@ -3,7 +3,7 @@
     {
       "arm": "anneal",
       "hits": 12,
-      "median": 4435.0,
+      "median": 6193.0,
       "misses": 0,
       "n": 12,
       "budget": 151738,
@@ -23,18 +23,18 @@
         2011
       ],
       "calls": [
-        4419,
-        629,
-        4318,
-        9271,
-        3220,
-        5432,
-        6379,
-        7822,
-        2925,
-        5531,
-        4451,
-        3489
+        5874,
+        627,
+        15513,
+        6132,
+        4070,
+        28376,
+        6254,
+        6258,
+        4388,
+        20714,
+        8009,
+        3951
       ],
       "source": "bench/pareto-h2o8/rows.csv",
       "call_column": "calls_to_first_hit",
@@ -107,10 +107,10 @@
     "u_anneal": 0.0
   },
   "median_ratio_anneal_over_crest": {
-    "ratio": 0.03131586658805337,
+    "ratio": 0.04372923602701567,
     "ci95": [
-      0.022996687923278462,
-      0.05766491602153667
+      0.028926273599831243,
+      0.09657737850843338
     ],
     "percentile": "numpy.percentile linear",
     "resamples": 10000,
@@ -125,7 +125,7 @@
     "A": {
       "arm": "A",
       "hits": 6,
-      "median": 4368.5,
+      "median": 6003.0,
       "misses": 0,
       "n": 6,
       "budget": 151738,
@@ -139,12 +139,12 @@
         2005
       ],
       "calls": [
-        4419,
-        629,
-        4318,
-        9271,
-        3220,
-        5432
+        5874,
+        627,
+        15513,
+        6132,
+        4070,
+        28376
       ],
       "target_Eh": -40.681336013361,
       "tolerance_Eh": 1e-06
@@ -152,7 +152,7 @@
     "B": {
       "arm": "B",
       "hits": 6,
-      "median": 4991.0,
+      "median": 6256.0,
       "misses": 0,
       "n": 6,
       "budget": 151738,
@@ -166,12 +166,12 @@
         2011
       ],
       "calls": [
-        6379,
-        7822,
-        2925,
-        5531,
-        4451,
-        3489
+        6254,
+        6258,
+        4388,
+        20714,
+        8009,
+        3951
       ],
       "target_Eh": -40.681336013361,
       "tolerance_Eh": 1e-06
@@ -212,48 +212,48 @@
     "seeds": [
       {
         "seed": 2006,
-        "rows_b_calls_to_first_hit": 6379,
+        "rows_b_calls_to_first_hit": 6254,
         "poi_calls_to_hit": 6254,
         "rows_b_best_Eh": "-40.681336013361",
         "poi_best_Eh": "-40.681336013361"
       },
       {
         "seed": 2007,
-        "rows_b_calls_to_first_hit": 7822,
+        "rows_b_calls_to_first_hit": 6258,
         "poi_calls_to_hit": 6258,
         "rows_b_best_Eh": "-40.681336013361",
         "poi_best_Eh": "-40.681336013361"
       },
       {
         "seed": 2008,
-        "rows_b_calls_to_first_hit": 2925,
+        "rows_b_calls_to_first_hit": 4388,
         "poi_calls_to_hit": 4388,
         "rows_b_best_Eh": "-40.681336013361",
         "poi_best_Eh": "-40.681336013361"
       },
       {
         "seed": 2009,
-        "rows_b_calls_to_first_hit": 5531,
+        "rows_b_calls_to_first_hit": 20714,
         "poi_calls_to_hit": 20714,
         "rows_b_best_Eh": "-40.681336013361",
         "poi_best_Eh": "-40.681336013361"
       },
       {
         "seed": 2010,
-        "rows_b_calls_to_first_hit": 4451,
+        "rows_b_calls_to_first_hit": 8009,
         "poi_calls_to_hit": 8009,
         "rows_b_best_Eh": "-40.681336013361",
         "poi_best_Eh": "-40.681336013361"
       },
       {
         "seed": 2011,
-        "rows_b_calls_to_first_hit": 3489,
+        "rows_b_calls_to_first_hit": 3951,
         "poi_calls_to_hit": 3951,
         "rows_b_best_Eh": "-40.681336013361",
         "poi_best_Eh": "-40.681336013361"
       }
     ],
-    "index_pairs_equal": false,
+    "index_pairs_equal": true,
     "energy_strings_equal": true
   }
 }

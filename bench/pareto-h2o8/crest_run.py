@@ -27,7 +27,7 @@ TOLERANCE_EH = 1e-6
 THRESHOLD_EH = REFERENCE_EH + TOLERANCE_EH
 BUDGET = 151738
 MISS = BUDGET + 1
-RECORDED_17000 = 127141
+RECORDED_17000 = 151538
 HEAVY = {"O": 2}
 CUTOFF_A = 1.2
 
@@ -144,14 +144,23 @@ def gfn2_args(args: list[str]) -> bool:
     return "gfn0" not in text and "gfnff" not in text and "gfn-ff" not in text
 
 
-def first_intact(energies: list[float], frames: list, threshold: float) -> int:
+def first_intact(energies: list[float], frames: list, threshold: float) -> tuple[int, bool]:
+    """First 1-based cycle at or below `threshold` whose geometry is intact.
+
+    A cycle with no optimized geometry is not a hit. The bool is set when any
+    such cycle was skipped.
+    """
+    missing = False
     for index, energy in enumerate(energies, start=1):
         if energy > threshold:
             continue
         atoms = frames[index - 1] if index - 1 < len(frames) else None
-        if atoms is None or intact(atoms):
-            return index
-    return 0
+        if atoms is None:
+            missing = True
+            continue
+        if intact(atoms):
+            return index, missing
+    return 0, missing
 
 
 def kill_crest() -> None:
@@ -247,7 +256,12 @@ def wrap_main() -> None:
         event["n"] = len(kept)
         event["energies"] = kept
         event["min_e"] = min(kept) if kept else None
-        event["first_local"] = first_intact(kept, kept_geom, threshold) if gfn2 else 0
+        if gfn2:
+            local, missing_geometry = first_intact(kept, kept_geom, threshold)
+        else:
+            local, missing_geometry = 0, False
+        event["first_local"] = local
+        event["geometry_missing"] = missing_geometry
         final = colons[-1] if stars and colons else None
         event["final_e"] = final
         event["final_intact"] = False
