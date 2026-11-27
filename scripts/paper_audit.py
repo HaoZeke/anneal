@@ -8217,6 +8217,38 @@ def _first_rewritten_line(old_lines: list[str], cur_lines: list[str], allowed_mi
     return None
 
 
+def _unrestored_removals(history: list[str]) -> list[tuple[str | None, str]]:
+    """Patch deletions whose text is not added again in the same range.
+
+    ``git log -p`` lists every intermediate edit. A line deleted and later
+    added back is still in the record. A deletion with no matching addition
+    is a removed line. Pairing stays inside one file. Lines with no diff
+    header pair only with each other. Each item is the file and the minus line.
+    """
+    added: dict[str | None, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    removed: list[tuple[str | None, str]] = []
+    current: str | None = None
+    for line in history:
+        if line.startswith("diff --git "):
+            parts = line.split()
+            current = parts[2][2:] if len(parts) >= 3 and parts[2].startswith("a/") else None
+            continue
+        if line.startswith(("+++", "---", "@@", "index ", "new file", "deleted file")):
+            continue
+        if line.startswith("+"):
+            added[current][line[1:]] += 1
+        elif line.startswith("-"):
+            removed.append((current, line))
+    kept: list[tuple[str | None, str]] = []
+    for current, line in removed:
+        payload = line[1:]
+        if added[current][payload]:
+            added[current][payload] -= 1
+            continue
+        kept.append((current, line))
+    return kept
+
+
 def append_only_rows(audit: Audit) -> None:
     """Every record preserves baseline lines and the series never removes one."""
     paths = set(git("ls-files", "**/rows.csv", "rows.csv").stdout.splitlines())
@@ -8289,8 +8321,9 @@ def append_only_rows(audit: Audit) -> None:
             "log", "-p", "--no-renames", "--format=", f"{base}..HEAD", "--",
             *history_paths,
         ).stdout.splitlines() if history_paths else []
-        # A summary whose hit counts and median walls still match may drop or
-        # blank a wall-ratio column. Any other removed line still fails.
+        # A line added back in the same range is still in the record. A summary
+        # whose hit counts and median walls still match may drop or blank a
+        # wall-ratio column. Any other removed line still fails.
         ratio_cores: dict[str, tuple[list[str], set[str]]] = {}
         for path in history_paths:
             if not (ROOT / path).is_file():
@@ -8306,23 +8339,17 @@ def append_only_rows(audit: Audit) -> None:
             header = next(csv.reader([shown.stdout.splitlines()[0]]))
             ratio_cores[path] = (header, set(_kept_summary_fields(current)))
         removed = []
-        diff_path = ""
-        for line in history:
-            match = re.match(r"diff --git a/(\S+) b/", line)
-            if match:
-                diff_path = match.group(1)
-                continue
-            if line.startswith("-") and not line.startswith("---"):
-                held = ratio_cores.get(diff_path)
-                if held:
-                    header, cores = held
-                    parsed = next(csv.reader([line[1:]]))
-                    if len(parsed) == len(header):
-                        keep = [index for index, name in enumerate(header) if name not in _RATIO_FIELDS]
-                        core = ",".join(parsed[index] for index in keep)
-                        if core in cores:
-                            continue
-                removed.append(line)
+        for diff_path, line in _unrestored_removals(history):
+            held = ratio_cores.get(diff_path or "")
+            if held:
+                header, cores = held
+                parsed = next(csv.reader([line[1:]]))
+                if len(parsed) == len(header):
+                    keep = [index for index, name in enumerate(header) if name not in _RATIO_FIELDS]
+                    core = ",".join(parsed[index] for index in keep)
+                    if core in cores:
+                        continue
+            removed.append(line)
         audit.record(
             not removed,
             "record-file history",
@@ -8440,6 +8467,11 @@ _NUMBER_CELL = re.compile(
 )
 _SHA_CELL = re.compile(f"^{revision_reach.commit_id_pattern(7)}$")
 _SHA_TOKEN = re.compile(f"(?<![0-9A-Za-z])({revision_reach.commit_id_pattern(7)})(?![0-9A-Za-z])")
+# A scientific-notation measurement, such as 2.543415e-06, is not a commit id.
+# The match must be a whole token. A hex SHA can contain "e" between digits.
+_SCIENTIFIC_NUMBER = re.compile(
+    r"(?<![0-9A-Za-z])[+-]?(?:\d+\.\d*|\.\d+|\d+)[eE][+-]?\d+(?![0-9A-Za-z])"
+)
 _REVISION_FIELDS = ("code_revision", "harness_revision", "harness_commit", "head", "anneal_head", "anneal_revision",
                     "release_revision")
 EXTERNAL_FORM_SOURCES = (
@@ -8716,11 +8748,17 @@ def is_revision_token(token: str) -> bool:
     return bool(re.search(r"\d", token)) or commit_of(token) is not None
 
 
+def _mask_spans(pattern: re.Pattern[str], text: str) -> str:
+    """Replace each match with spaces so a later scan keeps the surrounding indexes."""
+    return pattern.sub(lambda match: " " * len(match.group(0)), text)
+
+
 def _revision_tokens(cell: str) -> list[str]:
     """Git revisions and URL@hex forms anywhere in a cell. A pure number is a budget, not a commit."""
     text = cell or ""
     found = [match.group(0) for match in _FORM_ATTEMPT.finditer(text)]
-    found += [t for t in _SHA_TOKEN.findall(_FORM_ATTEMPT.sub(" ", text)) if is_revision_token(t)]
+    masked = _mask_spans(_SCIENTIFIC_NUMBER, _mask_spans(_FORM_ATTEMPT, text))
+    found += [t for t in _SHA_TOKEN.findall(masked) if is_revision_token(t)]
     return list(dict.fromkeys(found))
 
 
@@ -8948,7 +8986,7 @@ def _printed_readme_numbers(audit: Audit, forms: list[tuple[str, str]]) -> list[
                     forms.append((f"{rel}:{line_no}", match.group(0)))
             carried: list[str] = []
             for line_no, sentence in _paragraph_sentences(paragraph):
-                named = [t for t in _SHA_TOKEN.findall(sentence) if is_revision_token(t)]
+                named = [t for t in _SHA_TOKEN.findall(_mask_spans(_SCIENTIFIC_NUMBER, sentence)) if is_revision_token(t)]
                 if named:
                     carried = list(dict.fromkeys(t for t in named if not harness_reachable(t)))
                 if not carried:

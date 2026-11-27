@@ -1,0 +1,16 @@
+[workspace]
+
+[package]
+name = "gfn2-fd-gate"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "MIT"
+
+[dependencies]
+anneal-core = { path = "../../..", features = ["rgpot-ex"] }
+eindir-core = { version = "=0.6.0", features = ["capi"] }
+ndarray = "=0.17.2"
+rgpot-core = { version = "=3.5.1", default-features = false }
+libloading = "=0.8.9"
+serde_json = "1"

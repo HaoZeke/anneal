@@ -1,0 +1,87 @@
+{
+  "arms": {
+    "A": {
+      "binary_sha256": "32b35f00bcc8f30d0aee2939c20c1a9899aa45093fa6f93b753037a7ce127ed5",
+      "binary_size_bytes": 4942472,
+      "cap_twist_env": "unset",
+      "commit_sha": "16ef5cb869f68c46e71b1eae2cbf7cee9321d8d4",
+      "pad_kb": 0,
+      "tree_sha": "0e08e2e2086180ca3b186f977191f6c1a2d12cd1"
+    },
+    "A2": {
+      "binary_sha256": "32b35f00bcc8f30d0aee2939c20c1a9899aa45093fa6f93b753037a7ce127ed5",
+      "binary_size_bytes": 4942472,
+      "cap_twist_env": "unset",
+      "commit_sha": "16ef5cb869f68c46e71b1eae2cbf7cee9321d8d4",
+      "pad_kb": 0,
+      "tree_sha": "0e08e2e2086180ca3b186f977191f6c1a2d12cd1"
+    },
+    "B": {
+      "binary_sha256": "32b35f00bcc8f30d0aee2939c20c1a9899aa45093fa6f93b753037a7ce127ed5",
+      "binary_size_bytes": 4942472,
+      "cap_twist_env": "1",
+      "commit_sha": "16ef5cb869f68c46e71b1eae2cbf7cee9321d8d4",
+      "pad_kb": 0,
+      "tree_sha": "0e08e2e2086180ca3b186f977191f6c1a2d12cd1"
+    },
+    "D": {
+      "binary_sha256": "946cb0cdae3118ebf6f1e713182d1ae96ff6c5ba9aa416e7755081382c5fb986",
+      "binary_size_bytes": 4844720,
+      "cap_twist_env": "unset",
+      "commit_sha": "9837358ae1027067ff654fac8b48969020853452",
+      "pad_kb": 0,
+      "tree_sha": "15032ef401fb681e230d27c7b315d89f7ac53e4e"
+    },
+    "P1": {
+      "binary_sha256": "c815cc912fb8b8961677f5840d33b6d29fca2b9ab80929b7044bcce21746f9e5",
+      "binary_size_bytes": 4946632,
+      "cap_twist_env": "unset",
+      "commit_sha": "16ef5cb869f68c46e71b1eae2cbf7cee9321d8d4",
+      "pad_kb": 4,
+      "tree_sha": "0e08e2e2086180ca3b186f977191f6c1a2d12cd1"
+    },
+    "P2": {
+      "binary_sha256": "f3b651c17c87190bc3b97dc6f1eeb365cec372608ef8ff3ff9243d74a62341d7",
+      "binary_size_bytes": 4958952,
+      "cap_twist_env": "unset",
+      "commit_sha": "16ef5cb869f68c46e71b1eae2cbf7cee9321d8d4",
+      "pad_kb": 16,
+      "tree_sha": "0e08e2e2086180ca3b186f977191f6c1a2d12cd1"
+    },
+    "P3": {
+      "binary_sha256": "8c96d91c9ea70e2e62b89e7286334771b4dfad7aab5a3fe3d3f7139206ed1b04",
+      "binary_size_bytes": 5008104,
+      "cap_twist_env": "unset",
+      "commit_sha": "16ef5cb869f68c46e71b1eae2cbf7cee9321d8d4",
+      "pad_kb": 64,
+      "tree_sha": "0e08e2e2086180ca3b186f977191f6c1a2d12cd1"
+    },
+    "P4": {
+      "binary_sha256": "760db475412680ae652c084c5ac32e1f95afb2f885307bc0fb30b6d262c02bcf",
+      "binary_size_bytes": 5204680,
+      "cap_twist_env": "unset",
+      "commit_sha": "16ef5cb869f68c46e71b1eae2cbf7cee9321d8d4",
+      "pad_kb": 256,
+      "tree_sha": "0e08e2e2086180ca3b186f977191f6c1a2d12cd1"
+    },
+    "P5": {
+      "binary_sha256": "62661f72b34662f12eb8a36ca6aa5ee60367d55a25ec05f65045b7e0aadae6a4",
+      "binary_size_bytes": 5991120,
+      "cap_twist_env": "unset",
+      "commit_sha": "16ef5cb869f68c46e71b1eae2cbf7cee9321d8d4",
+      "pad_kb": 1024,
+      "tree_sha": "0e08e2e2086180ca3b186f977191f6c1a2d12cd1"
+    },
+    "PA": {
+      "binary_sha256": "32b35f00bcc8f30d0aee2939c20c1a9899aa45093fa6f93b753037a7ce127ed5",
+      "binary_size_bytes": 4942472,
+      "cap_twist_env": "unset",
+      "commit_sha": "16ef5cb869f68c46e71b1eae2cbf7cee9321d8d4",
+      "pad_kb": 0,
+      "tree_sha": "0e08e2e2086180ca3b186f977191f6c1a2d12cd1"
+    }
+  },
+  "cargo_version": "cargo 1.100.0 (3acc79c0c 2026-11-05)",
+  "machine_hash": "037fa5a91141da02",
+  "rustc_version": "rustc 1.100.0 (0ef1bc386 2026-11-09)"
+}

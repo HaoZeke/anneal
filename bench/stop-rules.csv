@@ -70,3 +70,8 @@ openconf-h2h,develop,matched-call-count
 openconf-h2h,openconf,matched-call-count
 b6-timing-gate,A,hit-or-budget
 b6-timing-gate,B,hit-or-budget
+branch-gate,branch,hit-or-budget
+branch-gate,develop,hit-or-budget
+bindings-parity-gate,A,hit-or-budget
+bindings-parity-gate,A',hit-or-budget
+bindings-parity-gate,B,hit-or-budget
