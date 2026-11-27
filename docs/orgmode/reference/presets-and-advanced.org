@@ -300,6 +300,9 @@ These stay off there, and off on every stock preset.
   The proposal step stays put.
 - =branch_on_stall= :: spends a stalled stretch on fresh random descents.
   Off, the chain is unchanged.
+- =align_directed_stall_source= :: starts a call-clock leave from the
+  recorded best instead of the live walker.
+  Off, the leave starts from the live state.
 - =call_floor= :: a pair at or below this distance is opened before a
   relaxation, and a zero-step read inside it is refused uncharged.
   Unset on every stock preset.
