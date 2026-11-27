@@ -13,7 +13,7 @@ project(
     # [[[cog
     # cog.outl("    version: '%s'," % anneal_version.package_version())
     # ]]]
-    version: '0.12.0',
+    version: '0.13.0',
     # [[[end]]]
     meson_version: '>=1.8.0',
     default_options: [

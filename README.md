@@ -6,7 +6,7 @@
 v = anneal_version.package_version()
 cog.outl("[![Version %s](https://img.shields.io/badge/version-%s-2ea44f)](https://github.com/HaoZeke/anneal/releases/tag/v%s)" % (v, v, v))
 ]]] -->
-[![Version 0.12.0](https://img.shields.io/badge/version-0.12.0-2ea44f)](https://github.com/HaoZeke/anneal/releases/tag/v0.12.0)
+[![Version 0.13.0](https://img.shields.io/badge/version-0.13.0-2ea44f)](https://github.com/HaoZeke/anneal/releases/tag/v0.13.0)
 <!-- [[[end]]] -->
 
 # Anneal

@@ -22,7 +22,7 @@ cog.out(json.dumps(doc, indent=2) + "\n")
   "description": "If you use anneal, please cite the paper and the software.",
   "upload_type": "software",
   "license": "MIT",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "creators": [
     {
       "name": "Goswami, Rohit",

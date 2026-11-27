@@ -355,7 +355,7 @@ def test_tex_prose_checks_ignore_comments():
 
 
 def workspace_version():
-    """The crate version, read the same way ``unauditable`` reads it."""
+    """The crate version in the workspace manifest."""
     return re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
 
 
@@ -368,6 +368,10 @@ def test_missing_release_tag_and_referenced_remote_stop_the_audit(monkeypatch):
     }
 
     def without_required_refs(*args, stdin=None):
+        if args == ("tag", "--list", "v*"):
+            return subprocess.CompletedProcess(["git", *args], 0, "", "")
+        if args == ("ls-remote", "--tags", "origin"):
+            return subprocess.CompletedProcess(["git", *args], 0, "", "")
         if args[:3] == ("show-ref", "--verify", "--quiet") and args[3] in missing:
             return subprocess.CompletedProcess(["git", *args], 1, "", "")
         if args[:4] == ("ls-remote", "--exit-code", "--tags", "origin"):
@@ -382,18 +386,87 @@ def test_missing_release_tag_and_referenced_remote_stop_the_audit(monkeypatch):
 
 def test_an_advertised_release_tag_need_not_be_fetched(monkeypatch):
     real_git = audit_mod.git
-    tag = f"refs/tags/v{workspace_version()}"
+    tag = "v0.12.0"
 
     def without_local_tag(*args, stdin=None):
-        if args == ("show-ref", "--verify", "--quiet", tag):
+        if args == ("tag", "--list", "v*"):
+            return subprocess.CompletedProcess(["git", *args], 0, "", "")
+        if args == ("ls-remote", "--tags", "origin"):
+            return subprocess.CompletedProcess(["git", *args], 0, f"abc\trefs/tags/{tag}\n")
+        if args == ("show-ref", "--verify", "--quiet", f"refs/tags/{tag}"):
             return subprocess.CompletedProcess(["git", *args], 1, "", "")
-        if args == ("ls-remote", "--exit-code", "--tags", "origin", tag):
-            return subprocess.CompletedProcess(["git", *args], 0, "tag\\n", "")
+        if args == ("ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}"):
+            return subprocess.CompletedProcess(["git", *args], 0, "tag\n", "")
         return real_git(*args, stdin=stdin)
 
     monkeypatch.setattr(audit_mod, "git", without_local_tag)
-    assert audit_mod.release_tag_available(f"v{workspace_version()}")
+    assert audit_mod.release_tag_available(tag)
+    assert audit_mod.cited_release_tag() == tag
     assert not [p for p in audit_mod.unauditable() if "release tag" in p]
+
+
+def test_workspace_version_ahead_of_the_newest_tag_stays_auditable(monkeypatch):
+    """A crate version that has no tag yet is not the manuscript's released tag."""
+    real_git = audit_mod.git
+
+    def listed(*args, stdin=None):
+        if args == ("tag", "--list", "v*"):
+            return subprocess.CompletedProcess(["git", *args], 0, "v0.9.0\nv0.10.0\n", "")
+        if args == ("ls-remote", "--tags", "origin"):
+            return subprocess.CompletedProcess(["git", *args], 0, "", "")
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", listed)
+    assert audit_mod.cited_release_tag() == "v0.10.0"
+    assert audit_mod.cited_release_tag() != f"v{workspace_version()}"
+    assert not [p for p in audit_mod.unauditable() if "release tag" in p]
+
+
+def test_a_tag_on_a_descendant_is_not_the_cited_release(monkeypatch):
+    """Tagging a descendant of the submitted revision does not move the citation.
+
+    The manuscript says that revision postdates the newest released tag.
+    v0.13.0 cut on HEAD does not predate the submitted revision, so the
+    citation stays on v0.12.0 before and after that tag exists.
+    """
+    real_git = audit_mod.git
+    head = real_git("rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
+    previous = real_git("rev-parse", "--verify", "v0.12.0^{commit}").stdout.strip()
+
+    def listed(*args, stdin=None):
+        if args == ("tag", "--list", "v*"):
+            return subprocess.CompletedProcess(["git", *args], 0, "", "")
+        if args == ("ls-remote", "--tags", "origin"):
+            text = (
+                f"{previous}\trefs/tags/v0.12.0\n"
+                f"{previous}\trefs/tags/v0.12.0^{{}}\n"
+                f"{head}\trefs/tags/v0.13.0\n"
+                f"{head}\trefs/tags/v0.13.0^{{}}\n"
+            )
+            return subprocess.CompletedProcess(["git", *args], 0, text, "")
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", listed)
+    assert head != real_git("rev-parse", "--verify", f"{audit_mod.SUBMITTED}^{{commit}}").stdout.strip()
+    assert audit_mod.cited_release_tag() == "v0.12.0"
+
+
+def test_a_local_tag_on_head_is_not_the_cited_release(monkeypatch):
+    """A local v0.13.0 tag on HEAD leaves the manuscript's tag at v0.12.0."""
+    real_git = audit_mod.git
+    head = real_git("rev-parse", "--verify", "HEAD^{commit}").stdout.strip()
+
+    def listed(*args, stdin=None):
+        if args == ("tag", "--list", "v*"):
+            return subprocess.CompletedProcess(["git", *args], 0, "v0.12.0\nv0.13.0\n", "")
+        if args == ("ls-remote", "--tags", "origin"):
+            return subprocess.CompletedProcess(["git", *args], 0, "", "")
+        if args == ("rev-parse", "--verify", "--quiet", "v0.13.0^{commit}"):
+            return subprocess.CompletedProcess(["git", *args], 0, head + "\n", "")
+        return real_git(*args, stdin=stdin)
+
+    monkeypatch.setattr(audit_mod, "git", listed)
+    assert audit_mod.cited_release_tag() == "v0.12.0"
 
 
 @pytest.mark.parametrize(
@@ -2322,6 +2395,23 @@ def test_a_water_rate_hit_flag_outside_its_printed_tolerance_is_rejected(path):
     audit.text_cache[path] = buffer.getvalue()
     audit_mod.tip4p_unscored(audit)
     assert [row for row in audit.drifts() if row[1] == path]
+
+
+def test_the_length_receipt_refresh_is_the_only_write_the_notes_allow():
+    path = "paper/jctc/REPRODUCE.md"
+    audit = audit_mod.Audit()
+    audit_mod.reproduction_records(audit)
+    assert not [
+        row for row in audit.drifts()
+        if row[1] == path and "never write tracked records" in row[2]
+    ]
+    audit = audit_mod.Audit()
+    audit.text_cache[path] = audit.text(path) + "\n    python3 other.py --write\n"
+    audit_mod.reproduction_records(audit)
+    assert [
+        row for row in audit.drifts()
+        if row[1] == path and "never write tracked records" in row[2]
+    ]
 
 
 @pytest.mark.parametrize("output", [

@@ -1,1 +1,0 @@
-Every script, bench runner, paper script and shell wrapper that checks a commit id calls ``scripts/revision_reach.py``: ``is_full_sha`` for a whole id, ``commit_id_pattern`` for text that may quote a prefix, and ``revision_reach.py full-sha`` for the shell. A test fails when a new forty-character hex check or machine id read appears elsewhere, with no exemption for a whole file.

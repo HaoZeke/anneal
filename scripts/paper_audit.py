@@ -5082,16 +5082,16 @@ def covalent_panels(audit: Audit) -> None:
 
 
 def release(audit: Audit) -> None:
-    version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
+    tag = cited_release_tag()
     audit.said(TEX, f"The described submitted revision postdates the newest released tag,\n"
-                    f"v{version}, and is available at\n"
+                    f"{tag}, and is available at\n"
                     "\\url{https://github.com/HaoZeke/anneal/commit/"
                     f"{SUBMITTED}}};\n"
                     "the Zenodo archive does not contain that revision.")
     audit.record(git("cat-file", "-e", f"{SUBMITTED}^{{commit}}").returncode == 0,
                  TEX, "the submitted revision in the archive statement exists", "present", "present")
-    tagged = release_tag_available(f"v{version}")
-    audit.record(tagged, TEX, "release tag exists", f"v{version}", "tagged" if tagged else "no tag")
+    tagged = release_tag_available(tag)
+    audit.record(tagged, TEX, "release tag exists", tag, "tagged" if tagged else "no tag")
 
 
 def lj_large(audit: Audit) -> None:
@@ -5247,13 +5247,20 @@ def reproduction_records(audit: Audit) -> None:
             or path.startswith("paper/jctc/logs/")
         )
     )
+    # pdf_length.py --write refreshes the tracked length receipt. Every
+    # other --write, and any command that names a tracked row file, is rejected.
+    other_lines = [
+        line for line in text.splitlines()
+        if not ("pdf_length.py" in line and "--write" in line)
+    ]
+    other_text = "\n".join(other_lines)
     audit.record(
-        not unsafe_outputs and "--write" not in text,
+        not unsafe_outputs and "--write" not in other_text,
         reproduce,
         "REPRODUCE commands never write tracked records",
         "fresh outputs only",
         " ".join(unsafe_outputs) or (
-            "--write" if "--write" in text else "fresh outputs only"
+            "--write" if "--write" in other_text else "fresh outputs only"
         ),
     )
     campaign_outputs = {
@@ -5713,6 +5720,101 @@ def release_tag_available(tag: str) -> bool:
     return git("ls-remote", "--exit-code", "--tags", "origin", f"refs/tags/{tag}").returncode == 0
 
 
+_RELEASE_TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)\Z")
+
+
+def _version_key(name: str) -> tuple[int, int, int]:
+    return tuple(int(part) for part in name[1:].split("."))
+
+
+def _commit_known(sha: str) -> bool:
+    return bool(sha) and git("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0
+
+
+def _scan_release_tags() -> tuple[list[str], dict[str, str]]:
+    """vX.Y.Z tags, oldest first, and the commits this clone can see.
+
+    A local tag resolves with rev-parse. An advertised tag uses the peeled
+    commit from ls-remote: the ``^{}`` line of an annotated tag, or the tag
+    line of a lightweight tag. A tag whose commit is not in this clone stays
+    in the name list and out of the commit map.
+    """
+    names: set[str] = set()
+    commits: dict[str, str] = {}
+    for name in git("tag", "--list", "v*").stdout.split():
+        if not _RELEASE_TAG.fullmatch(name):
+            continue
+        names.add(name)
+        peeled = git("rev-parse", "--verify", "--quiet", f"{name}^{{commit}}")
+        if peeled.returncode == 0 and peeled.stdout.strip():
+            commits[name] = peeled.stdout.strip()
+    advertised: dict[str, str] = {}
+    peeled_remote: dict[str, str] = {}
+    for line in git("ls-remote", "--tags", "origin").stdout.splitlines():
+        parts = line.split()
+        if len(parts) < 2 or not parts[1].startswith("refs/tags/"):
+            continue
+        sha = parts[0]
+        name = parts[1].removeprefix("refs/tags/")
+        if name.endswith("^{}"):
+            base = name[:-3]
+            if _RELEASE_TAG.fullmatch(base):
+                peeled_remote[base] = sha
+            continue
+        if _RELEASE_TAG.fullmatch(name):
+            advertised[name] = sha
+    for name, sha in advertised.items():
+        names.add(name)
+        commit = peeled_remote.get(name, sha)
+        if name not in commits and _commit_known(commit):
+            commits[name] = commit
+    for name, sha in peeled_remote.items():
+        names.add(name)
+        if name not in commits and _commit_known(sha):
+            commits[name] = sha
+    return sorted(names, key=_version_key), commits
+
+
+def release_tag_names() -> list[str]:
+    """vX.Y.Z tags present locally or advertised by origin, oldest first.
+
+    The workspace version can move ahead of the newest of these before
+    that version is tagged. The manuscript does not name that untagged
+    version. ``cited_release_tag`` names the tag the submitted revision
+    postdates, which stays put when a later tag is cut on a descendant.
+    """
+    names, _commits = _scan_release_tags()
+    return names
+
+
+def cited_release_tag() -> str:
+    """The newest release tag the submitted revision postdates.
+
+    The manuscript says that revision postdates the newest released tag.
+    A tag cut later, including the workspace version once it is tagged on
+    a descendant of the submitted revision, is not a tag that revision
+    postdates. Selecting it would report drift. When no seen tag is an
+    ancestor of the submitted revision, the newest tag name is used. When
+    no tag exists, the workspace version is used.
+    """
+    names, commits = _scan_release_tags()
+    if not names:
+        version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
+        return f"v{version}"
+    submitted = git("rev-parse", "--verify", "--quiet", f"{SUBMITTED}^{{commit}}").stdout.strip()
+    older = []
+    if submitted:
+        for name in names:
+            commit = commits.get(name)
+            if not commit or commit == submitted:
+                continue
+            if git("merge-base", "--is-ancestor", commit, submitted).returncode == 0:
+                older.append(name)
+    if older:
+        return older[-1]
+    return names[-1]
+
+
 def unauditable() -> list[str]:
     """Why this clone cannot answer the revision checks, if it cannot.
 
@@ -5726,8 +5828,7 @@ def unauditable() -> list[str]:
     if not git("for-each-ref", "--count=1", "refs/remotes").stdout.strip():
         problems.append("there are no remote-tracking refs; fetch the branches of origin "
                         "(git fetch origin '+refs/heads/*:refs/remotes/origin/*')")
-    version = re.search(r'^version = "([^"]+)"', (ROOT / "Cargo.toml").read_text(), re.M).group(1)
-    tag = f"v{version}"
+    tag = cited_release_tag()
     if not release_tag_available(tag):
         problems.append(f"the release tag {tag} is neither local nor advertised by origin")
     for branch in AUDIT_REMOTE_BRANCHES:
@@ -6257,7 +6358,7 @@ def manuscript_new(audit: Audit) -> None:
                     "knockouts, which ran the submitted search source plus default-off knockout\n"
                     "switches.")
     audit.said(TEX, "The described submitted revision postdates the newest released tag,\n"
-                    "v0.12.0, and is available at\n"
+                    f"{cited_release_tag()}, and is available at\n"
                     "\\url{https://github.com/HaoZeke/anneal/commit/"
                     "61fa67cf380e46876b569da45e7cc091647a775b};\n"
                     "the Zenodo archive does not contain that revision.")

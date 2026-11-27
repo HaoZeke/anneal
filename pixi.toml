@@ -3,7 +3,7 @@ name      = "anneal"
 # [[[cog
 # cog.outl('version   = "%s"' % anneal_version.package_version())
 # ]]]
-version   = "0.12.0"
+version   = "0.13.0"
 # [[[end]]]
 description = "Simulated annealing components on the eindir typed primitives."
 channels  = ["conda-forge"]

@@ -8,7 +8,7 @@
 // [[[cog
 // cog.outl('#define ANNEAL_CORE_VERSION "%s"' % anneal_version.package_version())
 // ]]]
-#define ANNEAL_CORE_VERSION "0.12.0"
+#define ANNEAL_CORE_VERSION "0.13.0"
 // [[[end]]]
 
 #endif

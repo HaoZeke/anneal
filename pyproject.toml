@@ -20,7 +20,7 @@ maintainers = [
 # [[[cog
 # cog.outl('version = "%s"' % anneal_version.package_version())
 # ]]]
-version = "0.12.0"
+version = "0.13.0"
 # [[[end]]]
 requires-python = ">=3.10"
 license = "MIT"

@@ -1,1 +1,0 @@
-A revision that a benchmark row cites must be a full 40-character SHA, a repository URL at a full SHA, or a pinned revision of another project. The record ingest and the ASE panel refresh refuse an abbreviated SHA through one shared validator.

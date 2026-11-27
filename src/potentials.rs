@@ -30,9 +30,10 @@ use std::sync::OnceLock;
 /// that names one, so the library takes the kernels at run time instead.
 /// Every binary in this repository installs them with
 /// [install_rgpot_kernels!](crate::install_rgpot_kernels); the wheel
-/// installs them when the module loads. Without them, Lennard-Jones and
-/// Morse run the pair loop in [`PairPotential::value_and_gradient`] and
-/// [`gupta::Gupta`] refuses to evaluate.
+/// installs them when the module loads. Without them, Lennard-Jones,
+/// Morse, the binary cluster and Gupta run the pair loops in this
+/// module. A packaged build, which cannot name the unpublished
+/// dependency, installs those loops from the same macro.
 #[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
 pub struct ClusterKernels {
@@ -99,9 +100,10 @@ pub fn cluster_kernels() -> Option<&'static ClusterKernels> {
     CLUSTER_KERNELS.get()
 }
 
-/// Install the `rgpot_pair` kernels when `rgpot_pair` is linked. In an
-/// unpacked `.crate`, `cargo package` omits the unpublished git
-/// dev-dependency so targets fall back to the built-in pair loops.
+/// Install the linked pair kernels when that crate is a dependency.
+/// `cargo package` drops the unpublished git dev-dependency, and
+/// [`install_builtin_kernels`] fills the same table from the loops in
+/// this module.
 #[cfg(not(anneal_packaged_without_rgpot_pair))]
 #[macro_export]
 macro_rules! install_rgpot_kernels {
@@ -115,12 +117,68 @@ macro_rules! install_rgpot_kernels {
     }};
 }
 
-/// Leave kernel installation empty when the unpublished dependency is absent
-/// from an unpacked crates.io package.
+/// Install the in-tree pair loops. `cargo package` omits the unpublished
+/// git dev-dependency from the packaged manifest, so the build script
+/// sets `anneal_packaged_without_rgpot_pair` and this arm is the one
+/// that compiles into the `.crate`.
 #[cfg(anneal_packaged_without_rgpot_pair)]
 #[macro_export]
 macro_rules! install_rgpot_kernels {
-    () => {{}};
+    () => {{
+        $crate::potentials::install_builtin_kernels();
+    }};
+}
+
+/// Pair loops compiled into this crate. The first installation wins, so
+/// a later call does not replace kernels already installed.
+pub fn install_builtin_kernels() {
+    install_cluster_kernels(ClusterKernels::new(
+        builtin_cluster_lj,
+        builtin_cambridge_morse,
+        gupta::builtin_gupta,
+        binary_lj::builtin_binary_lj,
+    ));
+}
+
+pub(crate) fn builtin_cluster_lj(positions: &[f64], energy: &mut f64, gradient: &mut [f64]) {
+    builtin_pair(positions, PairKind::LennardJones, energy, gradient);
+}
+
+pub(crate) fn builtin_cambridge_morse(
+    positions: &[f64],
+    rho: f64,
+    energy: &mut f64,
+    gradient: &mut [f64],
+) {
+    builtin_pair(positions, PairKind::Morse { rho }, energy, gradient);
+}
+
+fn builtin_pair(positions: &[f64], kind: PairKind, energy: &mut f64, gradient: &mut [f64]) {
+    let n = positions.len() / 3;
+    for slot in gradient.iter_mut().take(3 * n) {
+        *slot = 0.0;
+    }
+    let mut total = 0.0;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let d = [
+                positions[3 * i] - positions[3 * j],
+                positions[3 * i + 1] - positions[3 * j + 1],
+                positions[3 * i + 2] - positions[3 * j + 2],
+            ];
+            let r2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+            if r2 <= 0.0 {
+                continue;
+            }
+            let (value, coef) = kind.pair(r2);
+            total += value;
+            for k in 0..3 {
+                gradient[3 * i + k] = coef.mul_add(d[k], gradient[3 * i + k]);
+                gradient[3 * j + k] = (-coef).mul_add(d[k], gradient[3 * j + k]);
+            }
+        }
+    }
+    *energy = total;
 }
 
 /// A pairwise cluster potential over `n` free points in three dimensions.
