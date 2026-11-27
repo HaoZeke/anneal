@@ -906,8 +906,9 @@ ammonia, carbon, and silicon clusters
 \cite{bannwarthGfn2xtbanAccurateBroadly2019}.
 CREST takes no seed, so its runs are not paired with those of this code.
 The Fisher exact test is printed only where both arms use one stopping rule.
-CREST runs to its own end, so a pair is kept only when the budget of this
-code is at least the median calls of the complete CREST runs.
+(H\(_2\)O)\(_8\) counts first-hit calls on both sides.
+A budget pair is kept only when the budget of this code is at least the
+median calls of the complete CREST runs.
 An aborted CREST run is dropped from its pair.
 This code stops at a fixed charge of 3021 calls and hits the water hexamer
 on 1 of 12 runs.
@@ -918,8 +919,8 @@ polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
 seeds 17000--17011.
 Medians are over all 12 runs. A miss counts as the budget plus one.
 CREST budget is 151738.
-This code hits 12 of 12 seeds at a median of 6193, and CREST hits 7 of 12
-at a median of 141621.5.
+This code hits 12 of 12 seeds at a first-hit median of 6193, and CREST hits 7 of 12
+at a first-hit median of 141621.5.
 \texttt{calls\_to\_hit} includes polish-on-improve calls;
 \texttt{charged\_calls}, the run total, is larger on every seed.
 The two-sided Fisher exact test gives \(p=0.0373\).

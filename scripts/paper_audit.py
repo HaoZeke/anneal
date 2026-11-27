@@ -7155,9 +7155,9 @@ def h2o8_prose(row: dict[str, object]) -> str:
         f"seeds {row['crest_seeds']}. "
         f"Medians are over all {row['anneal_n']} runs. A miss counts as the budget plus one. "
         f"CREST budget is {row['crest_budget']}. "
-        f"This code hits {row['anneal_hits']} of {row['anneal_n']} seeds at a median of "
+        f"This code hits {row['anneal_hits']} of {row['anneal_n']} seeds at a first-hit median of "
         f"{_call_text(float(row['anneal_median']))}, and CREST hits {row['crest_hits']} of {row['crest_n']} "
-        f"at a median of {_call_text(float(row['crest_median']))}. "
+        f"at a first-hit median of {_call_text(float(row['crest_median']))}. "
         f"\\texttt{{calls\\_to\\_hit}} includes polish-on-improve calls; "
         f"\\texttt{{charged\\_calls}}, the run total, is larger on every seed. "
         f"The two-sided Fisher exact test gives \\(p={float(row['fisher']):.4f}\\). "
@@ -7340,9 +7340,16 @@ def removed_crest_arms(audit: Audit) -> None:
     audit.record(h2o_med > 0 and nh3_med > 0, "bench/h2o-octamer/results.csv",
                  "the removed CREST arms have complete-run medians", "positive",
                  f"{_calls_text(h2o_med)} {_calls_text(nh3_med)}")
-    audit.said(SI, "pairs are removed because the budget of this code is below the median calls of the complete "
-                   "CREST runs.")
-    audit.said(SI, "\\path{bench/h2o-octamer/}, \\path{bench/nh3-tetramer/}, and \\path{bench/nh3-octamer/}.")
+    audit.said(SI, "Table~\\msref{tab:crest} keeps (H\\(_2\\)O)\\(_6\\), (H\\(_2\\)O)\\(_8\\), "
+                   "(NH\\(_3\\))\\(_8\\), C\\(_{10}\\), Si\\(_{10}\\), and C\\(_{20}\\).")
+    audit.said(SI, "(H\\(_2\\)O)\\(_8\\) counts first-hit calls on both sides.")
+    audit.said(SI, "The anneal rows of that file are not this comparison.")
+    audit.said(SI, "Those arms are left out because the budget of this code is below the median "
+                   "calls of the complete CREST runs.")
+    audit.said(SI, "\\path{bench/h2o-octamer/}, \\path{bench/nh3-tetramer/}, and \\path{bench/nh3-octamer/}")
+    audit.said("bench/h2o-octamer/README.md", "These arms are not the (H2O)8 row of the manuscript.")
+    audit.said("bench/nh3-tetramer/README.md", "This 4000-call pair is not a row of the manuscript table.")
+    audit.said("bench/nh3-octamer/README.md", "The six CREST v4 rows are the full runs of the kept ammonia comparison.")
     octamer = audit.rows("bench/nh3-octamer/results.csv")
     oct_crest = median([float(r["calls"]) for r in octamer if r["arm"] == "crest"])
     oct_anneal = {int(float(r["calls"])) for r in octamer if r["arm"] == "anneal"}

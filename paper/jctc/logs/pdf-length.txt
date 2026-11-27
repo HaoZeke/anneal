@@ -2,8 +2,8 @@
 # a section number alone before its heading is not a word; a page number is not a numeral
 abstract_words=123
 abstract_numerals=6
-body_words=6971
+body_words=6975
 pages=27
-sha256 893eabc49ea29e4ad964fdc837287f858ee94c71253955f0554f127fe93dec35  paper/jctc/manuscript.tex
+sha256 6625c13d29ffeb206ae5b0d3f0abb6891f4792a0f0fe75f2ecec5b0aa1d4f8b5  paper/jctc/manuscript.tex
 sha256 23fc4d2c12f95c6cc39378df154c6fdc876591aecf5495b945038189cce9e80b  paper/jctc/macros.tex
 sha256 e1702d82b3fec934833626a8279e26d5faf844cc60f5dfd34f0c0bb30304bbca  paper/jctc/labels-si.tex

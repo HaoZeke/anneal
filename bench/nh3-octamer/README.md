@@ -44,3 +44,6 @@ CREST. Seeds 17000 and 17002 remain 3.5e-5 and 3.6e-5 Eh high.
 count. Seed 17001 is 2.09e-3 Eh high at 4000, 4.27e-4 at 64000, and
 3.54e-5 at 221579 calls. A longer budget is a different trajectory, so
 17003, already at CREST at 4000, is 1.15e-3 high at 241500 calls.
+
+The six CREST v4 rows are the full runs of the kept ammonia comparison.
+The anneal rows of this file are the arms the budget rule leaves out.

@@ -729,8 +729,17 @@ CREST 3.0.2 runs GFN2-xTB through its legacy xtb driver, and this code runs
 it through the xtb engine of rgpot; both arms count energy and gradient
 calls.
 CREST takes no seed, so its dynamics are not paired with those of this code.
-A pair of Table~\msref{tab:crest} is kept only when the budget of this code
-is at least the median calls of the complete CREST runs.
+Table~\msref{tab:crest} keeps (H\(_2\)O)\(_6\), (H\(_2\)O)\(_8\),
+(NH\(_3\))\(_8\), C\(_{10}\), Si\(_{10}\), and C\(_{20}\).
+(H\(_2\)O)\(_8\) counts first-hit calls on both sides.
+(NH\(_3\))\(_8\) stops at the target or at 332675 calls on this code, and its
+CREST side is a full run.
+C\(_{10}\), Si\(_{10}\), and C\(_{20}\) stop at the reference or at \(10^{5}\)
+calls on this code, and CREST stops at the end of its run.
+(H\(_2\)O)\(_6\) stops at a fixed charge of 3021 calls on this code and at the
+end of a 0.90~ps run on CREST.
+A budget pair is kept only when the budget of this code is at least the
+median calls of the complete CREST runs.
 An aborted CREST run, which made no call, is dropped from its pair.
 \path{paper/jctc/scripts/crest_table.py} writes the table from the rows
 named below.
@@ -761,8 +770,8 @@ polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
 seeds 17000--17011.
 Medians are over all 12 runs. A miss counts as the budget plus one.
 CREST budget is 151738.
-This code hits 12 of 12 seeds at a median of 6193, and CREST hits 7 of 12
-at a median of 141621.5.
+This code hits 12 of 12 seeds at a first-hit median of 6193, and CREST hits 7 of 12
+at a first-hit median of 141621.5.
 \texttt{calls\_to\_hit} includes polish-on-improve calls;
 \texttt{charged\_calls}, the run total, is larger on every seed.
 The two-sided Fisher exact test gives \(p=0.0373\).
@@ -781,6 +790,8 @@ The hit rate of this code is the 12 seeds of
 This code hits the ammonia octamer on 10 of 12 seeds and stops at the target
 or at a budget of 332675 calls.
 CREST hits it on 6 of 6 full runs.
+Those six rows are the kept CREST side.
+The anneal rows of that file are not this comparison.
 
 \emph{Carbon and silicon clusters.}
 The rows are in \path{bench/covalent-h2h/gfn2/}, at an electronic
@@ -804,10 +815,13 @@ On C\(_{20}\) both arms are the rows of \path{rows.csv} at
 \texttt{5351f272}.
 
 \emph{Arms that the budget rule removes.}
-The (H\(_2\)O)\(_8\), (NH\(_3\))\(_4\), and (NH\(_3\))\(_8\) pairs are removed
-because the budget of this code is below the median calls of the complete CREST runs.
-The rows are \path{bench/h2o-octamer/}, \path{bench/nh3-tetramer/}, and
-\path{bench/nh3-octamer/}.
+The directories are \path{bench/h2o-octamer/},
+\path{bench/nh3-tetramer/}, and \path{bench/nh3-octamer/}.
+The arms at 4000 and at 16000 calls in those directories are not the pairs
+the table keeps.
+Those arms are left out because the budget of this code is below the median
+calls of the complete CREST runs.
+(NH\(_3\))\(_4\) has no other comparison in the table.
 At the calls of each seed's CREST run, \path{bench/h2o-octamer/ladder.csv}
 holds two seeds, and this code hits 1 of 2 and CREST 2 of 2.
 The (H\(_2\)O)\(_{16}\) and (H\(_2\)O)\(_{20}\) records give no CREST call

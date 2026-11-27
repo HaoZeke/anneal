@@ -27,3 +27,6 @@ through the 127141 calls CREST used. On the rebased tree seed 17001 is
 Cartesian quench. The `cb248286` rows are 16000 calls with the TRIC
 quench. Seeds 17000, 17001, 17002, 17004 and 17005 reach the CREST
 energy. Seed 17003 holds the minimum 9.03e-5 Eh above it.
+
+These arms are not the (H2O)8 row of the manuscript.
+That row counts first-hit calls on both sides and is not this 4000-call comparison.

@@ -66,3 +66,5 @@ The `v4` rows are after the dissociated-monomer screen. All six seeds
 finish, with no SCC abort, at 4000 calls. CREST is still the original arm.
 The `3141987e` rows are the same starts and the same CREST arm after the
 rebase onto that develop.
+
+This 4000-call pair is not a row of the manuscript table.
