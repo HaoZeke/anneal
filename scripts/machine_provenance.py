@@ -75,19 +75,16 @@ def macos_cpu_model() -> str:
     return _darwin_cpu_model() if sys.platform == "darwin" else ""
 
 
-def machine_provenance(
+def machine_digest(
     machine_id_path: Path = MACHINE_ID_PATH,
     product_uuid_path: Path = PRODUCT_UUID_PATH,
-    cpuinfo_path: Path = CPUINFO_PATH,
-) -> tuple[str, str]:
-    """Return a salted machine digest and the normalized CPU model.
+) -> str:
+    """Return the salted SHA-256 of this machine's identifier.
 
-    Linux reads /etc/machine-id, then the DMI product_uuid, and
-    /proc/cpuinfo. macOS has none of them and reads the hardware UUID and the
-    CPU brand string from ioreg and sysctl instead, and only for the default
+    Linux reads /etc/machine-id, then the DMI product_uuid. macOS has neither
+    file and reads the hardware UUID from ioreg, and only for the default
     paths: an explicit path that names nothing still raises. A machine that
-    offers no identifier or no model raises: a row never records an invented
-    one.
+    offers no identifier raises.
     """
     identifier = ""
     for path in (machine_id_path, product_uuid_path):
@@ -106,6 +103,23 @@ def machine_provenance(
         raise RuntimeError(
             "neither /etc/machine-id, the DMI product_uuid nor the macOS hardware UUID is available"
         )
+    return hashlib.sha256(MACHINE_ID_SALT + identifier.encode()).hexdigest()
+
+
+def machine_provenance(
+    machine_id_path: Path = MACHINE_ID_PATH,
+    product_uuid_path: Path = PRODUCT_UUID_PATH,
+    cpuinfo_path: Path = CPUINFO_PATH,
+) -> tuple[str, str]:
+    """Return a salted machine digest and the normalized CPU model.
+
+    The digest is ``machine_digest``. Linux reads /proc/cpuinfo for the model.
+    macOS has no /proc/cpuinfo and reads the brand string from sysctl instead,
+    and only for the default path: an explicit path that names nothing still
+    raises. A machine that offers no model raises: a row never records an
+    invented one.
+    """
+    digest = machine_digest(machine_id_path, product_uuid_path)
 
     cpu_model = ""
     if cpuinfo_path.is_file():
@@ -123,7 +137,6 @@ def machine_provenance(
     if not cpu_model:
         raise RuntimeError("neither /proc/cpuinfo nor sysctl has a CPU model string")
 
-    digest = hashlib.sha256(MACHINE_ID_SALT + identifier.encode()).hexdigest()
     return digest, cpu_model
 
 

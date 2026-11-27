@@ -100,3 +100,10 @@ def test_a_missing_binary_or_tarball_is_refused(tmp_path: Path, monkeypatch):
     binary = tmp_path / "GMIN"
     binary.write_bytes(b"x\n")
     assert sc_h2h.gmin_artifact_error(binary, None, None) == "tarball absent"
+
+
+def test_the_rerun_takes_its_machine_digest_from_the_helper():
+    source = (ROOT / "scripts" / "paper_rerun" / "sc_h2h.py").read_text()
+    assert "def machine_id(" not in source
+    assert "/etc/machine-id" not in source
+    assert "host = machine_digest()" in source

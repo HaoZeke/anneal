@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "scripts" / "metal_h2h"))
 
 import run_sc as sc  # noqa: E402
+from machine_provenance import machine_digest  # noqa: E402
 from target_tol import DEFAULT_HIT_TOL, energy_hits  # noqa: E402
 
 CODE_REVISION = "61fa67cf380e46876b569da45e7cc091647a775b"
@@ -77,11 +78,6 @@ BASE_FIELDS = (
 )
 FIELDS = BASE_FIELDS + ("gmin_pin", "harness_blob", "session")
 MANIFEST_FIELDS = ("seq", "system", "arm", "seed", "budget", "reference")
-
-
-def machine_id() -> str:
-    raw = Path("/etc/machine-id").read_bytes().strip()
-    return hashlib.sha256(raw).hexdigest()
 
 
 def blob_of(path: Path) -> str:
@@ -398,7 +394,7 @@ def main(argv: list[str]) -> int:
             f"gmin arm not runnable: pin {GMIN_PIN} {refused}",
             flush=True,
         )
-    host = machine_id()
+    host = machine_digest()
     harness_revision = head_of()
     harness_blob = blob_of(HERE / "sc_h2h.py")
     session = session_id(work / "session")

@@ -285,10 +285,6 @@ EXEMPT = {
         'for path in (Path("/etc/machine-id"), Path("/proc/sys/kernel/random/boot_id")):',
     ): "frozen: the committed tuned rows are verified against this file's exact blob, so it moves with their rerun",
     (
-        "scripts/paper_rerun/sc_h2h.py",
-        'raw = Path("/etc/machine-id").read_bytes().strip()',
-    ): "the id is read to be hashed by the next line, and only the sha256 reaches a row",
-    (
         "paper/jctc/scripts/water_h2h.py",
         'for line in Path("/proc/cpuinfo").read_text().splitlines():',
     ): "a free-text description for a log header (family and model number too), not a row column",
