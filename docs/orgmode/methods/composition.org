@@ -64,17 +64,19 @@ checkpoint fires:
   larger of =escape_stall_patience= and =escape_stall_factor= times
   =longest_quiet= (src/methods/cluster_hopping.rs:5097). Those defaults
   are 5000 and 2.0 (src/methods/cluster_hopping/config.rs:2331). When
-  the chain is stalled and more than one stall arm is enabled, the
-  arm is drawn (src/methods/cluster_hopping.rs:11048). A call-plateau
-  directed leave is not that draw. It runs when =escape_on_stall= is
-  on and the charged stretch since the best reaches
-  =restart_patience= (src/methods/cluster_hopping.rs:7643). It selects
-  =climb= (src/methods/cluster_hopping.rs:11046). A fresh start on
-  that clock returns to the same funnel, so the leave is the climb
-  and not a draw among the stall arms
-  (src/methods/cluster_hopping.rs:6397). When the cap turn is also
-  on, the leave is a draw between =climb= and =cap= only
-  (src/methods/cluster_hopping.rs:6399).
+  the chain is stalled, the call clock is not due, and more than one
+  stall arm is enabled, the arm is drawn
+  (src/methods/cluster_hopping.rs:11048). When the call clock is due
+  and =escape_on_stall= is on (src/methods/cluster_hopping.rs:7643),
+  the walk sets =directed_leave= (src/methods/cluster_hopping.rs:7648)
+  and selects =climb= by name (src/methods/cluster_hopping.rs:11047)
+  and skips that draw.
+  =recommended_with_scales= enables =trail= and =climb=
+  (src/methods/cluster_hopping/config.rs:1944), so both arms are on
+  and this leave is the one that runs. A fresh start on that clock
+  returns to the same funnel (src/methods/cluster_hopping.rs:7574).
+  When the cap turn is also on, the leave is a draw between =climb=
+  and =cap= only (src/methods/cluster_hopping.rs:6397).
 
 None of this loop body talks to the coordinator. It is the same code
 path a solo run takes. The cooperative layer only enters at a
