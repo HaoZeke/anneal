@@ -38,7 +38,7 @@
       ],
       "source": "bench/pareto-h2o8/rows.csv",
       "call_column": "calls_to_first_hit",
-      "target_Eh": -40.681336013361,
+      "reference_Eh": -40.68133601315,
       "tolerance_Eh": 1e-06
     },
     {
@@ -79,7 +79,7 @@
       ],
       "source": "bench/h2o8-poi-vs-crest/inputs.csv",
       "call_column": "first_hit_call",
-      "target_Eh": -40.681336013361,
+      "reference_Eh": -40.68133601315,
       "tolerance_Eh": 1e-06
     }
   ],
@@ -146,7 +146,7 @@
         4070,
         28376
       ],
-      "target_Eh": -40.681336013361,
+      "reference_Eh": -40.68133601315,
       "tolerance_Eh": 1e-06
     },
     "B": {
@@ -173,7 +173,7 @@
         8009,
         3951
       ],
-      "target_Eh": -40.681336013361,
+      "reference_Eh": -40.68133601315,
       "tolerance_Eh": 1e-06
     }
   },

@@ -28,7 +28,9 @@ HERE = Path(__file__).resolve().parent
 REFERENCE_EH = -40.681336013150
 TOL_EH = 1.0e-6
 HARTREE_EV = 27.211386245988
-THRESHOLD_EV = (REFERENCE_EH + TOL_EH) * HARTREE_EV
+REFERENCE_EV = REFERENCE_EH * HARTREE_EV
+TOL_EV = TOL_EH * HARTREE_EV
+THRESHOLD_EV = REFERENCE_EV + TOL_EV
 BUDGET = 151738
 SEEDS_A = (2000, 2001, 2002, 2003, 2004, 2005)
 ENGINE_COMMIT = "b35601b7b7b2325c28f20ac604d267965cd64648"
@@ -56,6 +58,14 @@ def energy_hits(energy: float, target: float, tol: float) -> bool:
     if not (math.isfinite(energy) and math.isfinite(target) and math.isfinite(tol)):
         return False
     return tol >= 0.0 and energy <= target + tol
+
+
+def recorded_hit(best_eV: float) -> bool:
+    """Final energy at or below reference plus tolerance, in eV.
+
+    Same test as ``bench/octamer-matched/h2o8/run.py``.
+    """
+    return energy_hits(best_eV, REFERENCE_EV, TOL_EV)
 
 
 def scan_calls(lines, threshold: float) -> tuple[int | None, int]:
@@ -257,7 +267,7 @@ def row_from(
             "examples/gfn2_mol_h2h.rs at b35601b7"
         )
     hit_at = None if first == "none" else int(first)
-    best_eV_hit = energy_hits(best_eV, THRESHOLD_EV, 0.0)
+    best_eV_hit = recorded_hit(best_eV)
     if best_eV_hit and hit_at is None:
         raise SystemExit(f"seed {seed} final energy hits and first_hit_call is none")
     wall_s, cpu_s = parse_time(out / "time.txt")
@@ -270,7 +280,7 @@ def row_from(
         "search_wall_s": float(fields["wall_s"]),
         "best_Eh": best_Eh,
         "best_eV": best_eV,
-        "hit": int(energy_hits(best_Eh, REFERENCE_EH, TOL_EH)),
+        "hit": int(recorded_hit(best_eV)),
         "calls_to_first_hit": hit_at if hit_at is not None else budget + 1,
         "revision": fields["source_commit"],
         "host_id_hash": host,
@@ -427,7 +437,7 @@ def measure_row(
     model: str,
 ) -> dict[str, str]:
     best_eV = float(fields["objective_best_eV"])
-    hit = energy_hits(best_eV, THRESHOLD_EV, 0.0)
+    hit = recorded_hit(best_eV)
     return {
         "seed": str(seed),
         "budget": str(BUDGET),
@@ -547,7 +557,7 @@ def campaign(binary: Path, xtb_engine: Path, xtb_lib: Path, core: str, rows_path
             raise SystemExit(f"seed {seed} config {fields.get('config_sha256')} polish {fields.get('polish_on_improve')}")
         row = measure_row(seed, fields, wall_s, cpu_s, host, core, model)
         best_eV = float(fields["objective_best_eV"])
-        crossed = energy_hits(best_eV, THRESHOLD_EV, 0.0)
+        crossed = recorded_hit(best_eV)
         if crossed and fields["first_hit_call"] == "none":
             raise SystemExit(f"seed {seed} final energy hits and first_hit_call is none")
         rows.append(row)

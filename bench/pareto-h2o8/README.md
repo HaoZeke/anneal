@@ -69,7 +69,12 @@ The arms are methods. Anneal is seeds 2000-2011 from `rows-A.csv` and `rows-B.cs
 CREST first-hit calls are the 12 rows with `source` crest in `bench/h2o8-poi-vs-crest/inputs.csv`.
 CREST seeds are 17000-17011. Those seeds differ from 2000-2011. The arms are not paired by seed.
 The CREST call column is `first_hit_call`.
-A hit is `best_Eh` within `1e-6` Eh of `-40.681336013361`. A miss in the call median is scored as budget+1.
+A hit is a recorded energy at or below reference `-40.681336013150` Eh plus `1e-6` Eh.
+`run.py` and `analyze.py` both apply that test in eV: `energy <= reference * 27.211386245988 + 1e-6 * 27.211386245988`.
+That is `energy_hits` against `REFERENCE_EV` and `TOL_EV` in `bench/octamer-matched/h2o8/run.py`.
+The octamer driver also requires an intact geometry. These tables classify the stored `best_Eh`.
+No committed row changes class. The anneal rows, `rows-abba.csv`, and the CREST rows in `bench/h2o8-poi-vs-crest/inputs.csv` keep the stored hit or miss.
+A miss in the call median is scored as budget+1.
 Anneal hits 12. Median 6193.0.
 CREST hits 7. Median 141621.5.
 Two-sided Fisher exact table [[12, 0], [7, 5]]. p_value 0.037267080745341616. odds_ratio_infinite true.

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import re
 from decimal import Decimal
 from pathlib import Path
@@ -15,8 +16,11 @@ from scipy import stats
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
-TARGET_EH = -40.681336013361
-TOL_EH = 1e-6
+REFERENCE_EH = -40.681336013150
+TOL_EH = 1.0e-6
+HARTREE_EV = 27.211386245988
+REFERENCE_EV = REFERENCE_EH * HARTREE_EV
+TOL_EV = TOL_EH * HARTREE_EV
 BUDGET = 151738
 BOOT_DRAWS = 10000
 BOOT_SEED = 20261123
@@ -48,7 +52,15 @@ def read_csv(path: Path) -> list[dict[str, str]]:
 
 
 def is_hit(best_eh: str) -> bool:
-    return abs(float(best_eh) - TARGET_EH) <= TOL_EH
+    """Recorded energy at or below reference plus tolerance, in eV.
+
+    Same comparison as ``recorded_hit`` in ``run.py`` and
+    ``bench/octamer-matched/h2o8/run.py``.
+    """
+    energy = float(best_eh)
+    if not math.isfinite(energy):
+        return False
+    return energy * HARTREE_EV <= REFERENCE_EV + TOL_EV
 
 
 def call_score(row: dict[str, str]) -> int:
@@ -117,7 +129,7 @@ def arm_record(rows: list[dict[str, str]], shard: str) -> dict:
         "miss_score": BUDGET + 1,
         "seeds": [int(row["seed"]) for row in selected],
         "calls": calls,
-        "target_Eh": TARGET_EH,
+        "reference_Eh": REFERENCE_EH,
         "tolerance_Eh": TOL_EH,
     }
 
@@ -151,7 +163,7 @@ def method_arm(name: str, rows: list[dict[str, str]], calls: list[int], source: 
         "calls": calls,
         "source": source,
         "call_column": call_column,
-        "target_Eh": TARGET_EH,
+        "reference_Eh": REFERENCE_EH,
         "tolerance_Eh": TOL_EH,
     }
 
