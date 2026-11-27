@@ -39,6 +39,8 @@ PATCH=$ROOT/bench/lj104-lattice/v2/h2h-gmin.patch
 SW_PATCH=$HERE/sw-timer.patch
 USERPOT=$HERE/tersoff_userpot.f90
 
+# bash 3.2 with set -u rejects "${FORWARD_ARGS[@]}" when no
+# --tarball was given. Pass those words only when some exist.
 FORWARD_ARGS=()
 while [[ $# -gt 1 ]]; do
   case $1 in
@@ -52,7 +54,11 @@ if [[ ! -f $LIB ]]; then
   exit 1
 fi
 
-GMIN_H2H_WORK=$WORK bash "$HERE/build_gmin.sh" "${FORWARD_ARGS[@]}"
+if [[ ${#FORWARD_ARGS[@]} -gt 0 ]]; then
+  GMIN_H2H_WORK=$WORK bash "$HERE/build_gmin.sh" "${FORWARD_ARGS[@]}"
+else
+  GMIN_H2H_WORK=$WORK bash "$HERE/build_gmin.sh"
+fi
 got=$(python3 "$PIN" read-svnrev "$WORK/src/wales/GMIN/source/SVNREV")
 TARBALL_SHA256=$(python3 "$PIN" verify-tarball "$WORK/svn.tar.bz2")
 

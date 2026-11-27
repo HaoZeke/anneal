@@ -2,12 +2,16 @@
 //! Shell-core and dual-core orbit completion with `detected_symmetry` off,
 //! pinned by hash.
 //!
-//! The candidates of [`OrbitCore::Shells`] and [`OrbitCore::Both`], and short
-//! walks of the dual-core cluster preset with each core, are the ones of
-//! develop at `91fa4bbc`, where these hashes were recorded. Detected
+//! The shell-core candidates and the short walks were recorded on
+//! develop at `91fa4bbc`. The dual-core candidate digest is that same
+//! completion once the fixtures use the `libm` crate. Detected
 //! symmetry is opt-in, so leaving it off must not move them.
 //!
 //! The walks force rgmin's scalar dots, as `lj_trajectory_pin` does.
+//! The candidate fixtures take sine, cosine, square root and power
+//! from the `libm` crate. The host copies of those functions differ
+//! between runners, so a seed would otherwise name a different
+//! geometry.
 
 use anneal_core::methods::cluster_hopping::{
     Config, Ledger, OrbitCore, random_cluster_in_radius, run_with_gradient,
@@ -37,10 +41,10 @@ fn quench(potential: &PairPotential, x: ArrayView1<f64>, iterations: usize) -> A
 /// The 13-point icosahedron at the Lennard-Jones contact, each coordinate
 /// moved by up to `noise`.
 fn icosahedron(noise: f64, rng: &mut StdRng) -> Array1<f64> {
-    let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
-    let edge = 2.0_f64.powf(1.0 / 6.0);
-    let radius = edge * (phi * phi + 1.0).sqrt() / 2.0;
-    let scale = radius / (1.0 + phi * phi).sqrt();
+    let phi = (1.0 + libm::sqrt(5.0)) / 2.0;
+    let edge = libm::pow(2.0, 1.0 / 6.0);
+    let radius = edge * libm::sqrt(phi * phi + 1.0) / 2.0;
+    let scale = radius / libm::sqrt(1.0 + phi * phi);
     let mut coords = vec![0.0, 0.0, 0.0];
     for s1 in [-1.0, 1.0] {
         for s2 in [-1.0, 1.0] {
@@ -75,17 +79,17 @@ fn ring_core(
         let phase = std::f64::consts::PI * ring as f64 / order as f64;
         for step in 0..order {
             let angle = std::f64::consts::TAU * step as f64 / order as f64 + phase;
-            coords.extend([1.12 * angle.cos(), 1.12 * angle.sin(), height]);
+            coords.extend([1.12 * libm::cos(angle), 1.12 * libm::sin(angle), height]);
         }
     }
     for _ in 0..outer {
         let z = 2.0 * rng.random::<f64>() - 1.0;
         let azimuth = std::f64::consts::TAU * rng.random::<f64>();
         let radius = 2.6 + 0.3 * rng.random::<f64>();
-        let ring = (1.0 - z * z).sqrt();
+        let ring = libm::sqrt(1.0 - z * z);
         coords.extend([
-            radius * ring * azimuth.cos(),
-            radius * ring * azimuth.sin(),
+            radius * ring * libm::cos(azimuth),
+            radius * ring * libm::sin(azimuth),
             radius * z,
         ]);
     }
@@ -221,7 +225,7 @@ fn dual_core_candidates_match_develop() {
     let (hash, produced) = candidate_hash(both);
     assert!(produced > 0, "no dual-core completion to compare");
     assert_eq!(
-        hash, "fa1270d07def3d1432f038037e48998e1ebe838ec298b0c85299bfbe9fed397b",
+        hash, "f8a49913e79f0317777a5c918d919e40f761aabe29f77499c7693b22b6469aa8",
         "dual-core candidates moved: {hash}"
     );
 }
