@@ -3059,6 +3059,52 @@ def test_rewriting_or_truncating_a_record_line_fails_the_audit(target):
     assert any(r[1] == target and "truncated" in r[4] for r in truncated.drifts())
 
 
+def test_a_record_line_put_back_is_not_counted_removed(monkeypatch):
+    real_git = audit_mod.git
+
+    def history_puts_one_line_back(*args, **kwargs):
+        result = real_git(*args, **kwargs)
+        if args[:2] == ("log", "-p"):
+            return subprocess.CompletedProcess(
+                result.args, 0, "-same record\n+same record\n-gone record\n", ""
+            )
+        return result
+
+    monkeypatch.setattr(audit_mod, "git", history_puts_one_line_back)
+    audit = audit_mod.Audit()
+    audit_mod.append_only_rows(audit)
+    assert any(row[1] == "record-file history" and row[4] == "1 removed lines"
+               for row in audit.drifts())
+
+
+def test_wave_build_heads_are_mapped_and_the_rows_keep_them():
+    cited = {
+        "0670fcd69a8ede1e5a678ff855e0d8159bd47de3": "bench/branch-gate/rows-optin-2000.csv",
+        "8a34d5026ba9925ed2a9b2277c170174c1c35253": "bench/branch-gate/devfull-rows.csv",
+        "9ded8dce0e372b1c394820f6a799a8d351e5bbf6": "bench/branch-gate/rows-default-2000.csv",
+        "94ae35afbde33925affdb41e9e47afb8730ebc2d": "bench/blj-fix5-gate/rows.csv",
+    }
+    for sha, path in cited.items():
+        assert sha in audit_mod.UNPUSHED
+        assert sha in (ROOT / path).read_text()
+    audit = audit_mod.Audit()
+    audit_mod.revision_map(audit)
+    assert not audit.drifts()
+
+
+def test_a_scientific_number_is_not_a_revision_token():
+    assert audit_mod._revision_tokens("2.543415e-06") == []
+    assert audit_mod._revision_tokens("5.341146e-06") == []
+    assert audit_mod._revision_tokens("best 94ae35af at 2.543415e-06") == ["94ae35af"]
+    flags = audit_mod._table_revision_flags(
+        "bench/contact-cutoff-r1-gate/README.md",
+        ["Cell", "D out/call (s)", "Hits D"],
+        [(60, ["sc126-38", "2.543415e-06", "12/12"])],
+        [],
+    )
+    assert flags is None
+
+
 def test_a_removed_row_of_a_record_absent_at_head_fails_the_audit(monkeypatch):
     real_git = audit_mod.git
 
