@@ -29,4 +29,8 @@ With `--eh`, the evaluation that crosses raises the ledger stop after it has bee
 
 ## Rows
 
-`rows.csv` has one row for each seed from 2000 through 2011. All 12 hit. The median `calls_to_hit` is 150172. Each hit stopped on that evaluation, so `charged` equals `calls_to_hit`. The crossing is inside the charged answer polish: `polish_calls` in the twelve logs runs from 30 to 45.
+`rows.csv` has one row for each seed from 2000 through 2011. All 12 hit. The median `calls_to_hit` is 150172. Each hit stopped on that evaluation, so `charged` equals `calls_to_hit`. The crossing is inside the charged answer polish: `polish_calls` in the twelve logs runs from 30 to 45. `calls_to_hit` is that recorded count.
+
+0 of 12 seeds reach the threshold during the hop search. The hop budget is 150138, which is 151738 minus the 1600-call polish reserve. All 12 hits come from the charged end-of-run answer polish. The margins below the threshold are 1.1e-9 to 1.0e-7 Eh. `-40.681336013150` with tolerance `1e-6` comes from `7ad8eab6` `bench/h2o8-crest-firsthit/run.py:25` (`REFERENCE_EH`; the tolerance is the next line). The hit test is unchanged: energy at or below reference + tolerance, written `-40.681335013150` Eh.
+
+`phases.csv` is produced by `bench/h2o8-matched/phases.py` from the on-disk `runs/*/run.txt` logs. Those logs are not committed. A new run appends `hop_end`, `polish_begin`, `pre_Eh`, `first_hit`, `where`, and `margin` to its `run.txt` and does not rewrite a finished log.

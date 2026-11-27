@@ -46,6 +46,22 @@ COLUMNS = (
 )
 
 
+def load_phases():
+    import importlib.util
+    import sys
+
+    name = "h2o8_matched_phases"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, HERE / "phases.py")
+    if spec is None or spec.loader is None:
+        raise SystemExit("missing phases.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def fields_of(path: Path) -> dict[str, str]:
     found: dict[str, str] = {}
     for line in path.read_text().splitlines():
@@ -178,6 +194,7 @@ def run_seed(seed: int) -> None:
             raise SystemExit(f"seed {seed} exited {proc.returncode} after {elapsed:.1f}s")
         record = fields_of(out / "run.txt")
         built = row_of(seed, record)
+        load_phases().append_phase(out / "run.txt", seed)
         done.write_text("ok\n")
         print(
             f"SEED {seed} hit={built['hit']} calls={built['calls_to_hit']} "
