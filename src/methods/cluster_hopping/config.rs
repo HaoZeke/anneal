@@ -1363,12 +1363,12 @@ pub struct Config {
     pub plateau_heat: bool,
     /// Extra relaxation steps for a new best or a later basin visit.
     ///
-    /// Screened hopping leaves almost every hop short of the tolerance a
-    /// shared census uses, so a cooperative run has nothing valid to offer.
-    /// A new best is polished at once. A basin visit is polished once four
-    /// times this many charged spent have passed since the last one.
-    /// `recommended_with_scales` sets `relax_steps` to 1000 and leaves this
-    /// count at 0. The cluster-search example copies `relax_steps` into it.
+    /// Screened hopping leaves hops short of a shared census tolerance.
+    /// A new best is polished at once. A basin visit waits four times
+    /// this many charged spent. That wait ignores branch charges and
+    /// observed-basis charges, both added to the last polish spent.
+    /// `recommended_with_scales` sets `relax_steps` to 1000 and leaves
+    /// this count at 0. The cluster-search example copies `relax_steps`.
     /// Zero disables the polish and leaves the solo behaviour untouched.
     pub polish_records: usize,
     /// Polish the incumbent when a hop improves it.
