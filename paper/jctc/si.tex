@@ -1,5 +1,8 @@
 % Copyright (c) anneal developers
 \documentclass[journal=jctcce,manuscript=suppinfo]{achemso}
+% achemso prefixes figures and tables. Sections and equations need the same S.
+\renewcommand{\thesection}{S\arabic{section}}
+\renewcommand{\theequation}{S\arabic{equation}}
 \usepackage{amsmath,booktabs,longtable,siunitx}
 \usepackage{url,seqsplit}
 \urlstyle{tt}
@@ -256,11 +259,6 @@ The TIP4P rows of the GMIN comparison were recorded by revision
 \texttt{\seqsplit{e1a69a57a8dda1b44fdde9413ae31e3fc3af1889}}, an ancestor
 of the submitted revision.
 
-The rows of this code in the CREST table are not at revisions in the
-history of the submitted revision.
-The water hexamer rows are revision
-\texttt{\seqsplit{723b7c23bbb31a076a559e3ac7f4f91be9e36e1e}}, outside that
-history.
 The Si\(_{10}\) and C\(_{20}\) rows name \texttt{f3d6a050} and
 \texttt{5351f272}, local builds that are not commits of the repository.
 The C\(_{10}\) rows name no revision.
@@ -730,80 +728,40 @@ CREST 3.0.2 runs GFN2-xTB through its legacy xtb driver, and this code runs
 it through the xtb engine of rgpot; both arms count energy and gradient
 calls.
 CREST takes no seed, so its dynamics are not paired with those of this code.
-Table~\msref{tab:crest} keeps (H\(_2\)O)\(_8\),
-(NH\(_3\))\(_8\), C\(_{10}\), Si\(_{10}\), and C\(_{20}\).
-(H\(_2\)O)\(_8\) counts first-hit calls on both sides.
-(NH\(_3\))\(_8\) stops at the target or at 332675 calls on this code, and its
-CREST side is a full run.
-C\(_{10}\), Si\(_{10}\), and C\(_{20}\) stop at the reference or at \(10^{5}\)
-calls on this code, and CREST stops at the end of its run.
-The water hexamer is not a row.
-This code stops at a fixed charge of 3021 calls, and CREST stops at the end
-of a 0.90~ps run.
-The slopes differ and the stops differ.
-The five remaining hit-rate tests are one Holm family~\cite{holm1979}.
-A win is a shared-stop test whose adjusted value is below 0.05.
-The adjusted values are 0.149 on the water octamer, 0.0471 on C\(_{10}\),
-and 1 on the ammonia octamer, Si\(_{10}\), and C\(_{20}\).
-Only the water octamer shares one stopping rule, and that adjusted value
-is not below 0.05.
-The C\(_{10}\) arms do not share a stopping rule.
+Table~\msref{tab:crest} keeps (H\(_2\)O)\(_8\).
+On the water octamer each arm stays under its own recorded stop.
+anneal's rows do not record the CREST target or budget.
+There is no paired test, and the Holm family for CREST is empty.
+The ammonia, carbon, and silicon arms are not rows of the table.
+Each is reported below under its own stop, with no paired test.
 A budget pair is kept only when the budget of this code is at least the
 median calls of the complete CREST runs.
 An aborted CREST run, which made no call, is dropped from its pair.
 \path{paper/jctc/scripts/crest_table.py} writes the table from the rows
 named below.
 
-\emph{Water hexamer.}
-\path{scripts/crest_equal/run_panel.py} wrote \path{bench/crest-equal/rows.csv}
-on seeds 2000--2011, on one core of host \texttt{bench}.
-The seed picks the start geometry, which the arms share.
-This code runs at revision \texttt{723b7c23} and stops at a fixed charge of
-3021 calls on every seed.
-CREST runs \texttt{-mquick} to the end of a 0.90~ps run.
-A CREST row is charged the calls the driver served; the driver ceiling was
-50000 calls, so the 4000 in the budget column of the CREST rows is a label.
-A hit is a \texttt{vtight} polish within \(10^{-7}\)~Eh of the prism
-reference, and seed 2001 of this code, whose polish did not converge, is a
-miss.
-Revision \texttt{723b7c23} contains commit \texttt{acf5f0aa}, which flipped
-the sign of the GFN2-xTB gradient before commit \texttt{94a37da7}.
-The CREST wrapper at that revision negated the gradient it served.
-The 1 of 12 is the hit count on that reversed GFN2 slope.
-The 4 of 12 is the hit count on the GFN2 slope the wrapper put back.
-The two hit counts are not a comparison.
-A CREST arm at 0.11~ps is the shortest length that finished.
-That length is not the 0.90~ps length.
-
 \emph{Water octamer.}
-On (H\(_2\)O)\(_8\), seeds 2000--2011 of this code run with the opt-in
-polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
-seeds 17000--17011.
-CREST budget is 151738.
-This code hits 12 of 12 seeds at a first-hit median of 6193.
-CREST hits 7 of 12 at an all-run first-hit median of 141621.5, and a miss is
-the budget plus one.
-The median of those hits is 91817.
-\texttt{calls\_to\_hit} includes polish-on-improve calls;
-\texttt{charged\_calls}, the run total, is larger on every seed.
-The unadjusted two-sided Fisher exact test gives \(p=0.0373\).
-Mann--Whitney \(U=0\) for this code against CREST, pairs with its call larger,
-is complete separation (\(p=7.4\times 10^{-7}\)):
-its runs hit in fewer calls than every CREST run.
-The median ratio is 22.87, bootstrap 95\% interval 10.35 to 34.57.
+On (H\(_2\)O)\(_8\), seeds 2000--2011 of anneal and seeds 17000--17011
+of CREST each stay under their own recorded stop.
+CREST's recorded budget is 151738.
+anneal's rows do not record the CREST target or budget.
+There is no paired test, and the Holm family for CREST is empty.
 The rows of this code are \path{bench/octamer-matched/h2o8/poi/results.csv}
 and the CREST rows are \path{bench/h2o8-crest-firsthit/rows.csv}.
-The comparison is \path{bench/h2o8-poi-vs-crest/results.json}.
+\path{bench/h2o8-poi-vs-crest/results.json} is not a paired test.
 
 \emph{Ammonia octamer.}
-The hit rate of this code is the 12 seeds of
-\path{bench/octamer-matched/nh3x8/results.csv}, and CREST is the 6
-\texttt{v4} rows of \path{bench/nh3-octamer/results.csv}.
-This code hits the ammonia octamer on 10 of 12 seeds and stops at the target
-or at a budget of 332675 calls.
-CREST hits it on 6 of 6 full runs.
-Those six rows are the kept CREST side.
-The anneal rows of that file are not this comparison.
+The rows of this code are the 12 seeds of
+\path{bench/octamer-matched/nh3x8/results.csv}.
+anneal stops on the ammonia octamer at a fixed charge of 332675 calls,
+the longest of the six CREST runs, and hits 10 of 12 seeds.
+That charge is 331075 search calls and a 1600-call polish.
+Seeds 2000 and 2001 have no run.txt; their stop is the calls\_to\_hit of results.csv.
+On the run.txt files, seeds 2002--2011, the energy before the polish stays above the target.
+The six \texttt{v4} rows of \path{bench/nh3-octamer/results.csv} are CREST.
+CREST stops at the end of its run.
+Those runs are not a paired test.
+The anneal rows of that file are not this report.
 
 \emph{Carbon and silicon clusters.}
 The rows are in \path{bench/covalent-h2h/gfn2/}, at an electronic
@@ -814,6 +772,7 @@ This code runs the general configuration of
 \path{examples/h2h_covalent.rs} at \(10^{5}\) calls and stops at the
 reference.
 CREST stops at the end of its run.
+The arms do not share a stop, and there is no paired test.
 A hit is within \(10^{-3}\)~eV of the lowest minimum any run reached.
 On C\(_{10}\) the target is the lowest energy any run reached.
 On C\(_{10}\) both arms are the rows of \path{seeds.csv}, which name no
@@ -836,7 +795,7 @@ Those arms are left out because the budget of this code is below the median
 calls of the complete CREST runs.
 (NH\(_3\))\(_4\) has no other comparison in the table.
 At the calls of each seed's CREST run, \path{bench/h2o-octamer/ladder.csv}
-holds two seeds.
+records two seeds.
 The (H\(_2\)O)\(_{16}\) and (H\(_2\)O)\(_{20}\) records give no CREST call
 count, and the Si\(_{13}\) record has no valid reference.
 
@@ -847,10 +806,15 @@ Every test below is two-sided.
 generators of the tables call it.
 
 \emph{Holm adjustment.}
-For one family of \(m\) tests, order the unadjusted \(p\) values so that
-\(p_{(1)}\le \cdots\le p_{(m)}\) \cite{holm1979}.
+Hit-rate tests against one competitor are one family, and a test enters
+only when its two arms share one stopping rule \cite{holm1979}.
+For a family of \(m\) tests, order the Fisher \(p\) values so that
+\(p_{(1)}\le \cdots\le p_{(m)}\).
 The adjusted value at position \(i\) is
 \(\min\bigl(1,\max_{j\le i}(m-j+1)p_{(j)}\bigr)\).
+A one-member family leaves its \(p\) unchanged.
+A win is an adjusted value below 0.05.
+An unadjusted \(p\) from a test outside that family is not a win.
 
 \emph{Paired outcome table.}
 Two arms run on the same seeds from the same start give a pair of hit flags
@@ -930,7 +894,10 @@ hypergeometric probabilities
 \(\binom{n_1}{k}\binom{n_2}{h-k}/\binom{n_1+n_2}{h}\) of every \(k\) whose
 probability is at most that of \(h_1\)
 \cite{fisherLogicInductiveInference1935}.
-No adjustment for multiple comparisons is made.
+Hit-rate tests against one competitor form one Holm family, and only a
+test whose two arms share one stopping rule enters that family.
+A one-member family leaves its \(p\) unchanged.
+A win is a Holm-adjusted value below 0.05.
 
 \emph{Medians and quantiles.}
 Medians, interquartile ranges, and the bootstrap quantiles below are type-7

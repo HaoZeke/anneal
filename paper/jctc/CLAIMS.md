@@ -20,5 +20,7 @@ Its cap equals each seed's old counter.
 The 192-seed polish arm keeps the name budget-fair polish.
 The matched comparison.
 And the 30-start statistics are not in this article.
-We keep the 192-seed paragraph, with the McNemar values.
+The manuscript reports no CREST hit-rate win.
+On the water octamer each side stays under its own recorded stop.
+The Holm family for CREST is empty.
 The deferred budget section is not in this article.

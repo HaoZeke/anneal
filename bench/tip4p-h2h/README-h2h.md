@@ -64,14 +64,13 @@ energies.
 
 | Size | anneal | GMIN | calls (a/g) | anneal best / median | GMIN best / median | p(U) |
 | --- | --- | --- | --- | --- | --- | --- |
-| (H₂O)₈  | 12/12 | 8/12 | 6339 / 240163 | −305.5177 / −305.5176 | −305.5189 / −305.5189 | 0.166 |
+| (H₂O)₈  | 12/12 | 8/12 | 6339 / 240163 | −305.5177 / −305.5176 | −305.5189 / −305.5189 | — |
 | (H₂O)₁₅ | 7/12  | 0/12 | 1481619.5 / 2000000 | −628.3716 / −628.3713 | −622.859 / −619.933 | 3.2e-05 |
 | (H₂O)₂₀ | 6/12  | 0/12 | 1686249.5 / 2000000 | −872.9879 / −868.8666 | −860.701 / −851.443 | 3.2e-05 |
 | (H₂O)₂₁ | 0/12  | 0/12 | 2000000 / 2000000 | −915.774 / −914.368 | −903.760 / −895.593 | 3.2e-05 |
 
-GMIN beats anneal nowhere. Anneal has at least as many hits at every scored
-size and a lower per-seed best-energy distribution at scored sizes 15, 20,
-and 21, with the Mann–Whitney p at \(3.2\times 10^{-5}\). At (H₂O)₂₁ neither arm reaches the global
+Each arm has twelve seeds. The 8 of 12 is GMIN's hit count. The call medians count different operations, so there is no paired test. At scored sizes 15, 20,
+and 21, anneal has more hits and a lower per-seed best-energy distribution, with the Mann–Whitney p at \(3.2\times 10^{-5}\). At (H₂O)₂₁ neither arm reaches the global
 minimum in 2 M calls, but anneal stops 0.93 kJ/mol short of it against GMIN's
 13 kJ/mol. For size 25, anneal's best and median final energies are
 −1113.0346568571 and −1103.3447313609 kJ/mol and its median wall is
@@ -82,7 +81,8 @@ At (H₂O)₈ both arms find the same global-minimum cage. GMIN's best reads
 1.2 mJ/mol below anneal's there, which is the potential offset above plus
 GMIN's quench settling past the early-stop energy that anneal halts on; it is
 the same cage, not a lower one. Anneal finds that cage on all twelve seeds and
-GMIN on eight, so anneal wins the size on hits. Because no arm beats anneal,
+GMIN on eight. The two budgets count different operations, so there is no
+cross-arm test and no win on hits. Because no arm beats anneal,
 there is no accompanying fix.
 
 The r2 wall comparison is in `wall-r2.csv`; it records the one-machine,

@@ -122,10 +122,12 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
   `9837358ae1027067ff654fac8b48969020853452`, the anneal commit the
   session ran. That commit is an ancestor of the record commit.
 
+On LJ38 the pre-correction rows count different operations, so the Fisher and Mann-Whitney cells are blank and there is no cross-arm test.
+
 <!-- gmin-panel table: start -->
 | System | Budget | Arm | Hits | Median calls | IQR | Wall (s) | Inside (s) | Outside (s) | Fisher p | MW p calls | MW p wall |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| LJ38 | 400000 | anneal | 12/12 | 10615.5 | 3591.25 | 0.075 | 0.029 | 0.047 | 0.037 | 3.4e-5 | 3.4e-5 |
+| LJ38 | 400000 | anneal | 12/12 | 10615.5 | 3591.25 | 0.075 | 0.029 | 0.047 | — | — | — |
 |  |  | GMIN | 7/12 | 389399 | 173127.75 | 3.658 | 2.673 | 0.979 |  |  |  |
 | LJ55 | 1000000 | anneal | 12/12 | 12242 | 22988.5 | 0.142 | 0.062 | 0.082 | 1 | 0.75 | 0.31 |
 |  |  | GMIN | 12/12 | 12764.5 | 12435.75 | 0.236 | 0.191 | 0.045 |  |  |  |

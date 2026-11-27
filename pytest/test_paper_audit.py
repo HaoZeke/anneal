@@ -1615,7 +1615,7 @@ def test_an_unnamed_gfn2_false_hit_is_reported():
     audit.rows("bench/covalent-h2h/gfn2/false-hits.csv").clear()
     audit_mod.covalent_gfn2(audit)
     drifted = {r[2] for r in audit.drifts()}
-    assert {"hits", "median calls", "best", "GFN2 paper Si10 Mann-Whitney p"} <= drifted
+    assert {"hits", "median calls", "best"} <= drifted
 
 
 SC_N12_ROWS = ("bench/metal-cluster-h2h/sc-n12/results.csv", "bench/metal-cluster-h2h/sc-n12/seeds.csv")
@@ -3936,15 +3936,64 @@ def test_a_drifted_ase_hit_sentence_is_reported():
 
 
 def test_a_wall_cap_span_in_the_following_sentence_is_reported():
+    """A wall-cap span inside the ASE caption, after the version, is still the next sentence."""
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "and neither ASE arm hits any."
-    assert old in audit_mod.collapse(tex)
-    added = " Each ASE run there stopped at the cap after 3933 to 20950 calls."
-    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old + added)
+    old = "(MH) of ASE 3.29.0 at its constructor defaults"
+    assert old in tex
+    added = "(MH) of ASE 3.29.0 after 3933 to 20950 calls at its constructor defaults"
+    audit.text_cache[audit_mod.TEX] = tex.replace(old, added, 1)
     audit_mod.manuscript_ase(audit)
     assert [row for row in audit.drifts() if row[2] == "the following sentence names no wall-cap span"] == [
         ("DRIFT", audit_mod.TEX, "the following sentence names no wall-cap span", "absent", "present")]
+
+
+def test_a_shifted_budget_pair_is_reported():
+    audit = audit_mod.Audit()
+    path = audit_mod.TEX
+    audit.text_cache[path] = audit.text(path) + "\n4000 & 3056\n"
+    audit_mod.stopping_pairs(audit)
+    assert [row for row in audit.drifts() if row[2] == "a mixed stopping pair stays out"] == [
+        ("DRIFT", path, "a mixed stopping pair stays out", "4000 & 3056", "present")]
+
+
+def test_a_tilde_budget_pair_is_reported():
+    audit = audit_mod.Audit()
+    path = audit_mod.TEX
+    audit.text_cache[path] = audit.text(path) + "\n4000~&~3055\n"
+    audit_mod.stopping_pairs(audit)
+    assert [row for row in audit.drifts() if row[2] == "a mixed stopping pair stays out"] == [
+        ("DRIFT", path, "a mixed stopping pair stays out", "4000 & 3055", "present")]
+
+
+def test_a_comma_median_is_reported():
+    path = audit_mod.TEX
+    for fragment, shown in (("78,367", "78367"), ("78,581.5", "78581.5")):
+        audit = audit_mod.Audit()
+        audit.text_cache[path] = audit.text(path) + "\n" + fragment + "\n"
+        audit_mod.stopping_pairs(audit)
+        assert [row for row in audit.drifts() if row[2] == "a mixed stopping pair stays out"] == [
+            ("DRIFT", path, "a mixed stopping pair stays out", shown, "present")]
+
+
+def test_an_ammonia_holm_win_is_reported():
+    audit = audit_mod.Audit()
+    path = audit_mod.TEX
+    audit.text_cache[path] = audit.text(path) + (
+        "\nThe ammonia comparison joins that Holm family, and it is a win.\n"
+    )
+    audit_mod.stopping_pairs(audit)
+    assert [row for row in audit.drifts() if row[2] == "a Holm family member is outside the shared-stop list"] == [
+        ("DRIFT", path, "a Holm family member is outside the shared-stop list", "ammonia", "present")]
+
+
+def test_a_fisher_pvalue_dodge_is_reported():
+    audit = audit_mod.Audit()
+    path = audit_mod.TEX
+    audit.text_cache[path] = audit.text(path) + "\nFisher p = 0.0094\n"
+    audit_mod.stopping_pairs(audit)
+    assert [row for row in audit.drifts() if row[2] == "a p-value sentence needs a shared stop"] == [
+        ("DRIFT", path, "a p-value sentence needs a shared stop", "Fisher p = 0.0094", "present")]
 
 
 def test_a_drifted_newcombe_interval_is_reported():
@@ -4159,9 +4208,9 @@ def test_a_stale_gmin_single_session_claim_is_reported():
 def test_a_drifted_crest_holm_sentence_is_reported():
     audit = audit_mod.Audit()
     tex = audit.text(audit_mod.TEX)
-    old = "Only the water octamer shares one stopping rule, and that adjusted value is not below 0.05."
+    old = "On C\\(_{10}\\) the target is the lowest energy any run reached."
     assert audit_mod.collapse(tex).count(old) == 1
-    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("not below 0.05", "below 0.05"))
+    audit.text_cache[audit_mod.TEX] = replace_collapsed(tex, old, old.replace("any run reached", "one run reached"))
     audit_mod.crest_table(audit)
     assert [r[2] for r in audit.drifts()] == ["prose"]
 

@@ -1,11 +1,8 @@
 # Copyright (c) anneal developers
 """Write the CREST table of the manuscript from the committed GFN2-xTB rows.
 
-CREST runs to its own end, so a pair is kept only when the call budget of this code is
-at least the median calls of CREST's complete runs. An aborted CREST run, charged no
-call, is dropped from its pair. Hits are compared with the two-sided Fisher exact test
-of scripts/paired_stats.py, because CREST is given no seed and its dynamics are not
-paired with those of this code.
+The printed row is the water octamer. anneal's file does not record the CREST
+target or budget, so the table names each arm's own stop and prints no hit test.
 
     python3 paper/jctc/scripts/crest_table.py            # rewrite the block
     python3 paper/jctc/scripts/crest_table.py --check    # exit 1 if it is stale
@@ -24,8 +21,6 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 if str(ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(ROOT / "scripts"))
-from paired_stats import fisher_exact
-
 MANUSCRIPT = ROOT / "paper" / "jctc" / "manuscript.tex"
 BENCH = ROOT / "bench"
 MARKS = ("% crest table: start", "% crest table: end")
@@ -35,8 +30,8 @@ C20_REVISION = "5351f272"
 # CREST runs already in bench/nh3-octamer/results.csv. No call column is printed.
 NH3_RECORD = "d3c3e351e2bfd8c26a279943a26e5a8230467284"
 NH3_RECORD_PATH = "bench/octamer-matched/nh3x8/results.csv"
-# First-hit (H2O)8 records. A miss is stored as the budget plus one.
-# The row prints hits, the Fisher p, and those medians, and no budget.
+# First-hit (H2O)8 records. The anneal file has no target, tolerance, or budget.
+# The table prints each arm's own stop and no hit test.
 H2O8_ANNEAL_COMMIT = "42e708289a718d3d916b46e5ae43f26cf0a677c1"
 H2O8_ANNEAL_PATH = "bench/octamer-matched/h2o8/poi/results.csv"
 H2O8_CREST_COMMIT = "7ad8eab67d61f1d5835a9ce7b67e7b2cb2b4ede9"
@@ -146,20 +141,8 @@ def covalent() -> list[dict[str, object]]:
 
 
 def pairs() -> list[dict[str, object]]:
-    """Table rows. The hexamer is omitted: its arms use different slopes and different stops."""
-    kept = []
-    for pair in (water_octamer(), ammonia_octamer(), *covalent()):
-        a, c = pair["anneal"], pair["crest"]
-        if pair.get("hits_only") or pair.get("first_hit"):
-            pair.update(median=None, p=fisher_exact(hits(a), len(a), hits(c), len(c)))
-            kept.append(pair)
-            continue
-        median = statistics.median(pair["crest_calls"])
-        if pair["budget"] is not None and pair["budget"] < median:
-            continue
-        pair.update(median=median, p=fisher_exact(hits(a), len(a), hits(c), len(c)))
-        kept.append(pair)
-    return kept
+    """The water octamer row. The arms do not share a recorded stop."""
+    return [water_octamer()]
 
 
 def number(value: float) -> str:
@@ -188,28 +171,26 @@ def pvalue(p: float) -> str:
 
 
 def table() -> str:
-    kept = pairs()
     lines = [
         "\\begin{table}",
-        "\\caption{This code against CREST 3.0.2 on GFN2-xTB clusters.",
-        "Both arms count GFN2-xTB energy and gradient calls.",
-        "A row prints the unadjusted Fisher exact \\(p\\) only when both arms use one stopping rule.",
-        "The text names each stopping rule.",
-        "The Supporting Information gives the settings, revisions, records, and the arms that",
-        "the budget rule removes.}",
+        "\\caption{anneal and CREST 3.0.2 on the GFN2-xTB water octamer.",
+        "Each arm stays under its own recorded stop.",
+        "anneal's rows do not record the CREST target or budget.",
+        "There is no paired test.",
+        "The Holm family for CREST is empty.",
+        "The Supporting Information reports the other clusters under their own stops.}",
         "\\label{tab:crest}",
         "\\centering",
         "\\footnotesize",
-        "\\begin{tabular}{@{}lrrr@{}}",
+        "\\begin{tabular}{@{}lll@{}}",
         "\\toprule",
-        "Cluster & This work & CREST & \\(p\\) \\\\",
+        "Cluster & anneal stop & CREST stop \\\\",
         "\\midrule",
+        "(H\\(_2\\)O)\\(_8\\) & not recorded & end of its run \\\\",
+        "\\bottomrule",
+        "\\end{tabular}",
+        "\\end{table}",
     ]
-    for pair in kept:
-        a, c = pair["anneal"], pair["crest"]
-        shown = f"{pair['p']:.4f}" if pair.get("first_hit") else "---"
-        lines.append(f"{pair['system']} & {hits(a)}/{len(a)} & {hits(c)}/{len(c)} & {shown} \\\\")
-    lines += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
     return "\n".join(lines)
 
 

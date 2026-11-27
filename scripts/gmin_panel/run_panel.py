@@ -794,6 +794,9 @@ def table_lines(summary: list[dict[str, str]], tex: bool) -> list[list[str]]:
         for arm in ("anneal", "gmin"):
             label = ("this work" if tex else "anneal") if arm == "anneal" else "GMIN"
             first = arm == "anneal"
+            # LJ38 pre-correction rows count different operations, so the markdown
+            # table leaves the cross-arm tests blank. The TeX table is separate.
+            blank = first and not tex and line["system"] == "lj38"
             out.append(
                 [
                     name if first else "",
@@ -805,9 +808,9 @@ def table_lines(summary: list[dict[str, str]], tex: bool) -> list[list[str]]:
                     show_s(float(line[f"{arm}_wall_median_s"])),
                     show_s(float(line[f"{arm}_pot_median_s"])),
                     show_s(float(line[f"{arm}_outside_median_s"])),
-                    show_p(float(line["fisher_p"]), tex) if first else "",
-                    show_opt_p(line["mannwhitney_p_calls"], tex) if first else "",
-                    show_opt_p(line["mannwhitney_p_wall"], tex) if first else "",
+                    "—" if blank else (show_p(float(line["fisher_p"]), tex) if first else ""),
+                    "—" if blank else (show_opt_p(line["mannwhitney_p_calls"], tex) if first else ""),
+                    "—" if blank else (show_opt_p(line["mannwhitney_p_wall"], tex) if first else ""),
                 ]
             )
     return out

@@ -694,27 +694,28 @@ its legacy xtb driver. Silicon clusters have no gap and the SCC fails at
 | system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
 | Si10 | anneal G | 12/12 | 666 | 268 | -460.683738 | 33.2 | 58.43 ms | 0.010 ms |
-| Si10 | CREST | 11/12 | 97,521 | 8,524 | -460.683718 | 2646.6 | 26.72 ms | 0.244 ms |
+| Si10 | CREST | 11/11 | 98,677 | 8,386 | -460.683718 | 2665.7 | 26.72 ms | 0.244 ms |
 | C10 | anneal G | 11/12 | 6,350 | 6,077 | -571.322738 | 14.6 | 1.18 ms | 0.002 ms |
 | C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
 
-CREST's calls are the calls of its whole run, which does not stop at the
-reference.
+CREST's calls are the calls of its whole run. CREST stops at the end of its run.
+anneal stops at the reference or at 1e5 calls. The stops differ, and there is
+no paired test. These rows are not a comparison. The CREST Si10 line drops
+seed 2009, which made no call.
 
 - Si10, with the anneal rows of `seeds.csv` (the paper's Si10 number,
-  from the anneal rerun beside CREST, is below): anneal reaches the
-  minimum on 12 of 12 seeds and CREST on 11 (Fisher p = 1). On seeds 2000-2003 anneal takes 620, 505, 520 and 2,581
+  from the anneal rerun beside CREST, is below): anneal stops at the
+  reference or at 1e5 and the row is 12 of 12. CREST stops at the end of
+  its run. On seeds 2000-2003 anneal takes 620, 505, 520 and 2,581
   calls, and CREST 108,264, 96,365, 102,236 and 94,277. On seeds
-  2004-2011 CREST takes 103,294, 93,076, 98,677, 94,481, 100,309, 0,
-  103,479 and 92,415 calls. On seed 2009 xtb's SCC does not converge on
+  2004-2011 CREST takes 103,294, 93,076, 98,677, 94,481, 100,309,
+  103,479 and 92,415 calls, and seed 2009 is dropped. On seed 2009 xtb's SCC does not converge on
   the start, with 250 or 1000 iterations, so the optimisation before
-  CREST stops and CREST makes no call. Mann-Whitney p = 3.7e-5 over the
-  twelve seeds of each code, a miss ranked after every hit
-  (`gfn2/summaries.csv`). Anneal's calls cost more inside xtb, 58 ms
+  CREST stops and CREST makes no call (`gfn2/summaries.csv`). The stops
+  differ, and there is no paired test. Anneal's calls cost more inside xtb, 58 ms
   against 27 ms, because its quenches start from random clusters where
   the SCC struggles.
-- C10: anneal reaches the ring on 11 of 12 seeds and CREST on 4 (Fisher p
-  = 0.0094, Mann-Whitney p = 0.0005). Seven CREST runs end in a compact
+- C10: anneal reaches the ring on 11 of 12 seeds and CREST on 4. The stops differ, and there is no paired test. Seven CREST runs end in a compact
   cage with four three-coordinated atoms at -566.877 eV, and its eighth
   miss, seed 2004, in the linear chain at -568.818 eV. Anneal's one miss,
   seed 2003 at the full 1e5 calls, ends in a bicyclic ring with two
@@ -729,8 +730,8 @@ calls of `seeds.csv`: only seed 2002 matches. Anneal's Si10 seeds
 2000-2011 ran again there at `f3d6a050`, serial on core 4 with hostname
 `bench`, after the CREST seeds, and are the anneal rows of
 `gfn2/rows.csv` at that revision. The summary's `--anneal-revision`
-takes only them in `gfn2/summaries.csv`, against the same twelve CREST
-rows.
+takes only them in `gfn2/summaries.csv`, beside the CREST rows of the same
+files. The run that made no call is dropped, so the CREST line is 11 runs.
 
 Seed 2009's hit is not an energy of its geometry. Anneal stops at call
 745 on -492.59511796 eV, an SCC solution that rgpot's xtb engine reaches
@@ -746,19 +747,19 @@ and `--rescore`. The Si10 number for the paper is that one:
 | system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
 | Si10 | anneal G, `f3d6a050` | 11/12 | 943.5 | 1,006 | -460.683738 | 44.9 | 45.06 ms | 0.011 ms |
-| Si10 | CREST | 11/12 | 97,521 | 8,524 | -460.683718 | 2646.6 | 26.79 ms | 0.243 ms |
+| Si10 | CREST | 11/11 | 98,677 | 8,386 | -460.683718 | 2665.7 | 26.79 ms | 0.243 ms |
 
-- Anneal reaches the minimum on 11 of 12 seeds and CREST on 11 (Fisher p
-  = 1). Mann-Whitney p = 5.3e-4 on calls to the hit, both misses ranked
-  after every hit. Anneal's median counts seed 2009 at 1e5 calls.
+- Anneal, with the false hit counted as a miss, hits 11 of 12. It stops
+  at the reference or at 1e5. CREST stops at the end of its run, and the
+  zero-call seed is dropped. The stops differ, and there is no paired
+  test. Anneal's median counts seed 2009 at 1e5 calls.
 - Anneal takes 1,191, 1,512, 520, 618, 560, 1,723, 556, 539, 2,344, 745
   (the false hit), 696 and 1,475 calls on seeds 2000-2011, against 620,
   505, 520, 2,581, 801, 778, 306, 712, 601, 728, 1,619 and 302 in
   `seeds.csv`.
 - Counting seed 2009 as the hit it records, anneal has 12/12, median
-  720.5 calls and IQR 925, and CREST has Fisher p = 1 and Mann-Whitney p =
-  3.7e-5, as against `seeds.csv`: every anneal row is below every CREST
-  row. Both lines are in `gfn2/summaries.csv`, the one with the false hit
+  720.5 calls and IQR 925. That count is anneal's own rows. The stops
+  differ, and there is no paired test. Both lines are in `gfn2/summaries.csv`, the one with the false hit
   at `8aeb3b0b` and the one without at `b22eb285`.
 - The best geometries of seeds 2002 and 2008 give -460.683718 eV under
   the same xtb single point.
@@ -791,15 +792,15 @@ that are identical byte for byte.
 | system | code | hits | median calls | IQR | best / eV | median wall / s | inside / call | outside / call |
 |---|---|---|---|---|---|---|---|---|
 | Si10 | anneal G, `ce1e7a46` | 12/12 | 665.5 | 296 | -460.683738 | 36.1 | 70.88 ms | 0.044 ms |
-| Si10 | CREST | 11/12 | 97,521 | 8,524 | -460.683718 | 2646.6 | 26.72 ms | 0.244 ms |
+| Si10 | CREST | 11/11 | 98,677 | 8,386 | -460.683718 | 2665.7 | 26.72 ms | 0.244 ms |
 | C10 | anneal G, `ce1e7a46` | 12/12 | 2,516.5 | 1,908 | -571.322738 | 10.9 | 4.43 ms | 0.005 ms |
 | C10 | CREST | 4/12 | 78,367 | 2,880 | -571.322711 | 439.5 | 5.10 ms | 0.288 ms |
 
-- Si10: anneal reaches the minimum on 12 of 12 seeds and CREST on 11
-  (Fisher p = 1, Mann-Whitney p = 3.7e-5, a miss ranked after every
-  hit). On seeds 2000-2003 anneal takes 619, 563, 520 and 2,611 calls.
-- C10: anneal reaches the ring on 12 of 12 seeds and CREST on 4 (Fisher
-  p = 0.0013, Mann-Whitney p = 2.6e-5). Seed 2003, the miss of the first
+- Si10: anneal hits 12 of 12 and stops at the reference or at 1e5.
+  CREST stops at the end of its run. The zero-call seed is dropped.
+  The stops differ, and there is no paired test. On seeds 2000-2003 anneal takes 619, 563, 520 and 2,611 calls.
+- C10: anneal reaches the ring on 12 of 12 seeds and CREST on 4. The
+  stops differ, and there is no paired test. Seed 2003, the miss of the first
   table, takes 3,123 calls. There its refused calls were the screen and
   the quench each starting from a trial with a pair at 0.6-0.8 Å, drawn
   by every move kind. No call is refused on either system
@@ -840,11 +841,12 @@ valid reference yet.
 | C20 | anneal G, `5351f272` | 0/12 | 100,000 | 0 | -1148.292908 | 1866.6 | 18.54 ms | 0.005 ms |
 | C20 | CREST | 0/12 | 78,581.5 | 4,776.8 | -1146.770080 | 1545.1 | 19.30 ms | 0.307 ms |
 
-- C20: neither code reaches the cage. Anneal's best is lower than
-  CREST's on 134 of the 144 pairs of seeds (Mann-Whitney p = 0.0004 on
-  the best energies): -1148.293 eV at best (seed 2000), and -1146.550 eV
-  on five seeds, against CREST's -1146.770 eV at best (seed 2004) and
-  median -1144.664. No anneal call was refused or failed its SCC. The
+- C20: neither code reaches the cage. anneal stops at the reference or
+  at 1e5. CREST stops at the end of its run. The stops differ, and there
+  is no paired test. On its own rows anneal's best is -1148.293 eV (seed
+  2000), and -1146.550 eV on five seeds. On its own rows CREST's best is
+  -1146.770 eV (seed 2004) and the median is -1144.664. No anneal call
+  was refused or failed its SCC. The
   rows were measured on `5351f272` (develop `eae26977` with the call
   floor and these systems, a local build head; `b4ddad0d` on
   `bench/covalent-cov6b` has its tree) with untimed searches on the other

@@ -42,9 +42,9 @@ Lennard-Jones, short-ranged Morse, and rigid water clusters on which a
 reference basin-hopping program at one documented input hits no seed.
 Removing the former structure templates costs hits on a short-ranged Morse
 cluster.
-On the water octamer both arms count first-hit calls.
-The CREST hit-rate tests are one Holm family.
-A win needs one shared stopping rule, and the only such test is not a win.
+On the water octamer each arm stays under its own recorded stop.
+anneal's rows do not record the CREST target or budget.
+There is no paired test, and the Holm family for CREST is empty.
 \end{abstract}
 
 \section{Introduction}
@@ -499,12 +499,11 @@ Because the starts are unpaired and cap-censored outcomes occur, no
 cross-arm significance test is reported for the ASE tables.
 Among comparisons that report tests, every test is two-sided and exact, so
 no continuity correction enters.
-No adjustment for multiple comparisons is made: every reported \(p\) is
-that of one cluster and one pair of arms, every cluster of each printed
-comparison is reported,
-and the Supporting Information lists each record that is not printed and why,
-and a difference in hits is called significant only when its own exact test
-is below 0.05.
+Hit-rate tests against one competitor form one Holm family~\cite{holm1979},
+and only a test whose two arms share one stopping rule enters that family.
+A one-member family leaves its \(p\) unchanged.
+A win is a Holm-adjusted value below 0.05.
+The Supporting Information lists each record that is not printed and why.
 With fewer than six discordant seeds the exact McNemar test cannot fall below
 0.05, so 12 seeds detect only large differences in hit rate, and the
 interval and the exact test, being different procedures, can disagree at
@@ -894,70 +893,38 @@ M\(_{55}\), \(\rho=14\) & \(1\times 10^{6}\) & 47.552 & 8/12 & 0/12 & 0/12 & 12 
 \label{sec:crest}
 CREST searches conformer and cluster space by metadynamics on GFN
 tight-binding Hamiltonians \cite{prachtCrestProgramExploration2024}.
-Table~\ref{tab:crest} puts this code against CREST 3.0.2 on GFN2-xTB water,
-ammonia, carbon, and silicon clusters
+Table~\ref{tab:crest} reports anneal and CREST 3.0.2 on the GFN2-xTB
+water octamer
 \cite{bannwarthGfn2xtbanAccurateBroadly2019}.
-CREST takes no seed, so its runs are not paired with those of this code.
-The unadjusted Fisher exact test is printed only where both arms use one stopping rule.
-(H\(_2\)O)\(_8\) counts first-hit calls on both sides.
-A budget pair is kept only when the budget of this code is at least the
-median calls of the complete CREST runs.
-A different slope or a different stop removes a pair even when that budget
-test passes, and the water hexamer is removed on both grounds.
-An aborted CREST run is dropped from its pair.
-The five remaining hit-rate tests are one Holm family~\cite{holm1979}.
-A win is a shared-stop test whose adjusted value is below 0.05.
-The adjusted values are 0.149 on the water octamer, 0.0471 on C\(_{10}\),
-and 1 on the ammonia octamer, Si\(_{10}\), and C\(_{20}\).
-Only the water octamer shares one stopping rule, and that adjusted value
-is not below 0.05.
-The C\(_{10}\) arms do not share a stopping rule.
-On (H\(_2\)O)\(_8\), seeds 2000--2011 of this code run with the opt-in
-polish-on-improvement option (\texttt{polish\_on\_improve}), and CREST uses
-seeds 17000--17011.
-CREST budget is 151738.
-This code hits 12 of 12 seeds at a first-hit median of 6193.
-CREST hits 7 of 12 at an all-run first-hit median of 141621.5, and a miss is
-the budget plus one.
-The median of those hits is 91817.
-\texttt{calls\_to\_hit} includes polish-on-improve calls;
-\texttt{charged\_calls}, the run total, is larger on every seed.
-The unadjusted two-sided Fisher exact test gives \(p=0.0373\).
-Mann--Whitney \(U=0\) for this code against CREST, pairs with its call larger,
-is complete separation (\(p=7.4\times 10^{-7}\)):
-its runs hit in fewer calls than every CREST run.
-The median ratio is 22.87, bootstrap 95\% interval 10.35 to 34.57.
-This code hits the ammonia octamer on 10 of 12 seeds and stops at the target
-or at a budget of 332675 calls.
-CREST hits it on 6 of 6 full runs.
-This code stops at the reference or at \(10^{5}\) calls and hits the
-C\(_{10}\) ring on 11 of 12 seeds, Si\(_{10}\) on 11 of 12, and the
-C\(_{20}\) cage on 0 of 12.
-CREST stops at the end of its run and hits that ring on 4 of 12,
-Si\(_{10}\) on 11 of 11, and the C\(_{20}\) cage on 0 of 12.
+CREST takes no seed, so its runs are not paired with those of anneal.
+On the water octamer each arm stays under its own recorded stop.
+On (H\(_2\)O)\(_8\), seeds 2000--2011 of anneal and seeds 17000--17011
+of CREST each stay under their own recorded stop.
+CREST's recorded budget is 151738.
+anneal's rows do not record the CREST target or budget.
+There is no paired test, and the Holm family for CREST is empty.
+The ammonia, carbon, and silicon arms are in the Supporting Information,
+each under its own stop, with no paired test.
+On C\(_{10}\) the target is the lowest energy any run reached.
 The Supporting Information gives the settings, revisions, and records, and
 the CREST arms that the budget rule removes.
 
 % crest table: start
 \begin{table}
-\caption{This code against CREST 3.0.2 on GFN2-xTB clusters.
-Both arms count GFN2-xTB energy and gradient calls.
-A row prints the unadjusted Fisher exact \(p\) only when both arms use one stopping rule.
-The text names each stopping rule.
-The Supporting Information gives the settings, revisions, records, and the arms that
-the budget rule removes.}
+\caption{anneal and CREST 3.0.2 on the GFN2-xTB water octamer.
+Each arm stays under its own recorded stop.
+anneal's rows do not record the CREST target or budget.
+There is no paired test.
+The Holm family for CREST is empty.
+The Supporting Information reports the other clusters under their own stops.}
 \label{tab:crest}
 \centering
 \footnotesize
-\begin{tabular}{@{}lrrr@{}}
+\begin{tabular}{@{}lll@{}}
 \toprule
-Cluster & This work & CREST & \(p\) \\
+Cluster & anneal stop & CREST stop \\
 \midrule
-(H\(_2\)O)\(_8\) & 12/12 & 7/12 & 0.0373 \\
-(NH\(_3\))\(_8\) & 10/12 & 6/6 & --- \\
-C\(_{10}\) & 11/12 & 4/12 & --- \\
-Si\(_{10}\) & 11/12 & 11/11 & --- \\
-C\(_{20}\) & 0/12 & 0/12 & --- \\
+(H\(_2\)O)\(_8\) & not recorded & end of its run \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -968,11 +935,9 @@ At arm-specific work definitions this code reaches funnel-trapped references on
 LJ\(_{98}\), M\(_{55}\) and M\(_{80}\) at \(\rho=14\), and rigid
 (H\(_2\)O)\(_{15}\) and (H\(_2\)O)\(_{20}\), where the corresponding GMIN
 arms at one documented input hit no seed.
-The water octamer is the CREST test whose arms share a stopping rule, and
-its Holm-adjusted value is not below 0.05.
-This code hits the ammonia octamer on 10 of 12 seeds and stops at the target
-or at a budget of 332675 calls.
-CREST hits that cluster on 6 of 6 full runs.
+On the water octamer each arm stays under its own recorded stop.
+anneal's rows do not record the CREST target or budget.
+There is no paired test, and the Holm family for CREST is empty.
 
 The paired knockouts show that removing the former structure templates
 lowers M\(_{38}\) hits at \(\rho=14\) from 12 of 12 to 4.
