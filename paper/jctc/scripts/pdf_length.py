@@ -14,6 +14,9 @@ is only a page number is not an abstract numeral.
     python3 paper/jctc/scripts/pdf_length.py --pdf /tmp/texb/manuscript.pdf --write
     python3 paper/jctc/scripts/pdf_length.py --pdf /tmp/texb/manuscript.pdf --check
 
+--check fails when a count is outside its limit, and when the PDF page
+count is not the pages= value in the receipt.
+
 --write records the counts and the sha256 of the sources in
 paper/jctc/logs/pdf-length.txt, which scripts/paper_audit.py reads.
 abstract_words is the poppler pdftotext count of the abstract block
@@ -137,6 +140,14 @@ def source_digests(root: Path = ROOT) -> dict[str, str]:
     return {path: hashlib.sha256((root / path).read_bytes()).hexdigest() for path in SOURCES}
 
 
+def page_problem(pages: int, recorded: dict[str, int]) -> list[str]:
+    """The rendered page count must be the receipt's pages= value."""
+    if recorded.get("pages") == pages:
+        return []
+    shown = recorded["pages"] if "pages" in recorded else "absent"
+    return [f"pages {pages}, receipt has {shown}"]
+
+
 def problems(counts: dict[str, int]) -> list[str]:
     found = []
     if counts["abstract_words"] > ABSTRACT_WORDS:
@@ -189,6 +200,9 @@ def main() -> int:
     if args.write:
         RECEIPT.write_text(receipt_text(counts, pages, source_digests()))
     found = problems(counts)
+    if args.check and RECEIPT.is_file():
+        recorded, _digests = read_receipt()
+        found.extend(page_problem(pages, recorded))
     for problem in found:
         print(f"pdf_length: {problem}", file=sys.stderr)
     return 1 if args.check and found else 0

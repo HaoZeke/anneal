@@ -20,6 +20,24 @@ both files, build the manuscript, and measure the rendered text:
     (cd paper/jctc && latexmk -pdf -outdir=/tmp/jctc manuscript.tex)
     python3 paper/jctc/scripts/pdf_length.py --pdf /tmp/jctc/manuscript.pdf --check
 
+`pdf_length.py --check` fails when the PDF page count is not the `pages=`
+value in `paper/jctc/logs/pdf-length.txt`.
+
+achemso writes `acs-manuscript.bib` in the outdir. That file carries the
+`@Control` entry `achemso-control`, and for this journal it lists every
+author. BibTeX has to read the outdir file. A comment-only
+`acs-manuscript.bib` next to the source is opened first, the control
+entry is missed, and `larsenAse2017` is shortened to et al., which drops
+a page. The same shadowing applies to `acs-si.bib`. Neither stub is in
+the tree, so the outdir file is the one BibTeX opens. The build log must
+not say that `achemso-control` was missing.
+
+tectonic and pdfTeX break lines differently, so the poppler body counts
+differ slightly. On the manuscript whose receipt lists 6722 body words,
+tectonic gives 6722 and pdfTeX gives 6718. The receipt records the
+tectonic count. `--check` compares pages with that receipt and does not
+ask the body counts to be equal.
+
 `scripts/paper_audit.py` fails on a stale label file or a stale
 `paper/jctc/logs/pdf-length.txt`; that receipt is tracked although `logs/` is
 ignored, so it is staged with `git add -f`.

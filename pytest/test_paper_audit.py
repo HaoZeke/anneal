@@ -2500,6 +2500,13 @@ def pdf_length():
     return module
 
 
+def test_a_page_count_off_the_receipt_fails():
+    length = pdf_length()
+    assert length.page_problem(27, {"pages": 27}) == []
+    assert length.page_problem(26, {"pages": 27}) == ["pages 26, receipt has 27"]
+    assert length.page_problem(27, {}) == ["pages 27, receipt has absent"]
+
+
 def test_the_rendered_abstract_counts_pdftotext_tokens():
     length = pdf_length()
     abstract = " ".join(["word"] * 150) + " on 9 of 13 at 0.317 and GFN2. " + "end " * 40
