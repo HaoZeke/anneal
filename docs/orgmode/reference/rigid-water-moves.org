@@ -45,6 +45,7 @@ For =GminTip4p=, set it to =gmin_water_geometry()=, as =examples/h2h_seed= does.
      - ``rotate_step``, 0.40 rad in ``for_tip4p``.
    * - ``rtrans1``
      - Shift one centre by a uniform step. The other centres and every orientation stay fixed.
+       The draw multiplies that half-width by the proposal scale (src/methods/cluster_hopping/moves.rs:2560).
      - Half-width is the larger of ``min_separation`` and ``translate_step``. ``min_separation`` is 2.70 A in ``for_tip4p``.
    * - ``rreor``
      - Compose a uniform random rotation onto three bodies when the cluster has at least three, and onto every body when it has fewer. Centres stay fixed.
