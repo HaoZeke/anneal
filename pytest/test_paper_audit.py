@@ -502,7 +502,7 @@ def test_ase_rows_use_one_recorded_host():
     rows[0]["host"] = "f" * 64
     audit.read[path] = rows
     audit_mod.ase_groups(audit)
-    assert "single machine-id sha256 host" in {r[2] for r in audit.drifts()}
+    assert "single recorded host digest" in {r[2] for r in audit.drifts()}
 
 
 def test_a_drifted_ase_table_cell_is_reported(monkeypatch):

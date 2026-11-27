@@ -351,10 +351,7 @@ def balance(jobs: list[Job]) -> dict[tuple[int, str], int]:
 
 
 def machine_id() -> str:
-    for path in (Path("/etc/machine-id"), Path("/proc/sys/kernel/random/boot_id")):
-        if path.is_file():
-            return hashlib.sha256(path.read_text().strip().encode()).hexdigest()
-    raise SystemExit("no machine id source")
+    return "unrecorded"
 
 
 def affinity() -> str:

@@ -34,6 +34,7 @@ from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     host_label,
     machine_columns,
+    stored_machine_id_compatible,
     read_built_gmin_source,
     require_csv_schema,
     require_gmin_build_key,
@@ -544,7 +545,7 @@ def load_saved(
             revision_fields=("code_revision", "gmin_revision"),
         )
     if (
-        row.get("machine_id") != expected_machine["machine_id"]
+        not stored_machine_id_compatible(row.get("machine_id"))
         or row.get("cpu_model") != expected_machine["cpu_model"]
     ):
         return None

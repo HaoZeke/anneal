@@ -21,9 +21,116 @@ import numpy as np
 
 from anneal import cluster_search, polish
 
-__all__ = ["Anneal"]
+__all__ = ["Anneal", "PotentialCalculator"]
 
 _MODES = frozenset({"auto", "local", "search"})
+
+
+def _base_ase_calculator():
+    try:
+        from ase.calculators.calculator import Calculator
+    except ImportError:
+        return object
+    return Calculator
+
+
+class PotentialCalculator(_base_ase_calculator()):
+    """ASE-compatible calculator wrapping an ``anneal`` potential or objective.
+
+    ``potential`` may be any built-in potential (``PairPotential``,
+    ``BinaryLennardJones``, ``SuttonChen``, ``Gupta``), a ``PyObjective``
+    constructed with ``grad_fn``, or an object providing
+    ``value_and_gradient(x) -> (energy, gradient)``. Forces are returned
+    with ASE's minus-gradient sign convention and shape ``(N, 3)``.
+    """
+
+    implemented_properties = ["energy", "free_energy", "forces"]
+
+    def __init__(self, potential, **kwargs):
+        if _base_ase_calculator() is not object:
+            super().__init__(**kwargs)
+        if not (
+            hasattr(potential, "value_and_gradient")
+            or (hasattr(potential, "eval") and hasattr(potential, "grad"))
+        ):
+            raise TypeError(
+                "potential must implement value_and_gradient(x) or eval(x) and grad(x)"
+            )
+        self.potential = potential
+        self.results: dict[str, object] = {}
+        self.atoms = None
+
+    def reset(self) -> None:
+        self.atoms = None
+        self.results = {}
+
+    def _eval_and_grad(self, flat: np.ndarray) -> tuple[float, np.ndarray]:
+        x = np.ascontiguousarray(flat, dtype=np.float64).reshape(-1)
+        if hasattr(self.potential, "value_and_gradient"):
+            energy, grad = self.potential.value_and_gradient(x)
+        else:
+            energy = self.potential.eval(x)
+            grad = self.potential.grad(x)
+        return float(energy), np.asarray(grad, dtype=np.float64).reshape(-1)
+
+    def calculate(
+        self,
+        atoms=None,
+        properties=("energy", "forces"),
+        system_changes=None,
+    ) -> None:
+        if atoms is None:
+            atoms = self.atoms
+        if atoms is None:
+            raise ValueError("atoms must be provided to calculate")
+        # ASE compares the stored atoms with the caller's. Keeping the
+        # caller's object makes a later in-place move look unchanged, so
+        # the cached energy is reused. ``Calculator.calculate`` stores a copy.
+        base = _base_ase_calculator()
+        if base is not object and isinstance(self, base) and hasattr(atoms, "copy"):
+            if system_changes is None:
+                super().calculate(atoms, properties)
+            else:
+                super().calculate(atoms, properties, system_changes)
+            atoms = self.atoms
+        else:
+            self.atoms = atoms.copy() if hasattr(atoms, "copy") else atoms
+        pos = np.asarray(atoms.get_positions(), dtype=np.float64)
+        energy, grad = self._eval_and_grad(pos.reshape(-1))
+        self.results = {
+            "energy": energy,
+            "free_energy": energy,
+            "forces": -grad.reshape(pos.shape),
+        }
+
+    def _uses_ase_cache(self, atoms) -> bool:
+        base = _base_ase_calculator()
+        return (
+            base is not object
+            and isinstance(self, base)
+            and atoms is not None
+            and hasattr(atoms, "copy")
+            and hasattr(atoms, "arrays")
+        )
+
+    def get_potential_energy(self, atoms=None, force_consistent: bool = False) -> float:
+        target = self.atoms if atoms is None else atoms
+        if target is None:
+            raise ValueError("atoms must be provided")
+        if self._uses_ase_cache(target):
+            return float(super().get_potential_energy(target, force_consistent))
+        self.calculate(target, properties=("energy", "forces"))
+        key = "free_energy" if force_consistent else "energy"
+        return float(self.results[key])
+
+    def get_forces(self, atoms=None) -> np.ndarray:
+        target = self.atoms if atoms is None else atoms
+        if target is None:
+            raise ValueError("atoms must be provided")
+        if self._uses_ase_cache(target):
+            return np.asarray(super().get_forces(target), dtype=np.float64).copy()
+        self.calculate(target, properties=("energy", "forces"))
+        return np.asarray(self.results["forces"], dtype=np.float64).copy()
 
 
 def _positions(atoms) -> np.ndarray:
@@ -140,9 +247,13 @@ class Anneal:
     atoms
         ASE ``Atoms`` (or a duck type with ``get/set_positions``,
         ``get_potential_energy``, ``get_forces``, and ``__len__``).
-    logfile, trajectory, restart, master
+    logfile, trajectory, master
         Same names as ASE. ``attach`` fires observers. ``trajectory`` is
-        written at the start of ``run`` and after each step; errors raise.
+        written at the start of ``run`` and after each step unless
+        ``master=False``; errors raise.
+    restart
+        Restart files are not supported and a non-``None`` value raises
+        ``NotImplementedError``.
     force_consistent, append_trajectory
         Accepted for the BFGS constructor shape. ``append_trajectory``
         is passed to the final/step write. ``force_consistent`` is unused
@@ -169,6 +280,8 @@ class Anneal:
         mode: str = "local",
     ):
         _require_calculator(atoms)
+        if restart is not None:
+            raise NotImplementedError("Anneal restart files are not supported")
         mode = str(mode)
         if mode not in _MODES:
             raise ValueError(f"mode must be auto, local, or search, got {mode!r}")
@@ -178,8 +291,8 @@ class Anneal:
         self.mode = mode
         self.logfile = logfile
         self.trajectory = trajectory
-        self.restart = restart
-        self.master = master
+        self.restart = None
+        self.master = None if master is None else bool(master)
         self.force_consistent = force_consistent
         self.append_trajectory = bool(append_trajectory)
         self.nsteps = 0
@@ -219,15 +332,17 @@ class Anneal:
             function = getattr(function, "write", None)
         if not callable(function):
             raise TypeError("attach function must be callable")
-        self._observers.append((function, max(1, int(interval)), args, kwargs))
+        self._observers.append((function, int(interval), args, kwargs))
 
     def _call_observers(self) -> None:
         for function, interval, args, kwargs in self._observers:
-            if self.nsteps % interval == 0:
+            if (interval > 0 and self.nsteps % interval == 0) or (
+                interval <= 0 and self.nsteps == abs(interval)
+            ):
                 function(*args, **kwargs)
 
     def _write_trajectory(self) -> None:
-        if self.trajectory is None:
+        if self.trajectory is None or self.master is False:
             return
         if hasattr(self.trajectory, "write"):
             self.trajectory.write(self.atoms)
@@ -295,7 +410,7 @@ class Anneal:
             length_scale=_nn_length_scale(self.atoms),
         )
         _set_positions(self.atoms, out["best"])
-        self.charged += int(out.get("charged", 0) or 0)
+        self.charged += int(out.get("charged", out.get("spent", 0)) or 0)
         self._did_search = True
         self.nsteps += 1
         self.log()

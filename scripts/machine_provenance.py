@@ -15,9 +15,7 @@ import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
-MACHINE_ID_SALT = b"anneal-bench-machine-id-v1\0"
-MACHINE_ID_PATH = Path("/etc/machine-id")
-PRODUCT_UUID_PATH = Path("/sys/class/dmi/id/product_uuid")
+UNRECORDED = "unrecorded"
 CPUINFO_PATH = Path("/proc/cpuinfo")
 MACHINE_FIELDS = ("machine_id", "cpu_model")
 HOST_LABEL_SALT = b"anneal-bench-host-label-v1\0"
@@ -31,20 +29,13 @@ class SavedRowProvenanceMismatch(ValueError):
     """Raised when a saved row disagrees with expected producer provenance."""
 
 
-def _darwin_machine_id() -> str:
-    try:
-        result = subprocess.run(
-            ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError:
-        return ""
-    if result.returncode != 0:
-        return ""
-    match = re.search(r'"IOPlatformUUID"\s*=\s*"([^"]+)"', result.stdout)
-    return match.group(1).strip() if match else ""
+_LEGACY_MACHINE_ID = re.compile(r"[0-9a-f]{64}")
+
+
+def stored_machine_id_compatible(value: object) -> bool:
+    """True when a stored id is the literal unrecorded or a legacy 64-hex digest."""
+    text = "" if value is None else str(value).strip()
+    return text == UNRECORDED or _LEGACY_MACHINE_ID.fullmatch(text) is not None
 
 
 def _darwin_cpu_model() -> str:
@@ -65,48 +56,20 @@ def _darwin_cpu_model() -> str:
     return ""
 
 
-def macos_machine_id() -> str:
-    """IOPlatformUUID, the hardware UUID macOS has in place of /etc/machine-id."""
-    return _darwin_machine_id() if sys.platform == "darwin" else ""
-
-
 def macos_cpu_model() -> str:
     """The brand string macOS reports where there is no /proc/cpuinfo."""
     return _darwin_cpu_model() if sys.platform == "darwin" else ""
 
 
-def machine_provenance(
-    machine_id_path: Path = MACHINE_ID_PATH,
-    product_uuid_path: Path = PRODUCT_UUID_PATH,
-    cpuinfo_path: Path = CPUINFO_PATH,
-) -> tuple[str, str]:
-    """Return a salted machine digest and the normalized CPU model.
+def machine_provenance(cpuinfo_path: Path | None = None) -> tuple[str, str]:
+    """Return the literal unrecorded machine column and the normalized CPU model.
 
-    Linux reads /etc/machine-id, then the DMI product_uuid, and
-    /proc/cpuinfo. macOS has none of them and reads the hardware UUID and the
-    CPU brand string from ioreg and sysctl instead, and only for the default
-    paths: an explicit path that names nothing still raises. A machine that
-    offers no identifier or no model raises: a row never records an invented
-    one.
+    The host machine identifier is not read. The CPU model still comes from
+    /proc/cpuinfo, or on macOS from sysctl when that file is the default and
+    absent. A machine with no CPU model string raises.
     """
-    identifier = ""
-    for path in (machine_id_path, product_uuid_path):
-        if path.is_file():
-            identifier = path.read_text().strip()
-            if identifier:
-                break
-    if (
-        not identifier
-        and sys.platform == "darwin"
-        and machine_id_path == MACHINE_ID_PATH
-        and product_uuid_path == PRODUCT_UUID_PATH
-    ):
-        identifier = macos_machine_id()
-    if not identifier:
-        raise RuntimeError(
-            "neither /etc/machine-id, the DMI product_uuid nor the macOS hardware UUID is available"
-        )
-
+    if cpuinfo_path is None:
+        cpuinfo_path = CPUINFO_PATH
     cpu_model = ""
     if cpuinfo_path.is_file():
         fields: dict[str, str] = {}
@@ -123,28 +86,20 @@ def machine_provenance(
     if not cpu_model:
         raise RuntimeError("neither /proc/cpuinfo nor sysctl has a CPU model string")
 
-    digest = hashlib.sha256(MACHINE_ID_SALT + identifier.encode()).hexdigest()
-    return digest, cpu_model
+    return UNRECORDED, cpu_model
 
 
 def machine_columns() -> dict[str, str]:
     """Return the machine columns for one row.
 
-    A campaign may hand its identity to the processes it starts through
-    ``ANNEAL_MACHINE_ID`` and ``ANNEAL_CPU_MODEL``. Both must be set, the
-    identity must be a salted SHA-256 digest as ``machine_provenance`` returns
-    it, and a variable that is empty counts as unset. Without either variable
-    the columns describe this machine.
+    ``machine_id`` is the literal unrecorded. ``cpu_model`` is
+    ``ANNEAL_CPU_MODEL`` when that variable is set, otherwise the model of
+    this machine. A handed-off machine identifier is not written.
     """
-    machine_id = os.environ.get("ANNEAL_MACHINE_ID", "")
     cpu_model = " ".join(os.environ.get("ANNEAL_CPU_MODEL", "").split())
-    if bool(machine_id) != bool(cpu_model):
-        raise RuntimeError("incomplete ANNEAL_MACHINE_ID/ANNEAL_CPU_MODEL hand-off")
-    if not machine_id:
-        machine_id, cpu_model = machine_provenance()
-    elif not re.fullmatch(r"[0-9a-f]{64}", machine_id):
-        raise RuntimeError("ANNEAL_MACHINE_ID is not a salted sha256 digest")
-    return {"machine_id": machine_id, "cpu_model": cpu_model}
+    if not cpu_model:
+        _machine_id, cpu_model = machine_provenance()
+    return {"machine_id": UNRECORDED, "cpu_model": cpu_model}
 
 
 def host_label(hostname: str | None = None) -> str:

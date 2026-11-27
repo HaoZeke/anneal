@@ -133,6 +133,13 @@ impl SuttonChen {
     /// `m c phi_ij (rho_i^{-1/2} + rho_j^{-1/2}) / 2 * (x_i - x_j) / r^2`.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_points;
+        assert_eq!(
+            x.len(),
+            3 * n,
+            "SuttonChen expects {} coordinates, got {}",
+            3 * n,
+            x.len()
+        );
         let n_exp = self.family.n_exp();
         let m_exp = self.family.m_exp();
         let c = self.family.c();

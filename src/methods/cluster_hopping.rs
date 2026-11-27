@@ -65,6 +65,29 @@ pub(crate) fn portable_cbrt(x: f64) -> f64 {
     libm::cbrt(x)
 }
 
+/// Reduced number density of a fresh liquid-like cluster sphere.
+///
+/// This is the packing density inside the draw, not the pair-separation
+/// floor. [`Config::liquid_start_radius`] and dynamic lattice search both
+/// use it, so the two starts agree before any separation rescaling.
+pub(crate) const LIQUID_START_DENSITY: f64 = 0.7;
+
+/// Radius of a sphere that holds `n` points at [`LIQUID_START_DENSITY`].
+///
+/// The cube root is `libm::cbrt`. A seeded draw that used the platform
+/// cube root would not be the same geometry on every host.
+pub(crate) fn liquid_sphere_radius(n: usize) -> f64 {
+    portable_cbrt(3.0 * n as f64 / (4.0 * std::f64::consts::PI * LIQUID_START_DENSITY))
+}
+
+/// Pair-separation floor of the Lennard-Jones preset, in reduced units.
+///
+/// Liquid density and this floor are different numbers. A draw that
+/// divides a wider `min_separation` by the density treats 0.7 as a length.
+pub(crate) fn preset_min_separation() -> f64 {
+    preset::LennardJonesPreset::MIN_SEPARATION
+}
+
 use crate::allocate::{BudgetWindowTemperature, FlooredThompson};
 use crate::bias::{
     AdaptiveHeight, BasinBias, BasinIndex, Bias, Fingerprint, SiteEnergies, SortedPairs,
@@ -7605,7 +7628,7 @@ where
             && !RIGID
             && call_due
         {
-            let fresh = random_cluster(x.len() / 3, 0.7, cfg.min_separation, rng);
+            let fresh = cfg.scaled_liquid_start(x.len() / 3, rng);
             let (energy, relaxed) = relax(ledger, fresh.view(), cfg.relax_steps);
             charged_at_best = ledger.spent();
             best_seen = ledger.best;
@@ -7839,6 +7862,7 @@ where
                             step: cfg.escape_amplitude.max(0.15),
                             max_steps: cfg.escape_max_climb.max(48),
                             overshoot: cfg.escape_overshoot.max(1.0),
+                            detected_symmetry: cfg.detected_symmetry,
                             ..crate::methods::activation::Activation::default()
                         };
                         crate::methods::activation::activate_from_origin(
@@ -7896,6 +7920,7 @@ where
                             step: cfg.escape_amplitude.max(0.15),
                             max_steps: cfg.escape_max_climb.max(16),
                             overshoot: cfg.escape_overshoot.max(1.0),
+                            detected_symmetry: cfg.detected_symmetry,
                             ..crate::methods::activation::Activation::default()
                         };
                         crate::methods::activation::activate(
@@ -8199,7 +8224,7 @@ where
                         None
                     } else {
                         new_incumbent = false;
-                        crate::csm::propose(x.view(), classes)
+                        crate::csm::propose_for(cfg.detected_symmetry, x.view(), classes)
                             .map(|projected| projected.coordinates)
                     }
                 }
@@ -10534,7 +10559,8 @@ where
             && !ledger.target_reached()
             && !ledger.stopped()
             && (moved_basin || cfg.point_symmetrise_every_accept)
-            && let Some(y) = crate::symmetrise::symmetrise_core(
+            && let Some(y) = crate::symmetrise::symmetrise_core_for(
+                cfg.detected_symmetry,
                 x.view(),
                 n,
                 cfg.symmetry_tolerance,
@@ -10595,7 +10621,8 @@ where
                 .zip(history.as_deref_mut())
                 .is_none_or(|(m, h)| h.claim_completion(m))
         {
-            let candidates = crate::packing::orbit_candidates(
+            let candidates = crate::packing::orbit_candidates_for(
+                cfg.detected_symmetry,
                 x.view(),
                 n,
                 cfg.orbit_core,
@@ -10844,42 +10871,90 @@ where
                 // tetrahedral. Detecting several axes and closing them into a group
                 // is what makes this the published scheme rather than an axial
                 // constraint wearing its name.
-                let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
-                for order in [2usize, 3, 4, 5, 6] {
-                    if let Some(c) =
-                        crate::symmetrise::detect(x.view(), n, &[order], cfg.symmetry_tolerance)
-                    {
-                        cands.push(c);
-                    }
+                if n < 2 {
+                    continue;
                 }
-                let group = crate::symmetrise::generate_group(&cands, 60);
-                let symmetrised_state = if group.len() > 1 {
-                    Some(match cfg.species.as_deref() {
-                        Some(species) if species.len() == n => {
-                            crate::symmetrise::symmetrise_group_within(
+                let symmetrised_state = if cfg.detected_symmetry {
+                    let orders = crate::symmetrise::orders_held(n);
+                    let cands = crate::symmetrise::detect_orders(
+                        x.view(),
+                        n,
+                        &orders,
+                        cfg.symmetry_tolerance,
+                    );
+                    let detected_orders: Vec<usize> =
+                        cands.iter().map(|candidate| candidate.order).collect();
+                    match crate::symmetrise::generate_closed_group(&cands, 120) {
+                        Some(group) if group.len() > 1 => Some(match cfg.species.as_deref() {
+                            Some(species) if species.len() == n => {
+                                crate::symmetrise::symmetrise_group_within(
+                                    x.view(),
+                                    n,
+                                    &group,
+                                    cfg.symmetry_merge_radius,
+                                    species,
+                                )
+                            }
+                            _ => crate::symmetrise::symmetrise_group(
                                 x.view(),
                                 n,
                                 &group,
                                 cfg.symmetry_merge_radius,
-                                species,
-                            )
-                        }
-                        _ => crate::symmetrise::symmetrise_group(
+                            ),
+                        }),
+                        Some(_) => crate::symmetrise::symmetrise_detected(
                             x.view(),
                             n,
-                            &group,
+                            &detected_orders,
+                            cfg.symmetry_tolerance,
                             cfg.symmetry_merge_radius,
-                        ),
-                    })
+                        )
+                        .map(|(y, _)| y),
+                        None => None,
+                    }
                 } else {
-                    crate::symmetrise::symmetrise_detected(
-                        x.view(),
-                        n,
-                        &[2, 3, 4, 5, 6],
-                        cfg.symmetry_tolerance,
-                        cfg.symmetry_merge_radius,
-                    )
-                    .map(|(y, _)| y)
+                    let mut cands: Vec<crate::symmetrise::Candidate> = Vec::new();
+                    for order in [2usize, 3, 4, 5, 6] {
+                        if let Some(c) = crate::symmetrise::detect_crystallographic(
+                            x.view(),
+                            n,
+                            &[order],
+                            cfg.symmetry_tolerance,
+                        ) {
+                            cands.push(c);
+                        }
+                    }
+                    if let Some(group) =
+                        crate::symmetrise::generate_group_for(cfg.detected_symmetry, &cands, 60)
+                        && group.len() > 1
+                    {
+                        Some(match cfg.species.as_deref() {
+                            Some(species) if species.len() == n => {
+                                crate::symmetrise::symmetrise_group_within(
+                                    x.view(),
+                                    n,
+                                    &group,
+                                    cfg.symmetry_merge_radius,
+                                    species,
+                                )
+                            }
+                            _ => crate::symmetrise::symmetrise_group(
+                                x.view(),
+                                n,
+                                &group,
+                                cfg.symmetry_merge_radius,
+                            ),
+                        })
+                    } else {
+                        crate::symmetrise::symmetrise_detected_crystallographic(
+                            x.view(),
+                            n,
+                            &[2, 3, 4, 5, 6],
+                            cfg.symmetry_tolerance,
+                            cfg.symmetry_merge_radius,
+                        )
+                        .map(|(y, _)| y)
+                    }
                 };
                 if let Some(y) = symmetrised_state {
                     let (es, xs) = relax(ledger, y.view(), cfg.relax_steps);
@@ -11270,6 +11345,7 @@ where
                     max_steps: cfg.escape_max_climb,
                     lanczos_steps: cfg.escape_lanczos_steps,
                     epsilon: cfg.escape_epsilon,
+                    detected_symmetry: cfg.detected_symmetry,
                     ..Activation::default()
                 };
                 let sign = if rng.random::<bool>() { 1.0 } else { -1.0 };
@@ -12116,6 +12192,10 @@ fn hop_is_identity(x: ArrayView1<f64>, y: ArrayView1<f64>) -> bool {
 }
 
 /// Samples a non-overlapping cluster uniformly inside a sphere.
+///
+/// When `radius` cannot accommodate all `n` points at `min_sep` within the
+/// initial rejection budget, the sampling sphere expands iteratively until
+/// every point is placed so the returned vector always has length `3 * n`.
 pub fn random_cluster_in_radius<R: Rng + ?Sized>(
     n: usize,
     radius: f64,
@@ -12146,7 +12226,58 @@ pub fn random_cluster_in_radius<R: Rng + ?Sized>(
             pts.push(p);
         }
     }
-    let mut out = Array1::zeros(3 * pts.len());
+    if pts.len() < n {
+        let sep = if min_sep.is_finite() && min_sep > 0.0 {
+            min_sep
+        } else {
+            0.0
+        };
+        let base_r = if radius.is_finite() && radius > 0.0 {
+            radius
+        } else {
+            0.0
+        };
+        let mut draw_r = base_r.max(sep * portable_cbrt(n.max(1) as f64));
+        for _ in 0..12 {
+            if pts.len() == n {
+                break;
+            }
+            draw_r = (draw_r * 1.35).max(sep);
+            for _ in 0..2_500 {
+                if pts.len() == n {
+                    break;
+                }
+                let mut v = [0.0; 3];
+                let mut norm = 0.0;
+                for k in 0..3 {
+                    let u1: f64 = rng.random::<f64>().max(1e-12);
+                    let u2: f64 = rng.random::<f64>();
+                    v[k] = portable_sqrt(-2.0 * portable_ln(u1))
+                        * portable_cos(2.0 * std::f64::consts::PI * u2);
+                    norm += v[k] * v[k];
+                }
+                let norm = portable_sqrt(norm).max(1e-12);
+                let r = draw_r * portable_cbrt(rng.random::<f64>());
+                let p = [v[0] / norm * r, v[1] / norm * r, v[2] / norm * r];
+                if pts.iter().all(|q| {
+                    ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2) + (p[2] - q[2]).powi(2)).sqrt()
+                        >= sep
+                }) {
+                    pts.push(p);
+                }
+            }
+        }
+        if pts.len() < n {
+            let step = if sep > 0.0 { sep } else { 1.0 };
+            let mut next_x = pts.iter().map(|q| q[0]).fold(0.0_f64, f64::max) + step;
+            while pts.len() < n {
+                pts.push([next_x, 0.0, 0.0]);
+                next_x += step;
+            }
+        }
+    }
+    assert_eq!(pts.len(), n);
+    let mut out = Array1::zeros(3 * n);
     for (i, p) in pts.iter().enumerate() {
         for k in 0..3 {
             out[3 * i + k] = p[k];
@@ -12175,12 +12306,16 @@ pub fn optimize_with_settle<'g>(
     seed: u64,
 ) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster_in_radius(
-        cfg.n_points,
-        cfg.start_radius(),
-        cfg.min_separation,
-        &mut rng,
-    );
+    let start = if cfg.move_library.is_rigid_body() {
+        random_rigid_cluster(cfg.n_points, cfg.min_separation, &mut rng)
+    } else {
+        random_cluster_in_radius(
+            cfg.n_points,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut rng,
+        )
+    };
     run_with_gradient_settle(cfg, start.view(), ledger, relax, grad, settle, &mut rng)
 }
 
@@ -12193,13 +12328,31 @@ pub fn optimize_with_gradient<'g>(
     seed: u64,
 ) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster_in_radius(
-        cfg.n_points,
-        cfg.start_radius(),
-        cfg.min_separation,
-        &mut rng,
-    );
+    let start = if cfg.move_library.is_rigid_body() {
+        random_rigid_cluster(cfg.n_points, cfg.min_separation, &mut rng)
+    } else {
+        random_cluster_in_radius(
+            cfg.n_points,
+            cfg.start_radius(),
+            cfg.min_separation,
+            &mut rng,
+        )
+    };
     run_with_gradient(cfg, start.view(), ledger, relax, grad, &mut rng)
+}
+
+/// The start [`crate::methods::cluster_search::search`] draws for `cfg`.
+///
+/// Rigid bodies get a rigid draw; a point cluster is drawn at liquid density,
+/// see [`Config::scaled_liquid_start`]. Every entry that seeds its own start
+/// for that search, the residual archive search included, draws it here so a
+/// seed gives the same start on each.
+pub fn search_start<R: Rng + ?Sized>(cfg: &Config, rng: &mut R) -> Array1<f64> {
+    if cfg.move_library.is_rigid_body() {
+        random_rigid_cluster(cfg.n_points, cfg.min_separation, rng)
+    } else {
+        cfg.scaled_liquid_start(cfg.n_points, rng)
+    }
 }
 
 /// As [`optimize_with_gradient`], with value and gradient together for
@@ -12213,7 +12366,7 @@ pub fn optimize_with_energy_gradient<'g>(
     seed: u64,
 ) -> Result<Outcome, SearchError> {
     let mut rng = StdRng::seed_from_u64(seed);
-    let start = random_cluster(cfg.n_points, 0.7, cfg.min_separation, &mut rng);
+    let start = search_start(cfg, &mut rng);
     run_with_energy_gradient(
         cfg,
         start.view(),
@@ -12572,6 +12725,38 @@ mod tests {
         assert!(ledger.below_target(-5.0));
         assert!(!ledger.below_target((-1.0_f64).next_up()));
         assert!(!ledger.below_target(f64::NAN));
+    }
+
+    /// An identity-only detection is not a symmetry, so the search does
+    /// not relax a copy of the coordinates.
+    #[test]
+    fn an_asymmetric_cloud_adds_no_relaxation() {
+        let start = Array1::from_vec(vec![
+            0.2, -0.5, 0.1, 1.1, 0.3, -0.4, -0.6, 0.8, 0.7, 0.4, -0.2, 1.3,
+        ]);
+        let mut plain = Config::for_cluster(4);
+        plain.max_hops = Some(2);
+        plain.replicas = 1;
+        plain.continuous_symmetry = ContinuousSymmetry::Off;
+        let mut measured = plain.clone();
+        measured.continuous_symmetry = ContinuousSymmetry::Measure { interval: 1 };
+        measured.detected_symmetry = true;
+        let count = |cfg: &Config| {
+            let mut calls = 0usize;
+            let mut ledger = Ledger::new(12);
+            let mut rng = StdRng::seed_from_u64(11);
+            let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _: usize| {
+                calls += 1;
+                let _ = led.charge();
+                (x.iter().sum::<f64>(), x.to_owned())
+            };
+            run(cfg, start.view(), &mut ledger, &mut relax, &mut rng).expect("run");
+            calls
+        };
+        let without = count(&plain);
+        let with = count(&measured);
+        assert!(without > 0, "the walk never relaxed");
+        assert_eq!(with, without, "the identity projection was relaxed");
     }
 
     #[test]
@@ -16238,6 +16423,30 @@ mod tests {
     }
 
     #[test]
+    fn detected_symmetry_reaches_point_group_arms() {
+        let mut cfg = Config::for_cluster(7);
+        cfg.orbit_complete_on_new = false;
+        cfg.orbit_arm = true;
+        cfg.point_symmetrise = true;
+        cfg.detected_symmetry = true;
+        let kernels = search_kernels(&cfg);
+        assert!(kernels.iter().any(|kernel| matches!(
+            kernel,
+            ClusterMove::OrbitComplete {
+                detected_symmetry: true,
+                ..
+            }
+        )));
+        assert!(kernels.iter().any(|kernel| matches!(
+            kernel,
+            ClusterMove::PointSymmetrise {
+                detected_symmetry: true,
+                ..
+            }
+        )));
+    }
+
+    #[test]
     fn the_orbit_arm_steps_one_point_when_no_group_moves_anyone() {
         let cfg = Config::for_cluster(3);
         let kernel = ClusterMove::OrbitComplete {
@@ -16247,6 +16456,7 @@ mod tests {
             core_fraction: cfg.symmetrise_core_fraction,
             min_separation: cfg.min_separation,
             fallback_step: 0.1,
+            detected_symmetry: false,
         };
         let x = Array1::from(vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0, 0.0, 1.1, 0.0]);
         let mut rng = StdRng::seed_from_u64(7);
@@ -16981,6 +17191,31 @@ mod call_floor_tests {
     use super::*;
     use crate::methods::warm_lbfgs::WarmLbfgs;
     use crate::potentials::PairPotential;
+    use rand::RngCore;
+
+    /// Every `random::<f64>()` is the same value, so a rejection draw can
+    /// place the first point and no other.
+    struct ConstantBits(u64);
+
+    impl RngCore for ConstantBits {
+        fn next_u32(&mut self) -> u32 {
+            self.next_u64() as u32
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            self.0
+        }
+
+        fn fill_bytes(&mut self, dest: &mut [u8]) {
+            let mut offset = 0;
+            while offset < dest.len() {
+                let bytes = self.next_u64().to_le_bytes();
+                let n = (dest.len() - offset).min(8);
+                dest[offset..offset + n].copy_from_slice(&bytes[..n]);
+                offset += n;
+            }
+        }
+    }
 
     const POINTS: usize = 13;
     const FLOOR: f64 = 0.9;
@@ -17171,5 +17406,159 @@ mod call_floor_tests {
         assert!((distance(&x, 0, 1) - target).abs() < 1.0e-12);
         assert!(floor.clears(x.view()));
         assert!(distance(&x, 0, 2) > floor.pair(0, 2));
+    }
+
+    #[test]
+    fn random_cluster_in_radius_never_returns_short_vector() {
+        let mut rng = StdRng::seed_from_u64(29);
+        let x = random_cluster(4, 0.7, 1.4, &mut rng);
+        assert_eq!(x.len(), 12);
+        for i in 0..4 {
+            for j in (i + 1)..4 {
+                assert!(distance(&x, i, j) + 1.0e-12 >= 1.4);
+            }
+        }
+    }
+
+    fn points_of(x: &Array1<f64>) -> Vec<[f64; 3]> {
+        (0..x.len() / 3)
+            .map(|i| [x[3 * i], x[3 * i + 1], x[3 * i + 2]])
+            .collect()
+    }
+
+    /// The requested sphere cannot hold the points, so the draw has to grow
+    /// it. The grown points are not the collinear fallback.
+    #[test]
+    fn random_cluster_in_radius_expands_a_sphere_that_cannot_hold_the_points() {
+        let n = 5;
+        let radius = 0.05;
+        let sep = 1.2;
+        let mut rng = StdRng::seed_from_u64(11);
+        let x = random_cluster_in_radius(n, radius, sep, &mut rng);
+        assert_eq!(x.len(), 3 * n);
+        for i in 0..n {
+            for j in (i + 1)..n {
+                assert!(
+                    distance(&x, i, j) + 1.0e-12 >= sep,
+                    "points {i} and {j} overlap"
+                );
+            }
+        }
+        let pts = points_of(&x);
+        assert!(
+            pts.iter()
+                .any(|p| (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt() > radius + 1.0e-8),
+            "every point still lies in the original sphere"
+        );
+        let off_axis = pts
+            .iter()
+            .filter(|p| p[1].abs() > 1.0e-8 || p[2].abs() > 1.0e-8)
+            .count();
+        assert!(
+            off_axis >= 3,
+            "expansion collapsed onto the fallback line ({off_axis} points off axis)"
+        );
+    }
+
+    /// A generator that repeats one sample accepts the first point and then
+    /// nothing. The remaining points are the line fallback.
+    #[test]
+    fn random_cluster_in_radius_falls_back_to_a_separated_line() {
+        let n = 4;
+        let sep = 1.5;
+        let mut rng = ConstantBits(0);
+        let x = random_cluster_in_radius(n, 2.0, sep, &mut rng);
+        assert_eq!(x.len(), 3 * n);
+        let pts = points_of(&x);
+        for i in 1..n {
+            assert!(
+                pts[i][1].abs() < 1.0e-12 && pts[i][2].abs() < 1.0e-12,
+                "point {i} is not on the fallback line: {:?}",
+                pts[i]
+            );
+            let step = pts[i][0] - pts[i - 1][0];
+            assert!(
+                (step - sep).abs() < 1.0e-9,
+                "fallback step {step} is not {sep}"
+            );
+        }
+        for i in 0..n {
+            for j in (i + 1)..n {
+                assert!(distance(&x, i, j) + 1.0e-12 >= sep);
+            }
+        }
+    }
+
+    #[test]
+    fn scaled_liquid_start_matches_unit_and_scales_covariantly() {
+        for seed in [0_u64, 7, 29] {
+            let cfg_unit = Config::recommended(38);
+            let mut rng_a = StdRng::seed_from_u64(seed);
+            let mut rng_b = StdRng::seed_from_u64(seed);
+            let a = cfg_unit.scaled_liquid_start(38, &mut rng_a);
+            let b = random_cluster(38, 0.7, cfg_unit.min_separation, &mut rng_b);
+            assert!(
+                a.iter()
+                    .zip(b.iter())
+                    .all(|(u, v)| u.to_bits() == v.to_bits())
+            );
+
+            let cfg4 = Config::recommended(4);
+            let cfg4_scaled = Config::recommended_with_scales(4, 2.0, 3.0);
+            let mut rng_u = StdRng::seed_from_u64(seed);
+            let mut rng_s = StdRng::seed_from_u64(seed);
+            let u = cfg4.scaled_liquid_start(4, &mut rng_u);
+            let s = cfg4_scaled.scaled_liquid_start(4, &mut rng_s);
+            assert_eq!(s.len(), 12);
+            for (ui, si) in u.iter().zip(s.iter()) {
+                assert!((si - 2.0 * ui).abs() < 1.0e-12);
+            }
+        }
+    }
+
+    #[test]
+    fn search_start_is_the_liquid_start_the_search_relaxes_first() {
+        let bits = |x: ArrayView1<f64>| x.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        for n in [13_usize, 38, 75] {
+            let cfg = Config::recommended(n);
+            let radius = cfg.liquid_start_radius(n);
+            for seed in [0_u64, 11] {
+                let start = search_start(&cfg, &mut StdRng::seed_from_u64(seed));
+                let liquid = cfg.scaled_liquid_start(n, &mut StdRng::seed_from_u64(seed));
+                assert_eq!(bits(start.view()), bits(liquid.view()), "n = {n}");
+                let reach = start
+                    .exact_chunks(3)
+                    .into_iter()
+                    .map(|p| p.dot(&p).sqrt())
+                    .fold(0.0_f64, f64::max);
+                assert!(reach <= radius, "n = {n}, seed {seed}: {reach} > {radius}");
+
+                let mut relaxed = Vec::new();
+                let mut relax = |led: &mut Ledger, x: ArrayView1<f64>, _: usize| {
+                    let _ = led.charge();
+                    relaxed.push(x.to_owned());
+                    (x.dot(&x), x.to_owned())
+                };
+                let mut ledger = Ledger::new(4);
+                let _ =
+                    optimize_with_energy_gradient(&cfg, &mut ledger, &mut relax, None, None, seed);
+                let first = relaxed.first().expect("the search relaxes its start");
+                assert_eq!(bits(first.view()), bits(start.view()), "n = {n}");
+            }
+        }
+    }
+
+    #[test]
+    fn scaled_four_point_lj_search_seed_29_preserves_dimension() {
+        let pot = crate::potentials::PairPotential::lennard_jones(4);
+        let cfg = Config::recommended_with_scales(4, 2.0, 3.0);
+        let mut ledger = Ledger::new(120);
+        let (out, _stats) =
+            crate::methods::cluster_search::search(&pot, &cfg, &mut ledger, 29).unwrap();
+        assert_eq!(out.best_state.as_ref().unwrap().len(), 12);
+        // This seed reaches the four-point minimum. The hop count pins the
+        // walk; a shape check stays green if the search takes another path.
+        assert!((out.best - -5.9999999948323985).abs() < 1.0e-12);
+        assert_eq!(out.hops, 2);
     }
 }

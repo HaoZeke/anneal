@@ -1,1 +1,1 @@
-The campaign and panel scripts read the machine id and the CPU model only through ``machine_columns()``. The GMIN head-to-head runner, the TIP4P rerun, the template-free cell runner, the LJ board and the other scripts that read ``/etc/machine-id`` or ``/proc/cpuinfo`` themselves no longer do. Rows already on disk are not changed.
+Campaign and panel scripts stamp ``machine_id`` as the literal ``unrecorded`` through ``machine_columns()``, which reads no host identifier. ``cpu_model`` still comes from that helper. Rows already on disk are not changed.

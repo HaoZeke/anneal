@@ -1016,6 +1016,23 @@ pub fn step_into_hole_escaping<R: Rng + ?Sized>(
     mobile: Option<&[usize]>,
     rng: &mut R,
 ) -> Array1<f64> {
+    step_into_hole_escaping_with_lens(
+        x, wells, soap_step, escape, rcut, species, mobile, false, rng,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn step_into_hole_escaping_with_lens<R: Rng + ?Sized>(
+    x: ArrayView1<f64>,
+    wells: &[Array1<f64>],
+    soap_step: f64,
+    escape: f64,
+    rcut: f64,
+    species: Option<&[u32]>,
+    mobile: Option<&[usize]>,
+    ring_lens: bool,
+    rng: &mut R,
+) -> Array1<f64> {
     let mut cur = x.to_owned();
     let step = soap_step.max(SOAP_PACK_MERGE);
     let cart_guard = 2.0;
@@ -1055,7 +1072,9 @@ pub fn step_into_hole_escaping<R: Rng + ?Sized>(
         }
         dp *= step / dn;
         let mut dr = tikhonov(&s.mean_jac, dp.view(), LAMBDA);
-        if let Some(coords) = cur.as_slice()
+        if ring_lens
+            && mobile.is_none()
+            && let Some(coords) = cur.as_slice()
             && let Some(delta) = dr.as_slice_mut()
         {
             crate::catalog::lens_ring_displacement(coords, delta);
@@ -1207,7 +1226,8 @@ fn packing_kick<R: Rng + ?Sized>(
     }
     u /= nrm;
     let mut dr = tikhonov(&s.mean_jac, u.view(), LAMBDA);
-    if let Some(coords) = x.as_slice()
+    if mobile.is_none()
+        && let Some(coords) = x.as_slice()
         && let Some(delta) = dr.as_slice_mut()
     {
         crate::catalog::lens_ring_displacement(coords, delta);
@@ -1289,7 +1309,17 @@ pub fn step_away_featomic<R: Rng + ?Sized>(
     if rms < DEFECT || shell_leftover(&values) {
         let archive = PACK_ARCHIVE.with(|a| a.borrow().clone());
         if !archive.is_empty() {
-            return step_into_hole(x, &archive, SOAP_PACK_MERGE, rcut, species, mobile, rng);
+            return step_into_hole_escaping_with_lens(
+                x,
+                &archive,
+                SOAP_PACK_MERGE,
+                SOAP_PACK_ESCAPE,
+                rcut,
+                species,
+                mobile,
+                true,
+                rng,
+            );
         }
         // A uniform leftover on a free cluster means a closed packing
         // with nothing local to follow, and the kick is the escape from
@@ -1459,7 +1489,17 @@ mod tests {
         if rms < DEFECT || shell_leftover(&s) {
             let archive = PACK_ARCHIVE.with(|a| a.borrow().clone());
             if !archive.is_empty() {
-                return step_into_hole(x, &archive, SOAP_PACK_MERGE, rcut, species, mobile, rng);
+                return step_into_hole_escaping_with_lens(
+                    x,
+                    &archive,
+                    SOAP_PACK_MERGE,
+                    SOAP_PACK_ESCAPE,
+                    rcut,
+                    species,
+                    mobile,
+                    true,
+                    rng,
+                );
             }
             if mobile.is_some_and(|set| set.len() < x.len() / 3) {
                 return x.to_owned();
@@ -2123,6 +2163,42 @@ mod tests {
                 "packing hop produced a non-finite coordinate"
             );
         }
+    }
+
+    #[test]
+    fn champion_hole_walk_does_not_take_the_archive_ring_lens() {
+        let ico75 = load_xyz(include_str!("../tests/fixtures/lj75_ico.xyz"));
+        let mu = soap_cloud_mean(ico75.view(), 3.5, None, None);
+        let wells = std::slice::from_ref(&mu);
+        let mut plain_rng = StdRng::seed_from_u64(11);
+        let mut archive_rng = StdRng::seed_from_u64(11);
+        let plain = step_into_hole(
+            ico75.view(),
+            wells,
+            SOAP_PACK_MERGE,
+            3.5,
+            None,
+            None,
+            &mut plain_rng,
+        );
+        let archive = step_into_hole_escaping_with_lens(
+            ico75.view(),
+            wells,
+            SOAP_PACK_MERGE,
+            SOAP_PACK_ESCAPE,
+            3.5,
+            None,
+            None,
+            true,
+            &mut archive_rng,
+        );
+        assert!(
+            plain
+                .iter()
+                .zip(archive.iter())
+                .any(|(left, right)| left.to_bits() != right.to_bits()),
+            "archive ring lens must not leak into champion SOAP"
+        );
     }
 
     fn quench_lj(x: ArrayView1<f64>) -> (f64, Array1<f64>) {

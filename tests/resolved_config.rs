@@ -1,4 +1,4 @@
-use anneal_core::methods::cluster_hopping::{ArmSelection, Config, SoapProposalMode};
+use anneal_core::methods::cluster_hopping::{ArmSelection, ClusterMove, Config, SoapProposalMode};
 use anneal_core::potentials::PairKind;
 
 #[test]
@@ -399,6 +399,79 @@ fn pair_scaling_is_general_and_lennard_jones_is_unchanged() {
     assert_eq!(morse.energy_scale, 1.0);
     assert!((morse.length_scale - 2.0_f64.powf(-1.0 / 6.0)).abs() < 1e-15);
     assert!(morse.start_radius() < stock.start_radius());
+}
+
+#[test]
+fn with_detected_symmetry_opts_in_and_tracks_safe6_counter() {
+    let stock = Config::recommended(13);
+    assert!(!stock.detected_symmetry);
+    assert!(!stock.resolved_json().unwrap().contains("detected_symmetry"));
+
+    let opted = Config::recommended(13).with_detected_symmetry();
+    assert!(opted.detected_symmetry);
+    assert!(
+        opted
+            .resolved_json()
+            .unwrap()
+            .contains(r#""detected_symmetry":true"#)
+    );
+    assert_ne!(
+        opted.resolved_sha256().unwrap(),
+        stock.resolved_sha256().unwrap()
+    );
+    let mut routed = opted.clone();
+    routed.orbit_complete_on_new = false;
+    routed.orbit_arm = true;
+    routed.point_symmetrise = true;
+    let kernels = routed.move_library.kernels(&routed);
+    assert!(kernels.iter().any(|kernel| matches!(
+        kernel,
+        ClusterMove::OrbitComplete {
+            detected_symmetry: true,
+            ..
+        }
+    )));
+    assert!(kernels.iter().any(|kernel| matches!(
+        kernel,
+        ClusterMove::PointSymmetrise {
+            detected_symmetry: true,
+            ..
+        }
+    )));
+
+    let before = anneal_core::symmetrise::safe6_nearest_index_calls();
+    let pot = anneal_core::potentials::PairPotential::lennard_jones(13);
+    let mut ledger = anneal_core::methods::cluster_hopping::Ledger::new(250);
+    let _ = anneal_core::methods::cluster_search::search(&pot, &opted, &mut ledger, 7)
+        .expect("short opted search");
+    let after = anneal_core::symmetrise::safe6_nearest_index_calls();
+    assert!(
+        after > before,
+        "opt-in detected_symmetry path must exercise safe6 (before={before}, after={after})"
+    );
+}
+
+#[test]
+fn detected_propose_matches_each_class_separately() {
+    let order = 7;
+    let mut coordinates = Vec::with_capacity(6 * order);
+    let mut classes = Vec::with_capacity(2 * order);
+    for (class, radius, height, phase) in [(0, 1.0, -0.4, 0.0), (1, 1.4, 0.4, 0.0)] {
+        for step in 0..order {
+            let angle = std::f64::consts::TAU * step as f64 / order as f64 + phase;
+            coordinates.extend([radius * angle.cos(), radius * angle.sin(), height]);
+            classes.push(class);
+        }
+    }
+    let coordinates = ndarray::Array1::from_vec(coordinates);
+    let projection = anneal_core::csm::propose_for(true, coordinates.view(), &classes)
+        .expect("multi-class projection");
+    assert_eq!(projection.group, "detected");
+    let templates =
+        anneal_core::csm::propose(coordinates.view(), &classes).expect("template projection");
+    assert_ne!(templates.group, "detected");
+    assert!(projection.measure < 1.0e-12, "{}", projection.measure);
+    assert_eq!(projection.coordinates.len(), coordinates.len());
 }
 
 #[test]

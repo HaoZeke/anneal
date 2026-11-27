@@ -62,14 +62,6 @@ EXEMPT = {
         'raise SystemExit(f"uts name is {socket.gethostname()}")',
     ): TUNED_REASON + ", and the name is shown on a refused start, never written to a row",
     (
-        "scripts/gmin_panel/tuned.py",
-        'for path in (Path("/etc/machine-id"), Path("/proc/sys/kernel/random/boot_id")):',
-    ): TUNED_REASON + ", and both ids only feed a digest",
-    (
-        "scripts/paper_rerun/sc_h2h.py",
-        'raw = Path("/etc/machine-id").read_bytes().strip()',
-    ): "the id is read to be hashed by the next line, and only the sha256 reaches a row",
-    (
         "scripts/elja_hq_sci_bankrpc.sh",
         "HOST=${BANK_HOST:-$(hostname)}",
     ): "the address the compute jobs dial, kept in their environment; the log line prints its host label",

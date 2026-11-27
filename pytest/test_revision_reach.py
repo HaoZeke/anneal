@@ -257,7 +257,7 @@ MACHINE_CHECKS = (
 )
 DIGEST_CHECK = 'if len(first) == 64 and all(c in "0123456789abcdef" for c in first):'
 DIGEST_REASON = "a 64-character sha256 digest of a data file, not a commit id"
-# (file, exact line content) -> why the line is not a commit-id or machine-identity check.
+# (file, exact line content) -> why the line is not a commit id or host identity check.
 EXEMPT = {
     ("paper/jctc/scripts/fig_landfold_maps.py", DIGEST_CHECK): DIGEST_REASON,
     ("paper/jctc/scripts/lj75_gmin_table.py", DIGEST_CHECK): DIGEST_REASON,
@@ -280,14 +280,6 @@ EXEMPT = {
         "scripts/run_cuh2_fcc_rec.sh",
         "awk -F: '/^[Cc]pu MHz/ { gsub(/^[ \\t]+/, \"\", $2); print $2 }' /proc/cpuinfo",
     ): "clock speeds of a run, not a machine identity",
-    (
-        "scripts/gmin_panel/tuned.py",
-        'for path in (Path("/etc/machine-id"), Path("/proc/sys/kernel/random/boot_id")):',
-    ): "frozen: the committed tuned rows are verified against this file's exact blob, so it moves with their rerun",
-    (
-        "scripts/paper_rerun/sc_h2h.py",
-        'raw = Path("/etc/machine-id").read_bytes().strip()',
-    ): "the id is read to be hashed by the next line, and only the sha256 reaches a row",
     (
         "paper/jctc/scripts/water_h2h.py",
         'for line in Path("/proc/cpuinfo").read_text().splitlines():',
@@ -376,15 +368,31 @@ def test_the_listed_tuned_rewrite_is_what_accepts_the_committed_rows(monkeypatch
     head = git_text("rev-parse", "HEAD:scripts/gmin_panel/tuned.py")
     harness = audited_row()["harness_commit"]
     old = git_text("rev-parse", f"{harness}:scripts/gmin_panel/tuned.py")
+    recorded_old, heads = revision_reach.TUNED_SOURCE_REWRITES[harness]
     assert old != head
-    assert revision_reach.TUNED_SOURCE_REWRITES == {harness: (old, head)}
+    assert recorded_old == old
+    assert head in heads and len(heads) == 2
+    legacy = next(blob for blob in heads if blob != head)
+    assert revision_reach.tuned_source_accepted(harness, old, head)
+    assert revision_reach.tuned_source_accepted(harness, old, legacy)
+    assert not revision_reach.tuned_source_accepted(harness, old, "0" * 40)
+    assert not revision_reach.tuned_source_accepted(harness, "0" * 40, head)
+    assert not revision_reach.tuned_source_accepted(HELD, old, head)
+    assert not revision_reach.tuned_source_accepted(HELD, old, legacy)
     assert revision_reach.tuned_gmin_harness_verified(audited_row())
     monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {})
     assert not revision_reach.tuned_gmin_harness_verified(audited_row())
-    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {harness: (old, "0" * 40)})
+    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {harness: (old, frozenset({"0" * 40}))})
     assert not revision_reach.tuned_gmin_harness_verified(audited_row())
-    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {HELD: (old, head)})
+    monkeypatch.setattr(revision_reach, "TUNED_SOURCE_REWRITES", {HELD: (old, frozenset({head, legacy}))})
     assert not revision_reach.tuned_gmin_harness_verified(audited_row())
+
+
+def test_a_committed_tuned_row_verifies_at_head(paths):
+    rows = [row for row in tuned_rows() if row["system"] in revision_reach.TUNED_SYSTEMS]
+    assert rows
+    for row in rows:
+        assert {name: bool(check(row)) for name, check in paths.items()} == dict.fromkeys(paths, True)
 
 
 def side_commit(repo: Path, parent: str, files: dict[str, str]) -> str:

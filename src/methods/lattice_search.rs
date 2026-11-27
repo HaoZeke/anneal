@@ -20,7 +20,9 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
 
-use crate::methods::cluster_hopping::{ChargeName, Ledger, Outcome, Relax, random_cluster};
+use crate::methods::cluster_hopping::{
+    ChargeName, Ledger, Outcome, Relax, random_cluster_in_radius,
+};
 use crate::potentials::PairKind;
 
 use std::collections::VecDeque;
@@ -679,6 +681,28 @@ pub fn walk_occupation_on(
     Array1::from(best)
 }
 
+/// Radius of a fresh liquid-density start for `n` points.
+///
+/// The sphere volume uses [`crate::methods::cluster_hopping::LIQUID_START_DENSITY`]
+/// (0.7) and `libm::cbrt`, the same pair `Config::liquid_start_radius` uses
+/// for the unscaled sphere. A `min_separation` wider than the preset pair
+/// floor ([`crate::methods::cluster_hopping::preset_min_separation`], 0.85)
+/// enlarges that sphere by `min_separation / 0.85`. The old code divided by
+/// 0.7, which is the density, not a length, so a caller who raised
+/// `min_separation` past 0.7 drew a different radius here than from the
+/// config path. A floor at or below 0.85, including this search's default
+/// of 0.5, keeps the liquid sphere: the rescaling only grows a draw that
+/// is already wider than the pair floor.
+pub(crate) fn fresh_draw_radius(n: usize, min_separation: f64) -> f64 {
+    let unit_radius = crate::methods::cluster_hopping::liquid_sphere_radius(n);
+    let floor = crate::methods::cluster_hopping::preset_min_separation();
+    if min_separation.is_finite() && min_separation > floor {
+        unit_radius * (min_separation / floor)
+    } else {
+        unit_radius
+    }
+}
+
 /// Run the dynamic lattice search under `ledger`.
 ///
 /// `relax` is the caller's charged quench. The search alternates construction
@@ -692,7 +716,8 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
     let mut constructions = 0usize;
     let mut improvements = 0usize;
     let mut charged_at_best = 0usize;
-    let start = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+    let draw_radius = fresh_draw_radius(n, cfg.min_separation);
+    let start = random_cluster_in_radius(n, draw_radius, cfg.min_separation, &mut rng);
     let (mut e, mut x) = relax(ledger, start.view(), cfg.relax_steps);
     ledger.record(e, x.view());
     let mut stalls = 0usize;
@@ -722,7 +747,7 @@ pub fn run(cfg: &LatticeSearchConfig, ledger: &mut Ledger, relax: Relax<'_>, see
             stalls += 1;
         }
         if stalls >= cfg.patience {
-            let fresh = random_cluster(n, 0.7, cfg.min_separation, &mut rng);
+            let fresh = random_cluster_in_radius(n, draw_radius, cfg.min_separation, &mut rng);
             let (e_fresh, x_fresh) = relax(ledger, fresh.view(), cfg.relax_steps);
             ledger.record(e_fresh, x_fresh.view());
             e = e_fresh;
@@ -1984,6 +2009,32 @@ mod tests {
         };
         let mut ledger = Ledger::new(budget);
         run(&cfg, &mut ledger, &mut relax, seed)
+    }
+
+    #[test]
+    fn fresh_draw_uses_the_preset_floor_not_the_liquid_density() {
+        let n = 8;
+        let unit = crate::methods::cluster_hopping::liquid_sphere_radius(n);
+        let floor = crate::methods::cluster_hopping::preset_min_separation();
+        assert_eq!(floor.to_bits(), 0.85_f64.to_bits());
+        assert_eq!(
+            unit.to_bits(),
+            libm::cbrt(
+                3.0 * n as f64
+                    / (4.0
+                        * std::f64::consts::PI
+                        * crate::methods::cluster_hopping::LIQUID_START_DENSITY)
+            )
+            .to_bits()
+        );
+        // 0.8 sits above the old 0.7 cutoff and below the pair floor, so
+        // the draw stays the liquid sphere.
+        assert_eq!(fresh_draw_radius(n, 0.8).to_bits(), unit.to_bits());
+        assert_eq!(fresh_draw_radius(n, 0.5).to_bits(), unit.to_bits());
+        let wide = 1.7;
+        let got = fresh_draw_radius(n, wide);
+        assert_eq!(got.to_bits(), (unit * (wide / floor)).to_bits());
+        assert!((got - unit * (wide / 0.7)).abs() > 1e-6);
     }
 
     fn fixture(name: &str) -> Array1<f64> {

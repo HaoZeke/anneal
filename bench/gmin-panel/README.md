@@ -84,7 +84,8 @@ arms do not share a stop, and `hit` and `evals_to_hit` are unaffected.
   scores the latest stored row of each seed. `code_revision` is the anneal
   commit on anneal rows and the GMIN SVNREV or tarball sha256 on GMIN rows;
   `harness_revision` is the anneal commit whose examples wrote the starts;
-  `host` is the UTS hostname or machine-id sha256 and `session` the
+  committed `host` values are the UTS label `bench` or a legacy 64-hex
+  digest, and new rows write the literal `unrecorded`. `session` is the
   campaign stamp.
 - `gmin-source.txt`: the GMIN tarball, SVNREV, patches, CMake flags,
   compiler, linked BLAS and LAPACK and binary hash.

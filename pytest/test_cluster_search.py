@@ -586,6 +586,33 @@ def test_cluster_search_ras_reports_nonzero_branch_counters():
     assert 0 < ledger["screened_out"] <= ledger["screen"]
 
 
+@pytest.mark.parametrize("n", [13, 38, 75])
+def test_ras_true_starts_where_the_normal_search_starts(n):
+    from anneal._core import cluster_search as core_cluster_search
+
+    seed = 5
+    cfg = Config.recommended(n)
+    start = np.asarray(cfg.search_start(seed))
+    assert start.shape == (3 * n,)
+    assert cfg.liquid_start_radius() == cfg.liquid_start_radius(n)
+    reach = np.linalg.norm(start.reshape(-1, 3), axis=1).max()
+    assert reach <= cfg.liquid_start_radius()
+
+    for kwargs in ({"ras": True}, {"recommended": True}):
+        seen = []
+
+        def energy(x):
+            seen.append(np.array(x, dtype=np.float64).tobytes())
+            return lj_energy(x)
+
+        def grad(x):
+            seen.append(np.array(x, dtype=np.float64).tobytes())
+            return lj_grad(x)
+
+        core_cluster_search(energy, grad, n, 800, seed=seed, **kwargs)
+        assert start.tobytes() in seen, kwargs
+
+
 def flexible_water(x: np.ndarray, molecules: int):
     """Harmonic O-H and H-H springs and an O-O Lennard-Jones term, in eV and angstrom."""
     p = np.asarray(x, dtype=np.float64).reshape(-1, 3)
@@ -643,6 +670,36 @@ def test_quench_tric_needs_one_label_per_atom():
         quench(lambda x: flexible_water(x, 2), WATER_DIMER, 1e-3, method="tric", species=[8, 1, 1])
     with pytest.raises(ValueError, match="method"):
         quench(lambda x: flexible_water(x, 2), WATER_DIMER, 1e-3, method="bfgs")
+
+
+def test_cluster_search_splits_input_errors_from_invariant_failures():
+    """Bad input stays ValueError. A kernel panic that is not a caller
+    contract is RuntimeError."""
+    lj4 = pytest.importorskip("anneal").PairPotential.lennard_jones(4)
+    with pytest.raises(ValueError, match="free non-periodic"):
+        cfg = Config.recommended(4)
+        cfg.frozen = [True, False, False, False]
+        cfg.continuous_symmetry = ("measure", 10)
+        cluster_search(lj4, None, 4, 20, seed=1, config=cfg)
+    with pytest.raises(ValueError, match="single chain"):
+        cfg = Config.recommended(4)
+        cfg.delayed_acceptance = True
+        cfg.replicas = 2
+        cluster_search(lj4, None, 4, 20, seed=1, config=cfg)
+    with pytest.raises(ValueError, match="ira"):
+        cfg = Config.recommended(4)
+        cfg.shape_keyed = True
+        cluster_search(lj4, None, 4, 20, seed=1, config=cfg)
+    with pytest.raises(ValueError, match="at least one atom"):
+        cluster_search(lj4, None, 4, 20, seed=1, groups=[])
+    with pytest.raises(ValueError, match="at least one atom"):
+        cluster_search(lj4, None, 4, 20, seed=1, groups=[[]])
+    # The binding accepts this keying. The linked kernel was not built
+    # with the spherical expansion, and it panics rather than invent one.
+    with pytest.raises(RuntimeError, match="featomic"):
+        cfg = Config.recommended(4)
+        cfg.keying = "q4"
+        cluster_search(lj4, None, 4, 20, seed=1, config=cfg)
 
 
 def test_cluster_search_tric_local_step():

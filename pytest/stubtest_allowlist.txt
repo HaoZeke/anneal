@@ -1,0 +1,8 @@
+# Copyright (c) anneal developers
+# Reason: PyO3 #[new] binds constructor parameters on tp_new (__new__) while
+# leaving tp_init as object.__init__(self); pytest/test_stubs.py verifies the
+# exact constructor parameters and defaults against inspect.signature(cls).
+anneal\._core\.(BasinBias|BinaryLennardJones|Boltzmann|Bounds|Fast|GminTip4p|Gsa|Ledger|PairPotential|PyObjective|SuttonChen|Tip4pCluster)\.__init__
+# Reason: Companion tp_new side of PyO3 #[new] for the same twelve extension
+# classes whose constructor signatures are declared on __init__ in _core.pyi.
+anneal\._core\.(BasinBias|BinaryLennardJones|Boltzmann|Bounds|Fast|GminTip4p|Gsa|Ledger|PairPotential|PyObjective|SuttonChen|Tip4pCluster)\.__new__

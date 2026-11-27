@@ -22,6 +22,9 @@ LAMMPS_LIB_DIR=/path/to/lammps/lib cargo check --locked --features lammps
 * =graphkey=
 
 Exact basin identity by canonical contact-graph labelling through nauty.
+The Python wheel enables it, because ~cluster_search(ras=True)~ needs it.
+The nauty build generates its bindings with bindgen, so the build host
+needs libclang.
 
 #+begin_src sh
 cargo check --locked --features graphkey

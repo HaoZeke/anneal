@@ -894,12 +894,12 @@ mod run {
             Ok(())
         }
 
-        /// Configure the in-process motif-class table.
+        /// Configure the in-process descriptor-class table.
         pub fn enable_core_class(&mut self, patience: usize, trial: usize) {
             self.core_class = CoreClassTable::new(patience, trial);
         }
 
-        /// Report one replica's motif class and energy.
+        /// Report one replica's descriptor class and energy.
         ///
         /// A connected coordinator holds the shared table. Without a
         /// client the in-process table answers, so a single chain still

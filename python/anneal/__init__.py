@@ -40,11 +40,24 @@ import numpy as np
 
 from anneal._core import (
     BasinBias,
+    BinaryLennardJones,
     Boltzmann,
     Bounds,
+    COPPER_Z,
     Config,
+    DEFAULT_BETA0,
     DEFAULT_HIT_TOL,
+    DEFAULT_STEPS_PER_CONTROL,
+    DEFAULT_TARGET_WALKERS,
+    GOLD_Z,
+    GminTip4p,
+    Gupta,
+    IDENTITY_TOL,
+    PLATINUM_Z,
+    PairPotential,
     SEARCH_HIT_TOL,
+    SuttonChen,
+    Tip4pCluster,
     EpochLine,
     Fast,
     Gsa,
@@ -52,12 +65,19 @@ from anneal._core import (
     Ledger,
     PyObjective,
     __version__,
+    block_from_interleaved_gmin as _core_block_from_interleaved_gmin,
     cluster_search as _core_cluster_search,
     energy_hits,
+    energy_ohh as _core_energy_ohh,
+    gmin_tip4p_sites,
+    interleaved_gmin_from_block as _core_interleaved_gmin_from_block,
     low_discrepancy_points as _core_low_discrepancy_points,
+    osa_acceptance_rate,
     pilot_draws_qmc as _core_pilot_draws_qmc,
     polish as _core_polish,
     quench as _core_quench,
+    recommend_target_n,
+    rigid_from_ohh as _core_rigid_from_ohh,
     qmc_best1bin_scout as _core_qmc_best1bin_scout,
     qmc_best1bin_scout_objective as _core_qmc_best1bin_scout_objective,
     qmc_gsa_global_search as _core_qmc_gsa_global_search,
@@ -253,6 +273,7 @@ def cluster_search(
     branch_on_stall: bool = False,
     start=None,
     length_scale: float | None = None,
+    energy_scale: float | None = None,
     species=None,
     sigmas=None,
     rigid: bool = False,
@@ -265,15 +286,19 @@ def cluster_search(
     ring_moves: bool | None = None,
     hold_stereocentres: bool | None = None,
     measured_energy_scale: bool | None = None,
+    config: Config | None = None,
     polish_on_improve: bool | None = None,
 ):
     """Run the measured cluster-search layer.
 
     Args:
-      obj_fn: callable ``f(numpy.ndarray) -> float``.
-      grad_fn: gradient or force callable ``g(x) -> numpy.ndarray``. A charged
-        central-difference probe determines its orientation when the budget is
-        at least four evaluations.
+      obj_fn: callable ``f(numpy.ndarray) -> float``, or a native cluster
+        potential (``PairPotential``, ``BinaryLennardJones``, ``SuttonChen``,
+        ``Gupta``, ``Tip4pCluster``, or ``GminTip4p``).
+      grad_fn: gradient or force callable ``g(x) -> numpy.ndarray``, or
+        ``None`` when ``obj_fn`` is a native cluster potential. A charged
+        central-difference probe determines callable gradient vs force
+        orientation when the budget is at least four evaluations.
       n: number of points. The Cartesian state length is ``3 * n``. With
         ``rigid=True`` or ``water_sites``, ``n`` is the number of bodies and
         the state length is ``6 * n``.
@@ -288,10 +313,25 @@ def cluster_search(
       start: optional flat start. Cartesian length is ``3n``. A rigid or
         water start is ``6n``. When set, hops use ``search_from`` instead of
         a random compact cluster.
-      length_scale: optional physical length. With the recommended preset
-        this uses ``with_scales`` so an angstrom start is not crushed into
-        the reduced LJ container. Ignored when ``species`` or ``rigid`` is
-        set, because those keep the stock preset. Excluded by ``water_sites``.
+      length_scale: optional positive finite physical length scale (default
+        ``1.0`` when ``energy_scale`` is set). When neither ``config``,
+        ``groups``, nor ``water_sites`` is set and either scale is supplied,
+        presets are constructed at ``(scale, escale)`` via
+        ``Config.recommended_with_scales`` (for ``ras=True``,
+        ``recommended=True``, and ``derived=True`` with ``budget_window``,
+        ``bayes_screen``, and the cost-asymmetric threshold) or
+        ``Config.for_cluster_with_scales`` (for ``recommended=False`` and
+        ``communicating=True``, scaling its ``TwoPhase`` surface stiffness as
+        ``escale / scale**4`` for ``n < 98``). Stock ``species`` and
+        ``rigid`` runs preserve those scales: ``rigid=True`` scales the stock
+        GMIN water-site offsets by ``scale``, and ``species`` attaches
+        ``with_species(species, sigmas)`` to the scaled preset. Excluded by
+        ``water_sites``, ``groups``, and ``config``.
+      energy_scale: optional positive finite physical energy scale (default
+        ``1.0`` when ``length_scale`` or ``groups`` is set). Scaled into
+        cluster presets (including stock ``species`` and ``rigid`` runs) and
+        passed to ``recommended_molecular`` / ``for_molecular`` under
+        ``groups``. Excluded by ``water_sites`` and ``config``.
       species: optional label per point. Two or more labels add a swap move.
         A wide diameter ratio also tries one downhill unlike-pair exchange
         beside the escape.
@@ -318,17 +358,18 @@ def cluster_search(
         exponential-map rotation vectors (active Rodrigues). The presets are
         ``Config.communicating_tip4p``, ``Config.recommended_tip4p`` and, with
         both false, ``Config.for_tip4p``. Requires ``start``. Excludes
-        ``ras``, ``derived``, ``length_scale``, ``rigid``, ``species``,
-        ``sigmas``, and a non-block layout.
+        ``ras``, ``derived``, ``length_scale``, ``energy_scale``, ``rigid``,
+        ``species``, ``sigmas``, and a non-block layout.
       bonds: optional list of site-index pairs for that custom body. Unset
         bonds are the two O-H contacts, ``[[0, 1], [0, 2]]``. A list with no
         site joined to two others is refused. Requires ``water_sites``.
       groups: optional list of atom-index lists, one per rigid group of a
         molecular search. The presets become ``recommended_molecular`` and,
-        with ``recommended=False``, ``for_molecular``, at energy scale one.
-        Requires ``species`` and ``start``. Excludes ``ras``, ``derived``,
-        ``communicating``, ``length_scale``, ``rigid``, ``sigmas``,
-        ``water_sites`` and a non-block layout.
+        with ``recommended=False``, ``for_molecular``, scaled by
+        ``energy_scale`` when given. Requires ``species`` and ``start``.
+        Excludes ``ras``, ``derived``, ``communicating``, ``length_scale``,
+        ``rigid``, ``sigmas``, ``water_sites``, ``bonds`` and a non-block
+        layout.
       local_step: ``lbfgs``, ``tric`` or ``auto``, the optimizer of every
         quench of a ``groups`` search. ``tric`` relaxes in translation-rotation
         internal coordinates, in electronvolt and angstrom. ``auto`` times the
@@ -346,11 +387,14 @@ def cluster_search(
         preset's: on for ``recommended=True``, off otherwise.
       measured_energy_scale: take a ``groups`` search's temperature and
         deposit height from the median quenched energy change of its opening
-        hops instead of an energy scale of one. ``None`` keeps the preset's:
+        hops instead of ``energy_scale``. ``None`` keeps the preset's:
         on for ``recommended=True``, off otherwise.
+      config: explicit ``Config`` instance; mutually exclusive with preset
+        modifier arguments (mutate ``config`` directly instead).
       polish_on_improve: polish the incumbent when a hop improves it, at the
         component gradient tolerance, charging every evaluation. ``None``
-        keeps the preset's, which is off.
+        keeps the preset's, which is off. A ``config`` keeps its own flag
+        when this is ``None``.
 
     A callback raising a ``BaseException`` that is not an ``Exception``, such
     as ``KeyboardInterrupt`` or a harness stop, ends the search at once.
@@ -400,6 +444,32 @@ def cluster_search(
     compiled; the
     ``python`` feature compiles it. ``quench_seconds`` is ``None`` unless
     ``local_step="auto"`` timed a potential call and a TRIC step, in seconds.
+
+    When ``ras=False`` (default), the dict also contains:
+    - ``final``, ``final_energy``: final chain state (``numpy.ndarray`` or
+      ``None``) and energy.
+    - ``spent``, ``basins``, ``screened_out``, ``restarts``: evaluation
+      ledger spend and basin-hopping counters.
+    - ``visit_counts``, ``escape_scale``, ``escape_threshold``,
+      ``merge_radius``, ``mean_step``, ``arms``, ``improvements``,
+      ``stop``, ``quenched``, ``energy_trace``: outcome diagnostics,
+      improvement events ``(hop, charged, basin, energy)``, optional stop
+      code, and per-hop traces when enabled on ``Config``.
+    - ``converged``, ``capped``, ``screens``, ``screen_charged``,
+      ``full_charged``, ``check_charged``, ``overlap_rejected``, ``refused``,
+      ``screen_steps_taken``: quench and screening statistics.
+    - ``search_seconds``, ``polish_seconds``, ``polish_calls``: wall-clock
+      phase timings in seconds and final polish call count.
+    - ``rigid_path``: present on rigid searches (``rigid=True``,
+      ``water_sites``, or a rigid ``config``), a dict with ``shell``,
+      ``archive``, ``recorded``, ``withhold_nonfinite``,
+      ``withhold_insane``, ``withhold_overlap``, and ``withhold_gradient``
+      counts (absent for atomic and molecular searches).
+
+    When ``ras=True``, the dict is the residual archive search:
+    ``best``, ``best_energy``, ``hops``, ``charged``, ``screens``,
+    ``same_floor``, ``artn``, ``best_at``, ``floors``, ``returned``,
+    ``events``, ``nve_unavailable``, ``branch_on_stall``, and ``ledger``.
     """
     start_arr = None if start is None else np.asarray(start, dtype=np.float64).reshape(-1)
     args = (
@@ -422,6 +492,8 @@ def cluster_search(
         kwargs["start"] = start_arr
     if length_scale is not None:
         kwargs["length_scale"] = float(length_scale)
+    if energy_scale is not None:
+        kwargs["energy_scale"] = float(energy_scale)
     if species is not None:
         kwargs["species"] = [int(value) for value in species]
     if sigmas is not None:
@@ -442,32 +514,74 @@ def cluster_search(
         kwargs["hold_stereocentres"] = bool(hold_stereocentres)
     if measured_energy_scale is not None:
         kwargs["measured_energy_scale"] = bool(measured_energy_scale)
+    if config is not None:
+        kwargs["config"] = config
     if polish_on_improve is not None:
         kwargs["polish_on_improve"] = bool(polish_on_improve)
     out = _core_cluster_search(*args, **kwargs)
     out["best"] = np.asarray(out["best"], dtype=np.float64)
+    if out.get("final") is not None:
+        out["final"] = np.asarray(out["final"], dtype=np.float64)
     return out
+
+
+_NATIVE_POTENTIALS = (
+    PairPotential,
+    BinaryLennardJones,
+    SuttonChen,
+    Gupta,
+    Tip4pCluster,
+    GminTip4p,
+)
+
+
+def rigid_from_ohh(cartesian):
+    """Convert Cartesian ``(O, H, H)`` triples to block Rodrigues coordinates."""
+    return np.asarray(_core_rigid_from_ohh(_flat(cartesian)), dtype=np.float64)
+
+
+def energy_ohh(cartesian) -> float:
+    """Evaluate rigid TIP4P energy on Cartesian ``(O, H, H)`` coordinates."""
+    return float(_core_energy_ohh(_flat(cartesian)))
+
+
+def block_from_interleaved_gmin(interleaved):
+    """Reorder interleaved GMIN ``(c, omega)`` rows to block ``(centres, omega)``."""
+    return np.asarray(_core_block_from_interleaved_gmin(_flat(interleaved)), dtype=np.float64)
+
+
+def interleaved_gmin_from_block(block):
+    """Reorder block ``(centres, omega)`` to interleaved GMIN ``(c, omega)`` rows."""
+    return np.asarray(_core_interleaved_gmin_from_block(_flat(block)), dtype=np.float64)
 
 
 def quench(fg_fn, x0, gtol: float, max_iter: int = 10000, *, method: str = "lbfgs", species=None):
     """Relax ``x0`` with the quench a molecular cluster search runs.
 
-    ``fg_fn(x)`` returns ``(energy, gradient)``. The descent stops when the
-    largest gradient component is below ``gtol``. ``method`` is ``lbfgs``,
-    the search's Cartesian L-BFGS, or ``tric``, translation-rotation internal
-    coordinates over the atomic numbers ``species`` (electronvolt and
+    ``fg_fn`` is either a callable ``fg_fn(x) -> (energy, gradient)`` or a
+    native potential instance (``PairPotential``, ``BinaryLennardJones``,
+    ``SuttonChen``, ``Gupta``, ``Tip4pCluster``, ``GminTip4p``). The descent
+    stops when the largest gradient component is below ``gtol``. ``method`` is
+    ``lbfgs``, the search's Cartesian L-BFGS, or ``tric``, translation-rotation
+    internal coordinates over the atomic numbers ``species`` (electronvolt and
     angstrom). ``max_iter`` caps iterations for ``lbfgs`` and calls for
     ``tric``. Returns a dict with ``x``, ``energy`` and ``calls``, the number
     of ``fg_fn`` evaluations.
     """
-
-    def fg(x):
-        energy, gradient = fg_fn(np.asarray(x, dtype=np.float64))
-        return float(energy), np.asarray(gradient, dtype=np.float64).reshape(-1).tolist()
+    if isinstance(fg_fn, _NATIVE_POTENTIALS):
+        target_fg = fg_fn
+    elif hasattr(fg_fn, "value_and_gradient") and not callable(fg_fn):
+        def target_fg(x):
+            energy, gradient = fg_fn.value_and_gradient(np.asarray(x, dtype=np.float64))
+            return float(energy), np.asarray(gradient, dtype=np.float64).reshape(-1).tolist()
+    else:
+        def target_fg(x):
+            energy, gradient = fg_fn(np.asarray(x, dtype=np.float64))
+            return float(energy), np.asarray(gradient, dtype=np.float64).reshape(-1).tolist()
 
     labels = None if species is None else [int(value) for value in species]
     out = _core_quench(
-        fg,
+        target_fg,
         np.asarray(x0, dtype=np.float64).reshape(-1),
         float(gtol),
         int(max_iter),
@@ -503,7 +617,11 @@ def polish(
     step0: float = 1.0,
     grad_tol: float = 1e-8,
 ):
-    """Refine ``x0`` with bounded L-BFGS (two-loop, Armijo backtrack)."""
+    """Refine ``x0`` with bounded L-BFGS (two-loop, Armijo backtrack).
+
+    Returns a dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
+    ``projected_grad_norm``, ``projected_stationary``, and ``best_grad``.
+    """
     out = _core_polish(
         obj_fn,
         grad_fn,
@@ -515,6 +633,8 @@ def polish(
         float(grad_tol),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    if out.get("best_grad") is not None:
+        out["best_grad"] = np.asarray(out["best_grad"], dtype=np.float64)
     return out
 
 
@@ -827,7 +947,7 @@ def gle_langevin(
     estimated from local gradient curvature over the provided bounds. This
     handles ill-conditioning the way the
     ``1/sqrt(D)`` scale handles dimension. Returns ``{best_pos, best_val,
-    n_evals, omega0, dt}``.
+    n_evals, omega0, dt, preconditioner_diag, n_preconditioner_grads}``.
     """
     omega_arg = None if omega0 is None else float(omega0)
     out = _core_gle_langevin(
@@ -859,7 +979,11 @@ def gle_langevin_objective(
     n_epochs: int = 40,
     x0=None,
 ):
-    """GLE-Langevin annealing with a native ``PyObjective`` gradient handle."""
+    """GLE-Langevin annealing with a native ``PyObjective`` gradient handle.
+
+    Returns ``{best_pos, best_val, n_evals, omega0, dt, preconditioner_diag,
+    n_preconditioner_grads}``.
+    """
     omega_arg = None if omega0 is None else float(omega0)
     out = _core_gle_langevin_objective(
         objective,
@@ -891,7 +1015,11 @@ def gle_langevin_preconditioned(
     x0=None,
     preconditioner_probes: int | None = None,
 ):
-    """GLE-Langevin with an adaptive diagonal coordinate preconditioner."""
+    """GLE-Langevin with an adaptive diagonal coordinate preconditioner.
+
+    Returns ``{best_pos, best_val, n_evals, omega0, dt, preconditioner_diag,
+    n_preconditioner_grads}``.
+    """
     omega_arg = None if omega0 is None else float(omega0)
     probe_arg = None if preconditioner_probes is None else int(preconditioner_probes)
     out = _core_gle_langevin_preconditioned(
@@ -925,7 +1053,11 @@ def gle_langevin_preconditioned_objective(
     x0=None,
     preconditioner_probes: int | None = None,
 ):
-    """Preconditioned GLE-Langevin with a native ``PyObjective`` gradient handle."""
+    """Preconditioned GLE-Langevin with a native ``PyObjective`` gradient handle.
+
+    Returns ``{best_pos, best_val, n_evals, omega0, dt, preconditioner_diag,
+    n_preconditioner_grads}``.
+    """
     omega_arg = None if omega0 is None else float(omega0)
     probe_arg = None if preconditioner_probes is None else int(preconditioner_probes)
     out = _core_gle_langevin_preconditioned_objective(
@@ -972,6 +1104,7 @@ def gpmd_optimize(
         grad_fn,
         x0_arr,
     )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
 
 
@@ -995,7 +1128,7 @@ def amsa_optimize(
     low_arr = _flat(low)
     high_arr = _flat(high)
     x0_arr = _flat_or_none(x0)
-    return _core_amsa_optimize(
+    out = _core_amsa_optimize(
         obj_fn,
         low_arr,
         high_arr,
@@ -1004,6 +1137,64 @@ def amsa_optimize(
         grad_fn,
         x0_arr,
     )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    return out
+
+
+def _box_hop_kwargs(
+    *,
+    identity_tol=None,
+    shared_deposits=None,
+    shared_visit_policy=None,
+    escape=None,
+    langevin_steps=None,
+    langevin_omega0=None,
+    langevin_dt=None,
+    langevin_noise=None,
+    langevin_friction=None,
+    coverage_shared=None,
+    coverage_radius=None,
+    coverage_neighbors=None,
+    coverage_height=None,
+    coverage_well_tempering=None,
+    coverage_peer_weight=None,
+):
+    kwargs = {}
+    if identity_tol is not None:
+        kwargs["identity_tol"] = float(identity_tol)
+    if shared_deposits is not None:
+        kwargs["shared_deposits"] = int(shared_deposits)
+    if shared_visit_policy is not None:
+        kwargs["shared_visit_policy"] = str(shared_visit_policy)
+    if escape is not None:
+        kwargs["escape"] = str(escape)
+    if langevin_steps is not None:
+        kwargs["langevin_steps"] = int(langevin_steps)
+    if langevin_omega0 is not None:
+        kwargs["langevin_omega0"] = float(langevin_omega0)
+    if langevin_dt is not None:
+        kwargs["langevin_dt"] = float(langevin_dt)
+    if langevin_noise is not None:
+        kwargs["langevin_noise"] = str(langevin_noise)
+    if langevin_friction is not None:
+        kwargs["langevin_friction"] = float(langevin_friction)
+    if coverage_shared is not None:
+        kwargs["coverage_shared"] = bool(coverage_shared)
+    if coverage_radius is not None:
+        kwargs["coverage_radius"] = float(coverage_radius)
+    if coverage_neighbors is not None:
+        if not isinstance(coverage_neighbors, (int, np.integer)) or isinstance(
+            coverage_neighbors, bool
+        ):
+            raise TypeError("coverage_neighbors must be an integer")
+        kwargs["coverage_neighbors"] = int(coverage_neighbors)
+    if coverage_height is not None:
+        kwargs["coverage_height"] = float(coverage_height)
+    if coverage_well_tempering is not None:
+        kwargs["coverage_well_tempering"] = float(coverage_well_tempering)
+    if coverage_peer_weight is not None:
+        kwargs["coverage_peer_weight"] = float(coverage_peer_weight)
+    return kwargs
 
 
 def box_ensemble_optimize(
@@ -1017,15 +1208,58 @@ def box_ensemble_optimize(
     replicas: int = 4,
     history: str = "shared",
     membership: str = "accepted",
+    *,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
+    coverage_shared: bool | None = None,
+    coverage_radius: float | None = None,
+    coverage_neighbors: int | None = None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ):
     """Communicating box hops on SharedDesignHistory / MinimumHistory.
 
-    Requires ``grad_fn``. Kick and quench in the box. Without a gradient
-    use ``ensemble_optimize`` (portfolio). Not cluster hopping.
+    Requires ``grad_fn``. Runs ``escape="gaussian"`` (default reflected
+    Gaussian kick) or ``escape="langevin"`` (GLE-Langevin escape controlled by
+    ``langevin_*``) followed by L-BFGS quench on the box, with ``history`` /
+    ``membership`` / ``identity_tol`` / ``shared_visit_policy`` /
+    ``shared_deposits`` minimum-history controls and ``coverage_*`` peer
+    separation. Without a gradient use ``ensemble_optimize``. Not cluster
+    hopping.
+
+    Returns ``best_val``, ``best_pos``, ``charged``, ``n_evals``, ``n_grads``,
+    ``hops``, ``history_observations``, ``history_minima``,
+    ``history_attempts``, ``history_refusals``, ``history_seconds``,
+    ``shared_deposits``, ``coverage_*`` counters, and ``coverage_decisions``.
     """
     low_arr = np.asarray(low, dtype=np.float64)
     high_arr = np.asarray(high, dtype=np.float64)
     x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    hop_kwargs = _box_hop_kwargs(
+        identity_tol=identity_tol,
+        shared_deposits=shared_deposits,
+        shared_visit_policy=shared_visit_policy,
+        escape=escape,
+        langevin_steps=langevin_steps,
+        langevin_omega0=langevin_omega0,
+        langevin_dt=langevin_dt,
+        langevin_noise=langevin_noise,
+        langevin_friction=langevin_friction,
+        coverage_shared=coverage_shared,
+        coverage_radius=coverage_radius,
+        coverage_neighbors=coverage_neighbors,
+        coverage_height=coverage_height,
+        coverage_well_tempering=coverage_well_tempering,
+        coverage_peer_weight=coverage_peer_weight,
+    )
     out = _core_box_ensemble_optimize(
         obj_fn,
         low_arr,
@@ -1037,6 +1271,7 @@ def box_ensemble_optimize(
         int(replicas),
         str(history),
         str(membership),
+        **hop_kwargs,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1054,9 +1289,21 @@ def ensemble_optimize(
     history: str = "shared",
     membership: str = "accepted",
     *,
-    coverage_shared=None,
-    coverage_radius=None,
-    coverage_neighbors=None,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
+    coverage_shared: bool | None = None,
+    coverage_radius: float | None = None,
+    coverage_neighbors: int | None = None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ):
     """Search on a design box.
 
@@ -1067,8 +1314,10 @@ def ensemble_optimize(
 
     The returned dictionary retains ``best_val``, ``best_pos``, separate
     ``n_evals`` / ``n_grads``, their sum ``charged``, ``hops``, minimum-history
-    diagnostics, and evaluated-region ``coverage_*`` counters. Coverage is
-    not a count of certified minima.
+    diagnostics (``history_observations``, ``history_minima``,
+    ``history_attempts``, ``history_refusals``, ``history_seconds``),
+    evaluated-region ``coverage_*`` counters, and ``coverage_decisions``.
+    Coverage is not a count of certified minima.
 
     ``coverage_shared`` overrides sharing independently of ``history``;
     ``coverage_radius`` sets the normalized RMS parameter distance.
@@ -1085,6 +1334,23 @@ def ensemble_optimize(
     low_arr = np.asarray(low, dtype=np.float64)
     high_arr = np.asarray(high, dtype=np.float64)
     x0_arr = None if x0 is None else np.asarray(x0, dtype=np.float64)
+    hop_kwargs = _box_hop_kwargs(
+        identity_tol=identity_tol,
+        shared_deposits=shared_deposits,
+        shared_visit_policy=shared_visit_policy,
+        escape=escape,
+        langevin_steps=langevin_steps,
+        langevin_omega0=langevin_omega0,
+        langevin_dt=langevin_dt,
+        langevin_noise=langevin_noise,
+        langevin_friction=langevin_friction,
+        coverage_shared=coverage_shared,
+        coverage_radius=coverage_radius,
+        coverage_neighbors=coverage_neighbors,
+        coverage_height=coverage_height,
+        coverage_well_tempering=coverage_well_tempering,
+        coverage_peer_weight=coverage_peer_weight,
+    )
     out = _core_ensemble_optimize(
         obj_fn,
         low_arr,
@@ -1096,9 +1362,7 @@ def ensemble_optimize(
         int(replicas),
         str(history),
         str(membership),
-        coverage_shared=coverage_shared,
-        coverage_radius=coverage_radius,
-        coverage_neighbors=coverage_neighbors,
+        **hop_kwargs,
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1277,9 +1541,21 @@ def minimize(
     history="shared",
     membership="accepted",
     store=None,
+    identity_tol: float | None = None,
+    shared_deposits: int | None = None,
+    shared_visit_policy: str | None = None,
+    escape: str | None = None,
+    langevin_steps: int | None = None,
+    langevin_omega0: float | None = None,
+    langevin_dt: float | None = None,
+    langevin_noise: str | None = None,
+    langevin_friction: float | None = None,
     coverage_shared=None,
     coverage_radius=None,
     coverage_neighbors=None,
+    coverage_height: float | None = None,
+    coverage_well_tempering: float | None = None,
+    coverage_peer_weight: float | None = None,
 ):
     """Box search with a SciPy ``minimize`` shape.
 
@@ -1342,9 +1618,21 @@ def minimize(
         replicas=int(replicas),
         history=str(history),
         membership=str(membership),
+        identity_tol=identity_tol,
+        shared_deposits=shared_deposits,
+        shared_visit_policy=shared_visit_policy,
+        escape=escape,
+        langevin_steps=langevin_steps,
+        langevin_omega0=langevin_omega0,
+        langevin_dt=langevin_dt,
+        langevin_noise=langevin_noise,
+        langevin_friction=langevin_friction,
         coverage_shared=coverage_shared,
         coverage_radius=coverage_radius,
         coverage_neighbors=coverage_neighbors,
+        coverage_height=coverage_height,
+        coverage_well_tempering=coverage_well_tempering,
+        coverage_peer_weight=coverage_peer_weight,
     )
     fun_v = float(out["best_val"])
     best = np.asarray(out["best_pos"], dtype=np.float64)
@@ -1394,6 +1682,7 @@ def bfwt_optimize(
         grad_fn,
         x0_arr,
     )
+    out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
 
 
@@ -1404,16 +1693,29 @@ def dmc_population_optimize(
     budget: int,
     seed: int = 0,
     grad_fn=None,
-    target_n: int = 16,
-    steps_per_control: int = 4,
+    target_n: int | None = None,
+    steps_per_control: int = DEFAULT_STEPS_PER_CONTROL,
     x0=None,
+    *,
+    beta0: float = DEFAULT_BETA0,
 ):
     """Population-controlled diffusion search (DMC-inspired; classical objective).
 
     Parameters
     ----------
+    target_n :
+        Optional walker population size. ``None`` (default) uses
+        ``recommend_target_n(budget, dim)`` matching Rust
+        ``dmc_population_optimize``.
+    steps_per_control :
+        Diffusion steps between population-control events (default ``2``).
     x0 :
         Optional starting point for walker 0 (protocol anchor / incumbent).
+    beta0 :
+        Initial inverse-temperature scale (default ``1.0``).
+
+    Returns ``{best_val, best_pos, n_evals, n_grads, final_population,
+    controls}``.
     """
     out = _core_dmc_population_optimize(
         obj_fn,
@@ -1422,9 +1724,10 @@ def dmc_population_optimize(
         int(budget),
         int(seed),
         grad_fn,
-        int(target_n),
+        None if target_n is None else int(target_n),
         int(steps_per_control),
         _flat_or_none(x0),
+        beta0=float(beta0),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
     return out
@@ -1445,6 +1748,9 @@ def global_optimize(
     coverage_shared: bool = True,
     coverage_radius: float = 0.05,
     coverage_neighbors: int = 0,
+    coverage_height: float = 0.1,
+    coverage_well_tempering: float = 5.0,
+    coverage_peer_weight: float = 1.0,
 ):
     """Thompson-allocated portfolio global optimizer.
 
@@ -1557,14 +1863,21 @@ def global_optimize(
       coverage_neighbors: direct cyclic neighbourhood radius. Zero is all-to-all;
         one admits the two adjacent chain identities without forwarding samples.
         This does not remove the shared arm-checkpoint barrier.
+      coverage_height: well-tempered coverage deposit height.
+      coverage_well_tempering: well-tempering factor (``> 1``).
+      coverage_peer_weight: weight applied to foreign peer samples.
 
     ``obj_fn`` and ``grad_fn`` are only called inside ``[low, high]``: a
     point an arm proposes outside is mirror-reflected into the box, and the
     gradient there is reflected with it. Peer separation moves global
     candidates, not derivative stencils or raw objective values. Returns a
     dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
-    ``arm_pulls``, and ``arm_successes``. Multiple replicas also report
-    individual results, ``charged`` work and coverage sample counters.
+    ``arm_pulls``, ``arm_successes``, and ``hop_state``. Multiple replicas also
+    report ``replicas``, ``charged``, and ``coverage_*`` sample counters
+    (``coverage_published_samples``, ``coverage_applied_foreign_samples``,
+    ``coverage_sample_peer_checks``, ``coverage_sample_anchor_overlaps``,
+    ``coverage_sample_anchor_only_overlaps``, ``coverage_sample_overlaps``,
+    ``coverage_repelled_proposals``, ``coverage_constrained_repulsions``).
     """
     # int() truncates a float, so 1.5 would run as 1. A neighbour count is whole.
     if not isinstance(coverage_neighbors, (int, np.integer)):
@@ -1583,8 +1896,14 @@ def global_optimize(
         coverage_shared=bool(coverage_shared),
         coverage_radius=float(coverage_radius),
         coverage_neighbors=int(coverage_neighbors),
+        coverage_height=float(coverage_height),
+        coverage_well_tempering=float(coverage_well_tempering),
+        coverage_peer_weight=float(coverage_peer_weight),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    if out.get("hop_state") is not None:
+        pos, val = out["hop_state"]
+        out["hop_state"] = (np.asarray(pos, dtype=np.float64), float(val))
     return out
 
 
@@ -1594,27 +1913,52 @@ def global_optimize_objective(
     seed: int = 0,
     use_gradient: bool = True,
     x0=None,
+    *,
+    noise_sigma: float | None = None,
+    policy: str = "auto",
 ):
-    """Portfolio global optimizer over a native ``PyObjective`` handle."""
+    """Portfolio global optimizer over a native ``PyObjective`` handle.
+
+    Returns a dict with ``best_pos``, ``best_val``, ``n_evals``, ``n_grads``,
+    ``arm_pulls``, ``arm_successes``, and ``hop_state``.
+    """
     out = _core_global_optimize_objective(
         objective,
         int(budget),
         int(seed),
         bool(use_gradient),
-        None,
+        None if noise_sigma is None else float(noise_sigma),
         _flat_or_none(x0),
+        policy=str(policy),
     )
     out["best_pos"] = np.asarray(out["best_pos"], dtype=np.float64)
+    if out.get("hop_state") is not None:
+        pos, val = out["hop_state"]
+        out["hop_state"] = (np.asarray(pos, dtype=np.float64), float(val))
     return out
 
 
 __all__ = [
     "BasinBias",
+    "BinaryLennardJones",
     "Boltzmann",
     "Bounds",
+    "COPPER_Z",
     "Config",
+    "DEFAULT_BETA0",
     "DEFAULT_HIT_TOL",
+    "DEFAULT_STEPS_PER_CONTROL",
+    "DEFAULT_TARGET_WALKERS",
+    "GOLD_Z",
+    "GminTip4p",
+    "Gupta",
+    "IDENTITY_TOL",
+    "PLATINUM_Z",
+    "PairPotential",
+    "PotentialCalculator",
     "SEARCH_HIT_TOL",
+    "SuttonChen",
+    "Tip4pCluster",
     "DeviceHistory",
     "EnsembleHistory",
     "EpochLine",
@@ -1625,8 +1969,15 @@ __all__ = [
     "Ledger",
     "PyObjective",
     "Anneal",
+    "block_from_interleaved_gmin",
     "cluster_search",
     "energy_hits",
+    "energy_ohh",
+    "gmin_tip4p_sites",
+    "interleaved_gmin_from_block",
+    "osa_acceptance_rate",
+    "recommend_target_n",
+    "rigid_from_ohh",
     "TvmFfiTensorMetadata",
     "__version__",
     "low_discrepancy_points",
@@ -1698,4 +2049,8 @@ def __getattr__(name):
         from anneal.ase import Anneal as _Anneal
 
         return _Anneal
+    if name == "PotentialCalculator":
+        from anneal.ase import PotentialCalculator as _PotentialCalculator
+
+        return _PotentialCalculator
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

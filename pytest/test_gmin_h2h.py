@@ -14,7 +14,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from machine_provenance import (  # noqa: E402
-    MACHINE_ID_SALT,
     SavedRowProvenanceMismatch,
     host_label,
 )
@@ -25,7 +24,7 @@ campaign = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(campaign)
 
 
-def test_machine_provenance_prefers_machine_id_and_records_cpu(tmp_path):
+def test_machine_provenance_ignores_a_host_id_file_and_records_cpu(tmp_path):
     machine_id = tmp_path / "machine-id"
     product_uuid = tmp_path / "product_uuid"
     cpuinfo = tmp_path / "cpuinfo"
@@ -33,25 +32,25 @@ def test_machine_provenance_prefers_machine_id_and_records_cpu(tmp_path):
     product_uuid.write_text("fallback-b\n")
     cpuinfo.write_text("processor: 0\nmodel name: Example  CPU   123\n")
 
-    digest, cpu = campaign.machine_provenance(machine_id, product_uuid, cpuinfo)
+    digest, cpu = campaign.machine_provenance(cpuinfo)
 
-    expected = hashlib.sha256(MACHINE_ID_SALT + b"machine-a").hexdigest()
-    assert digest == expected
+    assert digest == "unrecorded"
     assert cpu == "Example CPU 123"
+    assert "machine-a" not in digest
+    assert "fallback-b" not in digest
 
 
-def test_machine_provenance_falls_back_to_dmi_uuid(tmp_path):
-    missing = tmp_path / "missing"
+def test_machine_provenance_ignores_a_dmi_uuid_and_records_cpu(tmp_path):
     product_uuid = tmp_path / "product_uuid"
     cpuinfo = tmp_path / "cpuinfo"
     product_uuid.write_text("dmi-machine\n")
     cpuinfo.write_text("Hardware : Example Board\n")
 
-    digest, cpu = campaign.machine_provenance(missing, product_uuid, cpuinfo)
+    digest, cpu = campaign.machine_provenance(cpuinfo)
 
-    expected = hashlib.sha256(MACHINE_ID_SALT + b"dmi-machine").hexdigest()
-    assert digest == expected
+    assert digest == "unrecorded"
     assert cpu == "Example Board"
+    assert "dmi-machine" not in digest
 
 
 def test_summary_keeps_host_and_adds_physical_machine_provenance():

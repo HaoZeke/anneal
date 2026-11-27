@@ -180,9 +180,10 @@ pub enum ContinuousSymmetry {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
     },
-    /// Project onto `C_i`, `C_5`, and `D_5h` and quench the lowest continuous
-    /// symmetry measure. GMIN's `NSYMINTERVAL` default is the same ten
-    /// quenches (`keywords.f90`).
+    /// Project onto `C_i`, `C_5`, and `D_5h`, or onto the operations detected
+    /// on the incumbent when [`Config::detected_symmetry`] is on, and quench
+    /// the lowest continuous symmetry measure. GMIN's `NSYMINTERVAL` default
+    /// is the same ten quenches (`keywords.f90`).
     Measure {
         /// Divisor of the basin-hopping quench count.
         interval: usize,
@@ -786,8 +787,17 @@ pub struct Config {
     /// each group image and quenches the averaged geometry on a fixed
     /// schedule. `C_i` has no orientation search. [`ContinuousSymmetry::Measure`]
     /// is the Oakley, Johnston and Wales continuous symmetry measure over
-    /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia tensor.
+    /// `C_i`, `C_5`, and `D_5h`, with orientations taken from the inertia
+    /// tensor. With [`Config::detected_symmetry`] on, it is the measure over
+    /// the operations detected on the incumbent that keep every atom within
+    /// its equivalence class, projected in the input frame
+    /// ([`crate::csm::propose_for`]).
     pub continuous_symmetry: ContinuousSymmetry,
+    /// Project onto detected symmetry operations rather than the fixed
+    /// fivefold/inversion template library, and scan all orders the point
+    /// count can hold rather than `[2, 3, 4, 5, 6]`.
+    #[serde(skip_serializing_if = "is_false")]
+    pub detected_symmetry: bool,
     /// Largest deviation at which an approximate symmetry is worth using.
     pub symmetry_tolerance: f64,
     /// Coordinate-space radius used to merge points after symmetrisation.
@@ -2187,6 +2197,13 @@ impl Config {
         self
     }
 
+    /// Opts into template-free symmetry detection across all orders the point
+    /// count can hold.
+    pub fn with_detected_symmetry(mut self) -> Self {
+        self.detected_symmetry = true;
+        self
+    }
+
     /// Lennard-Jones preset expressed against declared physical scales.
     ///
     /// ```
@@ -2288,6 +2305,7 @@ impl Config {
             symmetrise_core_fraction: 0.6,
             point_symmetrise_every_accept: false,
             continuous_symmetry: ContinuousSymmetry::Off,
+            detected_symmetry: false,
             symmetry_tolerance: LennardJonesPreset::SYMMETRY_TOLERANCE * length_scale,
             symmetry_merge_radius: LennardJonesPreset::SYMMETRY_MERGE_RADIUS * length_scale,
             symmetrise_patience: 2_000,
@@ -2772,6 +2790,34 @@ impl Config {
     /// Radius of the preset's initial cluster sphere.
     pub fn start_radius(&self) -> f64 {
         self.container
+    }
+
+    /// Liquid-density start radius scaled by [`Self::length_scale`], species
+    /// diameters, and [`Self::min_separation`].
+    pub fn liquid_start_radius(&self, n: usize) -> f64 {
+        let unit = super::liquid_sphere_radius(n);
+        let sep_scale = if self.min_separation.is_finite() && self.min_separation > 0.0 {
+            self.min_separation / LennardJonesPreset::MIN_SEPARATION
+        } else {
+            1.0
+        };
+        let sigma_scale = self
+            .species_sigma
+            .as_ref()
+            .and_then(|vals| vals.iter().copied().reduce(f64::max))
+            .unwrap_or(1.0)
+            .max(1.0);
+        let scale = (self.length_scale * sigma_scale).max(sep_scale);
+        if scale == 1.0 { unit } else { unit * scale }
+    }
+
+    /// Draw a non-overlapping liquid-density start scaled for `n` points.
+    pub(crate) fn scaled_liquid_start<R: Rng + ?Sized>(
+        &self,
+        n: usize,
+        rng: &mut R,
+    ) -> Array1<f64> {
+        random_cluster_in_radius(n, self.liquid_start_radius(n), self.min_separation, rng)
     }
 
     /// Proposal mixture for use by the general [`crate::sampler::Sampler`].

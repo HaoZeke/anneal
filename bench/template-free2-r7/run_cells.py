@@ -12,7 +12,6 @@ import csv, hashlib, os, struct, subprocess, sys, tempfile, time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from machine_provenance import machine_columns  # noqa: E402
 from target_tol import energy_hits  # noqa: E402
 
 REFERENCES = {
@@ -60,7 +59,7 @@ def main():
     else:
         with rows_path.open("w", newline="") as f:
             csv.writer(f, lineterminator="\n").writerow(FIELDS)
-    host = "machine-" + machine_columns()["machine_id"][:16]
+    host = "unrecorded"
     for cell in cells:
         driver, ref = REFERENCES[cell]
         for seed in range(first, last + 1):

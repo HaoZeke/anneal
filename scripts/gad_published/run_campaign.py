@@ -41,6 +41,7 @@ from machine_provenance import (  # noqa: E402
     aggregate_machine_columns,
     host_label,
     machine_columns,
+    stored_machine_id_compatible,
     read_built_gmin_provenance,
     require_csv_schema,
     require_gmin_build_key,
@@ -638,7 +639,7 @@ def saved_rerun(
             build_key=gmin_build_key,
         )
     if (
-        row.get("machine_id") != machine["machine_id"]
+        not stored_machine_id_compatible(row.get("machine_id"))
         or row.get("cpu_model") != machine["cpu_model"]
     ):
         return None

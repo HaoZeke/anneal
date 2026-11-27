@@ -4,9 +4,14 @@
 //! Section 3.3, and GMIN `SYMMETRYCSM`. The structure is centred and scaled
 //! so its largest radius is 1. For each operation, a class-blocked assignment
 //! matches the operated image to the original, and the proposed geometry is
-//! the mean of those operated, permuted images. [`crate::csm::propose`] takes its
-//! orientations from the inertia tensor plus one fixed one-fifth turn, and
-//! draws no random number.
+//! the mean of those operated, permuted images. [`crate::csm::propose`]
+//! projects onto the `D_5h`, `C_5` and `C_i` templates at orientations from
+//! the inertia tensor plus one fixed one-fifth turn.
+//! [`crate::csm::propose_for`] with detected symmetry on instead projects,
+//! in the input frame, onto the operations detected on the structure. An
+//! operation is kept when each image lands within 0.25 of a distinct atom
+//! of its own class. A short swap of two classes does not. Neither draws
+//! a random number.
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -75,6 +80,18 @@ impl MatchScratch {
 /// normalised squared distance from the oriented structure to its average.
 /// Zero means the orientation already has the group.
 pub fn project(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    ops: &[[[f64; 3]; 3]],
+    orientations: &[[[f64; 3]; 3]],
+) -> Option<(Array1<f64>, f64)> {
+    if !is_closed_ops(ops) {
+        return None;
+    }
+    project_verified(x, classes, ops, orientations)
+}
+
+fn project_verified(
     x: ArrayView1<'_, f64>,
     classes: &[u32],
     ops: &[[[f64; 3]; 3]],
@@ -199,19 +216,18 @@ fn project_centred(
 /// Pair distance below which an average is a coordinate singularity.
 pub const SINGULAR_PAIR: f64 = 1.0e-2;
 
-/// Lowest-measure average among `C_i`, `C_5`, and `D_5h`.
+/// Lowest-measure average from symmetry operations detected on the incumbent.
 ///
-/// `C_i` is the group of the published LJ38 continuous-symmetry benchmark.
-/// `C_5` and `D_5h` are the fivefold groups of the decahedral minima. The
-/// measure chooses, not the atom count. An average with a pair closer than
-/// [`SINGULAR_PAIR`] is dropped.
+/// The detector proposes approximate operations from the current coordinates.
+/// Those generators are closed into a finite operation set and projected by
+/// [`project`]. An average with a pair closer than [`SINGULAR_PAIR`] is dropped.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GroupProjection {
     /// Cartesian coordinates in the input atom order.
     pub coordinates: Array1<f64>,
     /// Normalised squared distance to the average. Zero is exact symmetry.
     pub measure: f64,
-    /// `C_i`, `C_5`, or `D_5h`.
+    /// Projection family label.
     pub group: &'static str,
 }
 
@@ -230,9 +246,270 @@ fn inversion_ops_ref() -> &'static [[[f64; 3]; 3]] {
     OPS.get_or_init(inversion_ops)
 }
 
-/// Projects onto the library group with the lowest measure.
+/// Projects onto `D_5h`, `C_5`, or `C_i`, returning the group with the lowest
+/// measure. This is [`propose_for`] with detected symmetry off.
 pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+    propose_for(false, x, classes)
+}
+
+/// The lowest-measure projection, onto operations detected on `x` when
+/// `detected_symmetry` is on and onto the `D_5h`, `C_5` and `C_i` templates
+/// when it is off.
+///
+/// A detected projection keeps only operations that carry every atom onto
+/// a distinct atom of its own class, and its [`GroupProjection::group`] is
+/// `"detected"`. Each image must land within [`DETECTION_TOLERANCE`] of
+/// that atom on unit-radius coordinates. A swap onto a different class
+/// fails even when the two atoms lie closer than that bound.
+pub fn propose_for(
+    detected_symmetry: bool,
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+) -> Option<GroupProjection> {
+    if detected_symmetry {
+        propose_detected(x, classes)
+    } else {
+        propose_templates(x, classes)
+    }
+}
+
+fn propose_detected(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
     if let Some(cached) = cached_propose(x, classes) {
+        return cached;
+    }
+    let n = classes.len();
+    if x.len() != n.checked_mul(3)? || x.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    clear_op_cache();
+    // Detected operations are already in the input frame, so projecting
+    // once at the identity avoids repeating the same assignment across
+    // inertia orientations and lets the op cache reuse solved inverses.
+    let best = detected_ops(x, classes)
+        .and_then(|ops| project_verified(x, classes, &ops, &[identity()]))
+        .and_then(|(coordinates, measure)| {
+            (closest_pair(&coordinates) >= SINGULAR_PAIR).then_some(GroupProjection {
+                coordinates,
+                measure,
+                group: "detected",
+            })
+        });
+    store_propose(x, classes, best.as_ref());
+    best
+}
+
+/// Operations of the input frame, written in the frame of `rotation`.
+#[cfg(test)]
+fn conjugate_ops(ops: &[[[f64; 3]; 3]], rotation: &[[f64; 3]; 3]) -> Vec<[[f64; 3]; 3]> {
+    let back = transpose(*rotation);
+    ops.iter()
+        .map(|op| matmul(matmul(*rotation, *op), back))
+        .collect()
+}
+
+/// Largest per-atom distance, on unit-radius coordinates, that
+/// [`preserves_classes`] accepts. Detection uses the same cap. The image
+/// must land on a distinct atom of the same class. A nearer atom of
+/// another class is a swap and is rejected.
+const DETECTION_TOLERANCE: f64 = 0.25;
+
+/// The closed operation set detected on `x` whose every element carries each
+/// atom onto the atoms of its own class.
+fn detected_ops(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<Vec<[[f64; 3]; 3]>> {
+    let n = x.len() / 3;
+    if n < 2 || classes.len() != n {
+        return None;
+    }
+    let (centred, _, _) = centre_and_scale(x, n)?;
+    let mut scaled = Array1::zeros(3 * n);
+    for (atom, point) in centred.iter().enumerate() {
+        for axis in 0..3 {
+            scaled[3 * atom + axis] = point[axis];
+        }
+    }
+    let orders: Vec<usize> = (2..=n).collect();
+    // Detection runs on unit-radius centred coordinates so it matches the
+    // scale normalisation inside `project`.
+    let mut candidates =
+        crate::symmetrise::detect_all(scaled.view(), n, &orders, DETECTION_TOLERANCE);
+    let one_class = classes.iter().all(|&class| class == classes[0]);
+    if !one_class {
+        // The scan matches each image to the nearest atom of any class, so
+        // an operation that swaps species passes it. Projection matches
+        // within each class and cannot use one.
+        candidates.retain(|cand| {
+            preserves_classes(&crate::symmetrise::candidate_op(cand), &centred, classes)
+        });
+    }
+    let generators = select_generators(&candidates);
+    if generators.is_empty() {
+        return None;
+    }
+    let ops: Vec<[[f64; 3]; 3]> = generators
+        .iter()
+        .map(crate::symmetrise::candidate_op)
+        .collect();
+    let group = close_detected_ops(&ops)?;
+    (one_class
+        || group
+            .iter()
+            .all(|op| preserves_classes(op, &centred, classes)))
+    .then_some(group)
+}
+
+/// Whether `op` carries `centred` onto itself class by class.
+///
+/// Each image must land within [`DETECTION_TOLERANCE`] of a distinct atom
+/// of the same class. The bound is the detector's deviation cap, applied
+/// per atom rather than as a mean. A swap onto another class fails however
+/// short the gap. An octahedron axis against its equator fails with it.
+fn preserves_classes(op: &[[f64; 3]; 3], centred: &[[f64; 3]], classes: &[u32]) -> bool {
+    let n = centred.len();
+    if n == 0 || classes.len() != n {
+        return false;
+    }
+    let limit = DETECTION_TOLERANCE * DETECTION_TOLERANCE;
+    let mut claimed = vec![false; n];
+    for (atom, &point) in centred.iter().enumerate() {
+        let image = mul_vec(op, point);
+        let mut partner = 0;
+        let mut best = f64::INFINITY;
+        for (other, other_point) in centred.iter().enumerate() {
+            let distance = (0..3)
+                .map(|axis| (image[axis] - other_point[axis]).powi(2))
+                .sum::<f64>();
+            if distance < best {
+                best = distance;
+                partner = other;
+            }
+        }
+        if best >= limit || classes[partner] != classes[atom] || claimed[partner] {
+            return false;
+        }
+        claimed[partner] = true;
+    }
+    true
+}
+
+const CSM_CLOSURE: f64 = 0.27;
+const CSM_GROUP_CAP: usize = 120;
+
+fn close_detected_ops(gens: &[[[f64; 3]; 3]]) -> Option<Vec<[[f64; 3]; 3]>> {
+    let group = crate::symmetrise::close_group_checked(gens, CSM_CLOSURE, CSM_GROUP_CAP)?;
+    // The closure always contains the identity; one element means no
+    // non-trivial symmetry was detected.
+    (group.len() >= 2).then_some(group)
+}
+
+fn select_generators(
+    candidates: &[crate::symmetrise::Candidate],
+) -> Vec<crate::symmetrise::Candidate> {
+    const PARALLEL_COSINE: f64 = 0.995;
+    const ORTHOGONAL_SLACK: f64 = 0.05;
+    let mut picked: Vec<crate::symmetrise::Candidate> = Vec::new();
+    for &cand in candidates {
+        if let Some(existing) = picked.iter_mut().find(|prev| {
+            let dot = prev.axis[0] * cand.axis[0]
+                + prev.axis[1] * cand.axis[1]
+                + prev.axis[2] * cand.axis[2];
+            dot.abs() > PARALLEL_COSINE && prev.improper == cand.improper
+        }) {
+            if !cand.improper
+                && cand.order > existing.order
+                && cand.order.is_multiple_of(existing.order)
+                && cand.deviation <= existing.deviation + 1.0e-9
+            {
+                *existing = cand;
+            }
+            continue;
+        }
+        picked.push(cand);
+    }
+    picked.sort_by(|left, right| {
+        let left_primary = !left.improper && left.order >= 3;
+        let right_primary = !right.improper && right.order >= 3;
+        right_primary
+            .cmp(&left_primary)
+            .then_with(|| {
+                if left_primary {
+                    right.order.cmp(&left.order)
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .then_with(|| {
+                left.deviation
+                    .partial_cmp(&right.deviation)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| right.order.cmp(&left.order))
+    });
+    let mut axes: Vec<[f64; 3]> = Vec::with_capacity(picked.len());
+    for cand in &mut picked {
+        let mut axis = cand.axis;
+        for &anchor in &axes {
+            let dot = axis[0] * anchor[0] + axis[1] * anchor[1] + axis[2] * anchor[2];
+            if dot.abs() > 0.0 && dot.abs() < ORTHOGONAL_SLACK {
+                axis = reject(axis, anchor);
+                if let Some(unit) = normalize(axis) {
+                    axis = unit;
+                }
+            }
+        }
+        cand.axis = axis;
+        axes.push(axis);
+    }
+    picked
+}
+
+fn matrix_within(left: &[[f64; 3]; 3], right: &[[f64; 3]; 3], tolerance: f64) -> bool {
+    left.iter()
+        .flatten()
+        .zip(right.iter().flatten())
+        .all(|(left, right)| (*left - *right).abs() <= tolerance)
+}
+
+fn is_closed_ops(ops: &[[[f64; 3]; 3]]) -> bool {
+    is_closed_within(ops, 1.0e-5)
+}
+
+fn is_closed_within(ops: &[[[f64; 3]; 3]], tolerance: f64) -> bool {
+    if ops.is_empty() {
+        return false;
+    }
+    let id = identity();
+    if !ops
+        .iter()
+        .any(|op| matrix_within(op, &id, tolerance.clamp(1.0e-12, 1.0e-6)))
+        && !ops.iter().any(|op| matrix_within(op, &id, tolerance))
+    {
+        return false;
+    }
+    for op in ops {
+        if !matrix_within(&matmul(*op, transpose(*op)), &id, 1.0e-5) {
+            return false;
+        }
+    }
+    for left in ops {
+        for right in ops {
+            let product = matmul(*left, *right);
+            if !ops
+                .iter()
+                .any(|other| matrix_within(other, &product, tolerance))
+            {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// Projects onto `D_5h`, `C_5`, or `C_i`, returning the group with the lowest measure.
+pub(crate) fn propose_templates(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+) -> Option<GroupProjection> {
+    if let Some(cached) = cached_template_propose(x, classes) {
         return cached;
     }
     let n = classes.len();
@@ -240,7 +517,7 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
         return None;
     }
     let (centred, centroid, scale) = centre_and_scale(x, n)?;
-    let orientations = inertia_orientations_centred(&centred)?;
+    let orientations = inertia_orientations_centred(&centred, std::f64::consts::TAU / 5.0)?;
     // D_5h contains every C_5 turn, so it is solved first and those
     // permutations are reused. Equal measures keep the earlier group
     // in the published order C_i, C_5, D_5h.
@@ -251,12 +528,6 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
         (1, "C_5", c5_ops_ref()),
         (0, "C_i", inversion_ops_ref()),
     ] {
-        // Inversion is not a fivefold operation, so its permutations are
-        // not in the D_5h cache. The nearest-image residual is a lower
-        // bound on the assigned measure: the average of a point and its
-        // matched inverse sits halfway between them. A margin keeps a
-        // one-ulp overestimate from skipping a tie, which would prefer
-        // inversion. Above the margin, inversion cannot win the group.
         if name == "C_i"
             && let Some((_, incumbent)) = &best
         {
@@ -293,8 +564,38 @@ pub fn propose(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjectio
         }
     }
     let best = best.map(|(_, projection)| projection);
-    store_propose(x, classes, best.as_ref());
+    store_template_propose(x, classes, best.as_ref());
     best
+}
+
+std::thread_local! {
+    static TEMPLATE_PROPOSE_CACHE: std::cell::RefCell<Option<ProposeCache>> = const { std::cell::RefCell::new(None) };
+}
+
+fn cached_template_propose(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+) -> Option<Option<GroupProjection>> {
+    TEMPLATE_PROPOSE_CACHE.with(|slot| {
+        let slot = slot.borrow();
+        let cached = slot.as_ref()?;
+        (same_bits(&cached.coordinates, x) && cached.classes == classes)
+            .then(|| cached.value.clone())
+    })
+}
+
+fn store_template_propose(
+    x: ArrayView1<'_, f64>,
+    classes: &[u32],
+    value: Option<&GroupProjection>,
+) {
+    TEMPLATE_PROPOSE_CACHE.with(|slot| {
+        *slot.borrow_mut() = Some(ProposeCache {
+            coordinates: x.iter().map(|value| value.to_bits()).collect(),
+            classes: classes.to_vec(),
+            value: value.cloned(),
+        });
+    });
 }
 
 struct ProposeCache {
@@ -334,11 +635,71 @@ fn store_propose(x: ArrayView1<'_, f64>, classes: &[u32], value: Option<&GroupPr
     });
 }
 
-pub(crate) fn inversion_ops() -> Vec<[[f64; 3]; 3]> {
+fn inversion_ops() -> Vec<[[f64; 3]; 3]> {
     vec![
         identity(),
         [[-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]],
     ]
+}
+
+fn cyclic_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
+    (0..order)
+        .map(|step| rot_z(std::f64::consts::TAU * step as f64 / order as f64))
+        .collect()
+}
+
+fn d5h_ops() -> Vec<[[f64; 3]; 3]> {
+    let turns = cyclic_about_z(5);
+    let twofold = [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
+    let mirror = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
+    let mut ops = Vec::with_capacity(20);
+    for turn in &turns {
+        ops.push(*turn);
+        ops.push(matmul(twofold, *turn));
+    }
+    let rotations = ops.clone();
+    for rotation in rotations {
+        ops.push(matmul(mirror, rotation));
+    }
+    ops
+}
+
+/// Lower bound on the inversion measure in every orientation.
+///
+/// The group is the identity and the central inversion. The residual is
+/// half the matched distance, so the measure is the assignment cost
+/// divided by four times the squared norm. Each atom's nearest inverse
+/// image is at most that assignment cost, whether or not the nearest
+/// images form a bijection.
+fn inversion_lower_measure(centred: &[[f64; 3]], orientations: &[[[f64; 3]; 3]]) -> f64 {
+    let n = centred.len();
+    let mut y = vec![[0.0; 3]; n];
+    let mut best = f64::INFINITY;
+    for rotation in orientations {
+        apply_all_into(rotation, centred, &mut y);
+        let mut nearest = 0.0;
+        let mut norm = 0.0;
+        for atom in 0..n {
+            let mut closest = f64::INFINITY;
+            for image in 0..n {
+                let mut squared = 0.0;
+                for axis in 0..3 {
+                    let delta = y[atom][axis] + y[image][axis];
+                    squared += delta * delta;
+                }
+                closest = closest.min(squared);
+            }
+            nearest += closest;
+            for axis in 0..3 {
+                norm += y[atom][axis] * y[atom][axis];
+            }
+        }
+        if norm < 1e-18 {
+            continue;
+        }
+        best = best.min(nearest / (4.0 * norm));
+    }
+    best
 }
 
 fn centre_and_scale(x: ArrayView1<'_, f64>, n: usize) -> Option<(Vec<[f64; 3]>, [f64; 3], f64)> {
@@ -645,67 +1006,10 @@ fn apply_all(matrix: &[[f64; 3]; 3], points: &[[f64; 3]]) -> Vec<[f64; 3]> {
     points.iter().map(|point| mul_vec(matrix, *point)).collect()
 }
 
-/// Lower bound on the inversion measure in every orientation.
-///
-/// The group is the identity and the central inversion. The residual is
-/// half the matched distance, so the measure is the assignment cost
-/// divided by four times the squared norm. Each atom's nearest inverse
-/// image is at most that assignment cost, whether or not the nearest
-/// images form a bijection.
-fn inversion_lower_measure(centred: &[[f64; 3]], orientations: &[[[f64; 3]; 3]]) -> f64 {
-    let n = centred.len();
-    let mut y = vec![[0.0; 3]; n];
-    let mut best = f64::INFINITY;
-    for rotation in orientations {
-        apply_all_into(rotation, centred, &mut y);
-        let mut nearest = 0.0;
-        let mut norm = 0.0;
-        for atom in 0..n {
-            let mut closest = f64::INFINITY;
-            for image in 0..n {
-                let mut squared = 0.0;
-                for axis in 0..3 {
-                    let delta = y[atom][axis] + y[image][axis];
-                    squared += delta * delta;
-                }
-                closest = closest.min(squared);
-            }
-            nearest += closest;
-            for axis in 0..3 {
-                norm += y[atom][axis] * y[atom][axis];
-            }
-        }
-        if norm < 1e-18 {
-            continue;
-        }
-        best = best.min(nearest / (4.0 * norm));
-    }
-    best
-}
-
-fn cyclic_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
-    (0..order)
-        .map(|step| rot_z(std::f64::consts::TAU * step as f64 / order as f64))
-        .collect()
-}
-
-fn d5h_ops() -> Vec<[[f64; 3]; 3]> {
-    let turns = cyclic_about_z(5);
-    let twofold = [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
-    let mirror = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]];
-    let mut ops = Vec::with_capacity(20);
-    for turn in &turns {
-        ops.push(*turn);
-        ops.push(matmul(twofold, *turn));
-    }
-    let rotations = ops.clone();
-    for rotation in rotations {
-        ops.push(matmul(mirror, rotation));
-    }
-    ops
-}
-
-fn inertia_orientations_centred(centred: &[[f64; 3]]) -> Option<Vec<[[f64; 3]; 3]>> {
+fn inertia_orientations_centred(
+    centred: &[[f64; 3]],
+    extra_turn: f64,
+) -> Option<Vec<[[f64; 3]; 3]>> {
     let axes = jacobi(inertia(centred));
     let mut orientations = Vec::with_capacity(6);
     for axis in 0..3 {
@@ -718,15 +1022,24 @@ fn inertia_orientations_centred(centred: &[[f64; 3]]) -> Option<Vec<[[f64; 3]; 3
         let y_axis = normalize(cross(z_axis, x_axis))?;
         let aligned = [x_axis, y_axis, z_axis];
         orientations.push(aligned);
-        orientations.push(matmul(rot_z(std::f64::consts::TAU / 5.0), aligned));
+        orientations.push(matmul(rot_z(extra_turn), aligned));
     }
     Some(orientations)
 }
 
 #[cfg(test)]
 fn inertia_orientations(x: ArrayView1<'_, f64>, n: usize) -> Option<Vec<[[f64; 3]; 3]>> {
+    inertia_orientations_with(x, n, std::f64::consts::PI)
+}
+
+#[cfg(test)]
+fn inertia_orientations_with(
+    x: ArrayView1<'_, f64>,
+    n: usize,
+    extra_turn: f64,
+) -> Option<Vec<[[f64; 3]; 3]>> {
     let (centred, _, _) = centre_and_scale(x, n)?;
-    inertia_orientations_centred(&centred)
+    inertia_orientations_centred(&centred, extra_turn)
 }
 
 fn closest_pair(x: &Array1<f64>) -> f64 {
@@ -814,9 +1127,9 @@ fn jacobi(mut tensor: [[f64; 3]; 3]) -> [[f64; 3]; 3] {
 }
 
 fn rot_z(angle: f64) -> [[f64; 3]; 3] {
-    // The extra orientation is a turn by `τ/5`. Host `sin` and `cos` of
-    // that angle are not the same function on glibc and libSystem, and
-    // the continuous-symmetry proposal is built from this matrix.
+    // One orientation is a half turn. Host `sin` and `cos` of that angle
+    // are not the same function on glibc and libSystem, and the
+    // continuous-symmetry proposal is built from this matrix.
     let sine = libm::sin(angle);
     let cosine = libm::cos(angle);
     [[cosine, -sine, 0.0], [sine, cosine, 0.0], [0.0, 0.0, 1.0]]
@@ -891,7 +1204,7 @@ mod tests {
     }
 
     #[test]
-    fn octahedron_measure_is_zero_and_a_shift_is_not() {
+    fn a_detected_projection_is_reported_with_its_generic_label() {
         let octahedron = Array1::from_vec(vec![
             1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
             -1.0,
@@ -905,9 +1218,34 @@ mod tests {
         let (_, noisy) =
             project(shifted.view(), &classes, &inversion_ops(), &[identity()]).unwrap();
         assert!(noisy > 1e-3, "{noisy}");
-        let chosen = propose(octahedron.view(), &classes).expect("library");
-        assert_eq!(chosen.group, "C_i");
+        let chosen = propose_detected(octahedron.view(), &classes).expect("projection");
+        assert_eq!(chosen.group, "detected");
         assert!(chosen.measure < 1e-8, "{}", chosen.measure);
+    }
+
+    #[test]
+    fn propose_ignores_label_order_and_rises_when_a_point_moves() {
+        let mut coords = Vec::with_capacity(21);
+        for step in 0..5 {
+            let angle = std::f64::consts::TAU * step as f64 / 5.0;
+            coords.extend([angle.cos(), angle.sin(), 0.0]);
+        }
+        coords.extend([0.0, 0.0, 1.2, 0.0, 0.0, -1.2]);
+        let x = Array1::from_vec(coords);
+        let classes = vec![0; 7];
+        let projection = propose_detected(x.view(), &classes).expect("projection");
+        let mut reversed = Array1::zeros(x.len());
+        for atom in 0..7 {
+            for axis in 0..3 {
+                reversed[3 * atom + axis] = x[3 * (6 - atom) + axis];
+            }
+        }
+        let flipped = propose_detected(reversed.view(), &classes).expect("relabelled");
+        assert!((flipped.measure - projection.measure).abs() < 1e-8);
+        let mut noisy = x.clone();
+        noisy[2] += 0.25;
+        let shifted = propose_detected(noisy.view(), &classes).expect("noisy");
+        assert!(shifted.measure > 1e-3, "{}", shifted.measure);
     }
 
     #[test]
@@ -921,42 +1259,6 @@ mod tests {
             )
             .is_none()
         );
-    }
-
-    fn ungated_projection(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
-        let orientations = inertia_orientations(x, classes.len())?;
-        clear_op_cache();
-        let mut best: Option<(usize, GroupProjection)> = None;
-        for (rank, name, ops) in [
-            (2, "D_5h", d5h_ops()),
-            (1, "C_5", cyclic_about_z(5)),
-            (0, "C_i", inversion_ops()),
-        ] {
-            let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
-                continue;
-            };
-            if closest_pair(&coordinates) < SINGULAR_PAIR {
-                continue;
-            }
-            let replace = match &best {
-                None => true,
-                Some((incumbent_rank, incumbent)) => {
-                    measure < incumbent.measure
-                        || (measure == incumbent.measure && rank < *incumbent_rank)
-                }
-            };
-            if replace {
-                best = Some((
-                    rank,
-                    GroupProjection {
-                        coordinates,
-                        measure,
-                        group: name,
-                    },
-                ));
-            }
-        }
-        best.map(|(_, projection)| projection)
     }
 
     /// `project` with every operation solved by the Kuhn-Munkres walk.
@@ -1060,7 +1362,13 @@ mod tests {
             (near, vec![0u32; 7]),
         ] {
             let orientations = inertia_orientations(x.view(), classes.len()).expect("axes");
-            for ops in [d5h_ops(), cyclic_about_z(5), inversion_ops()] {
+            for ops in [
+                d5h_ops(),
+                cyclic_about_z(5),
+                turns_about_z(4),
+                turns_about_z(3),
+                inversion_ops(),
+            ] {
                 clear_op_cache();
                 let (coordinates, measure) =
                     project(x.view(), &classes, &ops, &orientations).expect("projection");
@@ -1072,6 +1380,456 @@ mod tests {
                 }
             }
         }
+    }
+
+    fn turns_about_z(order: usize) -> Vec<[[f64; 3]; 3]> {
+        (0..order)
+            .map(|step| rot_z(std::f64::consts::TAU * step as f64 / order as f64))
+            .collect()
+    }
+
+    fn bipyramid() -> Array1<f64> {
+        let mut coords = Vec::with_capacity(21);
+        for step in 0..5 {
+            let angle = std::f64::consts::TAU * step as f64 / 5.0;
+            coords.extend([angle.cos(), angle.sin(), 0.0]);
+        }
+        coords.extend([0.0, 0.0, 1.2, 0.0, 0.0, -1.2]);
+        Array1::from_vec(coords)
+    }
+
+    #[test]
+    fn project_refuses_an_empty_group_a_bad_length_and_a_non_finite_point() {
+        let x = Array1::from_vec(vec![1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
+        let classes = [0, 0];
+        assert!(project(x.view(), &classes, &[], &[identity()]).is_none());
+        assert!(project(x.view(), &classes, &inversion_ops(), &[]).is_none());
+        assert!(project(x.view(), &[0], &inversion_ops(), &[identity()]).is_none());
+        let mut bad = x.clone();
+        bad[0] = f64::NAN;
+        assert!(project(bad.view(), &classes, &inversion_ops(), &[identity()]).is_none());
+        assert!(centre_and_scale(Array1::zeros(0).view(), 0).is_none());
+    }
+
+    #[test]
+    fn a_zero_orientation_is_not_a_measure() {
+        let x = Array1::from_vec(vec![1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
+        let zero = [[0.0; 3]; 3];
+        assert!(project(x.view(), &[0, 0], &inversion_ops(), &[zero]).is_none());
+    }
+
+    #[test]
+    fn a_pair_inside_the_singular_distance_is_not_proposed() {
+        let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.005, 0.0, 0.0]);
+        assert!(propose_detected(x.view(), &[0, 0]).is_none());
+    }
+
+    fn rotation_from(axis: [f64; 3], angle: f64) -> [[f64; 3]; 3] {
+        let axis = normalize(axis).expect("axis");
+        let sine = libm::sin(angle);
+        let cosine = libm::cos(angle);
+        let turn = 1.0 - cosine;
+        let (x, y, z) = (axis[0], axis[1], axis[2]);
+        [
+            [
+                turn * x * x + cosine,
+                turn * x * y - sine * z,
+                turn * x * z + sine * y,
+            ],
+            [
+                turn * x * y + sine * z,
+                turn * y * y + cosine,
+                turn * y * z - sine * x,
+            ],
+            [
+                turn * x * z - sine * y,
+                turn * y * z + sine * x,
+                turn * z * z + cosine,
+            ],
+        ]
+    }
+
+    fn apply_rotation(x: &Array1<f64>, rotation: [[f64; 3]; 3]) -> Array1<f64> {
+        let mut out = Array1::zeros(x.len());
+        let n = x.len() / 3;
+        for atom in 0..n {
+            let point = [x[3 * atom], x[3 * atom + 1], x[3 * atom + 2]];
+            let turned = mul_vec(&rotation, point);
+            for axis in 0..3 {
+                out[3 * atom + axis] = turned[axis];
+            }
+        }
+        out
+    }
+
+    /// Operations written in the input frame, applied after an orientation,
+    /// give the same average as applying them before that orientation.
+    #[test]
+    fn conjugating_operations_matches_the_input_frame() {
+        let x = bipyramid();
+        let classes = vec![0u32; 7];
+        let ops = inversion_ops();
+        let (plain, plain_measure) =
+            project(x.view(), &classes, &ops, &[identity()]).expect("input frame");
+        let orientations = inertia_orientations(x.view(), 7).expect("axes");
+        for orientation in orientations {
+            let turned = conjugate_ops(&ops, &orientation);
+            let (spun, spun_measure) =
+                project(x.view(), &classes, &turned, &[orientation]).expect("oriented");
+            assert!(
+                (plain_measure - spun_measure).abs() < 1e-8,
+                "{plain_measure} vs {spun_measure}"
+            );
+            for (left, right) in plain.iter().zip(spun.iter()) {
+                assert!((left - right).abs() < 1e-6, "{left} vs {right}");
+            }
+        }
+    }
+
+    /// A rigid rotation does not change the detected measure.
+    #[test]
+    fn a_rotation_leaves_the_detected_measure_unchanged() {
+        let symmetric = Array1::from_vec(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        let mut distorted = symmetric.clone();
+        distorted[0] += 0.05;
+        let rotation = rotation_from([1.0, 2.0, -0.5], 0.7);
+        let mut measures = Vec::new();
+        for structure in [symmetric, distorted] {
+            let classes = vec![0u32; structure.len() / 3];
+            let plain = propose_detected(structure.view(), &classes).expect("projection");
+            let turned = apply_rotation(&structure, rotation);
+            let spun = propose_detected(turned.view(), &classes).expect("rotated");
+            let gap = (plain.measure - spun.measure).abs();
+            assert!(
+                gap < 1e-4,
+                "plain {} spun {} gap {gap}",
+                plain.measure,
+                spun.measure
+            );
+            measures.push(plain.measure);
+        }
+        assert!(measures[0] < 1e-8, "exact octahedron {}", measures[0]);
+        assert!(
+            measures[1] > measures[0] + 1e-6,
+            "distortion did not raise the measure: {}",
+            measures[1]
+        );
+    }
+
+    #[test]
+    fn an_asymmetric_cloud_is_not_projected() {
+        let x = Array1::from_vec(vec![
+            0.2, -0.5, 0.1, 1.1, 0.3, -0.4, -0.6, 0.8, 0.7, 0.4, -0.2, 1.3,
+        ]);
+        assert!(propose_detected(x.view(), &[0, 0, 0, 0]).is_none());
+    }
+
+    #[test]
+    fn a_nearly_axial_vector_uses_the_other_reference() {
+        let along_x = perpendicular([1.0, 0.0, 0.0]);
+        assert!(along_x[0].abs() < 1e-12);
+        let along_z = perpendicular([0.0, 0.0, 1.0]);
+        assert!(along_z[2].abs() < 1e-12);
+    }
+
+    fn icosahedron() -> Array1<f64> {
+        let phi = (1.0 + 5.0_f64.sqrt()) / 2.0;
+        let mut coords = Vec::with_capacity(36);
+        for &s1 in &[-1.0_f64, 1.0] {
+            for &s2 in &[-1.0_f64, 1.0] {
+                coords.extend([0.0, s1, s2 * phi]);
+                coords.extend([s1, s2 * phi, 0.0]);
+                coords.extend([s2 * phi, 0.0, s1]);
+            }
+        }
+        Array1::from_vec(coords)
+    }
+
+    #[test]
+    fn propose_is_invariant_under_uniform_scaling() {
+        let mut x = bipyramid();
+        // Perturb one point: at scale 1.0 the distortion is within 0.25 on
+        // unit-radius coordinates, whereas on raw coordinates scaled by 10x or
+        // 0.05x a fixed 0.25 tolerance would flip detection or admit spurious
+        // operations.
+        x[2] += 0.25;
+        let classes = vec![0u32; 7];
+        let base = propose_detected(x.view(), &classes).expect("base scale projection");
+        for scale in [0.1_f64, 0.25, 4.0, 25.0] {
+            let scaled = x.mapv(|v| v * scale);
+            clear_op_cache();
+            let got = propose_detected(scaled.view(), &classes).expect("scaled projection");
+            assert!(
+                (got.measure - base.measure).abs() < 1e-10,
+                "scale={scale} measure {} vs {}",
+                got.measure,
+                base.measure
+            );
+            for (g, b) in got.coordinates.iter().zip(base.coordinates.iter()) {
+                assert!(
+                    (g - b * scale).abs() < 1e-8 * scale.max(1.0),
+                    "scale={scale} coord {g} vs {}",
+                    b * scale
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn propose_admits_icosahedral_group_and_closes_approximate_generators() {
+        let ico = icosahedron();
+        let classes = vec![0u32; 12];
+        let ih = detected_ops(ico.view(), &classes).expect("icosahedral group");
+        assert_eq!(ih.len(), 120, "Ih must have 120 operations");
+        let ico_proj = propose_detected(ico.view(), &classes).expect("icosahedral projection");
+        assert!(ico_proj.measure < 1e-8, "{}", ico_proj.measure);
+
+        // Perturb the icosahedron slightly: exact 1e-6 generate_group runs to
+        // its cap and fails, while tolerant closure closes it into a valid
+        // finite group (I, 60 elements).
+        let mut approx = ico.clone();
+        approx[0] += 0.03;
+        approx[4] -= 0.02;
+        let (centred, _, _) = centre_and_scale(approx.view(), 12).expect("scale");
+        let mut scaled = Array1::zeros(36);
+        for (atom, p) in centred.iter().enumerate() {
+            for axis in 0..3 {
+                scaled[3 * atom + axis] = p[axis];
+            }
+        }
+        let orders: Vec<usize> = (2..=12).collect();
+        let cands = crate::symmetrise::detect_all(scaled.view(), 12, &orders, 0.25);
+        let gens = select_generators(&cands);
+        assert!(
+            crate::symmetrise::generate_group(&gens, 120).is_err(),
+            "exact 1e-6 closure should fail on approximate generators"
+        );
+        let approx_ops = detected_ops(approx.view(), &classes).expect("approximate closure");
+        assert_eq!(
+            approx_ops.len(),
+            60,
+            "approximate icosahedron closes to I (60)"
+        );
+        assert!(is_closed_within(&approx_ops, CSM_CLOSURE));
+        let approx_proj =
+            propose_detected(approx.view(), &classes).expect("approximate projection");
+        assert!(approx_proj.measure > 1e-5);
+    }
+
+    #[test]
+    fn capped_non_closed_group_is_refused_by_propose_and_project() {
+        // Non-commensurate C5 (about z) and tilted C4 (about [1, 0.2, 0.3])
+        // generate a dense subgroup of SO(3) that never closes within cap.
+        let c5 = rotation_from([0.0, 0.0, 1.0], std::f64::consts::TAU / 5.0);
+        let c4 = rotation_from([1.0, 0.2, 0.3], std::f64::consts::FRAC_PI_2);
+        assert!(
+            close_detected_ops(&[c5, c4]).is_none(),
+            "non-closing generator pair must be refused rather than silently truncated"
+        );
+        let classes = vec![0u32; 4];
+        let unclosed = vec![identity(), rot_z(std::f64::consts::TAU / 5.0)];
+        assert!(
+            project(
+                Array1::from_vec(vec![
+                    1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0
+                ])
+                .view(),
+                &classes,
+                &unclosed,
+                &[identity()]
+            )
+            .is_none(),
+            "project must refuse a non-closed operation set"
+        );
+    }
+
+    /// An octahedron whose axial pair is a second species has `O_h` as a
+    /// point set and `D_4h` as a labelled structure. The eight-fold larger
+    /// set carries axial atoms onto equatorial sites, and projecting onto it
+    /// pulls the structure off itself.
+    #[test]
+    fn detected_ops_exclude_class_swapping_operations() {
+        let octahedron = Array1::from_vec(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        let blind = detected_ops(octahedron.view(), &[0; 6]).expect("O_h");
+        assert_eq!(blind.len(), 48);
+        let classes = [0, 0, 0, 0, 1, 1];
+        let (centred, _, _) = centre_and_scale(octahedron.view(), 6).expect("scale");
+        let nearest = |image: [f64; 3]| {
+            (0..6)
+                .min_by(|&left, &right| {
+                    let gap = |atom: usize| {
+                        (0..3)
+                            .map(|axis| (image[axis] - centred[atom][axis]).powi(2))
+                            .sum::<f64>()
+                    };
+                    gap(left).total_cmp(&gap(right))
+                })
+                .expect("atoms")
+        };
+        let swaps = |op: &[[f64; 3]; 3]| {
+            (0..6).any(|atom| classes[nearest(mul_vec(op, centred[atom]))] != classes[atom])
+        };
+        assert_eq!(blind.iter().filter(|op| swaps(op)).count(), 32);
+
+        let aware = detected_ops(octahedron.view(), &classes).expect("D_4h");
+        assert_eq!(aware.len(), 16);
+        assert!(aware.iter().all(|op| !swaps(op)));
+        assert!(is_closed_ops(&aware));
+
+        let (_, blind_measure) =
+            project(octahedron.view(), &classes, &blind, &[identity()]).expect("blind");
+        assert!(blind_measure > 1e-2, "{blind_measure}");
+        let projection = propose_detected(octahedron.view(), &classes).expect("D_4h projection");
+        assert_eq!(projection.group, "detected");
+        assert!(projection.measure < 1e-12, "{}", projection.measure);
+        for (got, want) in projection.coordinates.iter().zip(octahedron.iter()) {
+            assert!((got - want).abs() < 1e-9, "{got} vs {want}");
+        }
+    }
+
+    /// Two atoms 0.08 apart. The half turn about z exchanges each with the
+    /// neighbour of the other class. The mean same-class RMS is that gap,
+    /// under 0.25. The labelled projection must not follow the turn.
+    #[test]
+    fn a_short_class_swap_is_rejected() {
+        let coords = Array1::from_vec(vec![
+            1.0, 0.04, 0.0, 1.0, -0.04, 0.0, -1.0, -0.04, 0.0, -1.0, 0.04, 0.0,
+        ]);
+        let swapped = [0u32, 1, 1, 0];
+        let (centred, _, _) = centre_and_scale(coords.view(), 4).expect("scale");
+        let half = rot_z(std::f64::consts::PI);
+        let mut total = 0.0;
+        for (atom, &point) in centred.iter().enumerate() {
+            let image = mul_vec(&half, point);
+            let nearest = centred
+                .iter()
+                .zip(&swapped)
+                .filter(|&(_, &class)| class == swapped[atom])
+                .map(|(other, _)| {
+                    (0..3)
+                        .map(|axis| (image[axis] - other[axis]).powi(2))
+                        .sum::<f64>()
+                })
+                .fold(f64::INFINITY, f64::min);
+            total += nearest;
+        }
+        let rms = (total / 4.0).sqrt();
+        assert!(rms < DETECTION_TOLERANCE, "{rms}");
+        let moved = propose_detected(coords.view(), &swapped);
+        let shift = moved.as_ref().map_or(f64::NAN, |projection| {
+            projection
+                .coordinates
+                .iter()
+                .zip(coords.iter())
+                .map(|(got, want)| (got - want).abs())
+                .fold(0.0, f64::max)
+        });
+        assert!(
+            !preserves_classes(&half, &centred, &swapped),
+            "a class swap closer than 0.25 was kept, rms {rms}, shift {shift}"
+        );
+        let projection = moved.expect("labelled mirror");
+        assert!(shift < 1e-8, "{shift}");
+        assert!(projection.measure < 1e-10, "{}", projection.measure);
+    }
+
+    /// Exchanging two adjacent atoms of one class is a mirror of this
+    /// dimer. The projection stays on the input.
+    #[test]
+    fn an_adjacent_same_class_exchange_stays_put() {
+        let coords = Array1::from_vec(vec![
+            1.0, 0.04, 0.0, 1.0, -0.04, 0.0, -1.0, -0.04, 0.0, -1.0, 0.04, 0.0,
+        ]);
+        let classes = [0u32; 4];
+        let projection = propose_detected(coords.view(), &classes).expect("same class");
+        let shift = projection
+            .coordinates
+            .iter()
+            .zip(coords.iter())
+            .map(|(got, want)| (got - want).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(shift < 1e-8, "{shift}");
+        assert!(projection.measure < 1e-10, "{}", projection.measure);
+    }
+
+    #[test]
+    fn propose_projects_once_and_reuses_op_cache() {
+        let ico = icosahedron();
+        let classes = vec![0u32; 12];
+        let ih = detected_ops(ico.view(), &classes).expect("Ih");
+        assert_eq!(ih.len(), 120);
+        let first = propose_detected(ico.view(), &classes).expect("first projection");
+        let cached_ops = OP_CACHE.with(|slot| slot.borrow().len());
+        assert!(
+            cached_ops > 0 && cached_ops < ih.len(),
+            "expected single-orientation op cache reuse, got {cached_ops} entries for {} ops",
+            ih.len()
+        );
+        let second = propose_detected(ico.view(), &classes).expect("cached projection");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn octahedron_measure_is_zero_and_a_shift_is_not() {
+        let octahedron = Array1::from_vec(vec![
+            1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0,
+            -1.0,
+        ]);
+        let classes = vec![0; 6];
+        let (_, exact) =
+            project(octahedron.view(), &classes, &inversion_ops(), &[identity()]).unwrap();
+        assert!(exact < 1e-10, "{exact}");
+        let mut shifted = octahedron.clone();
+        shifted[0] += 0.3;
+        let (_, noisy) =
+            project(shifted.view(), &classes, &inversion_ops(), &[identity()]).unwrap();
+        assert!(noisy > 1e-3, "{noisy}");
+        let chosen = propose_templates(octahedron.view(), &classes).expect("library");
+        assert_eq!(chosen.group, "C_i");
+        assert!(chosen.measure < 1e-8, "{}", chosen.measure);
+    }
+
+    fn ungated_projection(x: ArrayView1<'_, f64>, classes: &[u32]) -> Option<GroupProjection> {
+        let orientations =
+            inertia_orientations_with(x, classes.len(), std::f64::consts::TAU / 5.0)?;
+        clear_op_cache();
+        let mut best: Option<(usize, GroupProjection)> = None;
+        for (rank, name, ops) in [
+            (2, "D_5h", d5h_ops()),
+            (1, "C_5", cyclic_about_z(5)),
+            (0, "C_i", inversion_ops()),
+        ] {
+            let Some((coordinates, measure)) = project(x, classes, &ops, &orientations) else {
+                continue;
+            };
+            if closest_pair(&coordinates) < SINGULAR_PAIR {
+                continue;
+            }
+            let replace = match &best {
+                None => true,
+                Some((incumbent_rank, incumbent)) => {
+                    measure < incumbent.measure
+                        || (measure == incumbent.measure && rank < *incumbent_rank)
+                }
+            };
+            if replace {
+                best = Some((
+                    rank,
+                    GroupProjection {
+                        coordinates,
+                        measure,
+                        group: name,
+                    },
+                ));
+            }
+        }
+        best.map(|(_, projection)| projection)
     }
 
     fn assert_same_projection(gated: &GroupProjection, full: &GroupProjection) {
@@ -1102,9 +1860,11 @@ mod tests {
             let classes = vec![0; x.len() / 3];
             let full = ungated_projection(x.view(), &classes).expect("full");
             clear_op_cache();
-            let gated = propose(x.view(), &classes).expect("gated");
+            let gated = propose_templates(x.view(), &classes).expect("gated");
             assert_same_projection(&gated, &full);
-            let orientations = inertia_orientations(x.view(), classes.len()).expect("axes");
+            let orientations =
+                inertia_orientations_with(x.view(), classes.len(), std::f64::consts::TAU / 5.0)
+                    .expect("axes");
             let (centred, _, _) = centre_and_scale(x.view(), classes.len()).expect("centre");
             let bound = inversion_lower_measure(&centred, &orientations);
             let (_, solved) =
@@ -1117,7 +1877,8 @@ mod tests {
         let mut noisy = bipyramid();
         noisy[2] += 0.25;
         let classes = vec![0; 7];
-        let orientations = inertia_orientations(noisy.view(), 7).expect("axes");
+        let orientations =
+            inertia_orientations_with(noisy.view(), 7, std::f64::consts::TAU / 5.0).expect("axes");
         let (centred, _, _) = centre_and_scale(noisy.view(), 7).expect("centre");
         let bound = inversion_lower_measure(&centred, &orientations);
         let (_, fivefold) =
@@ -1129,27 +1890,17 @@ mod tests {
         );
     }
 
-    fn bipyramid() -> Array1<f64> {
-        let mut coords = Vec::with_capacity(21);
-        for step in 0..5 {
-            let angle = std::f64::consts::TAU * step as f64 / 5.0;
-            coords.extend([angle.cos(), angle.sin(), 0.0]);
-        }
-        coords.extend([0.0, 0.0, 1.2, 0.0, 0.0, -1.2]);
-        Array1::from_vec(coords)
-    }
-
     #[test]
     fn pentagonal_bipyramid_selects_d5h_and_ignores_labels() {
         let x = bipyramid();
         let classes = vec![0; 7];
-        let projection = propose(x.view(), &classes).expect("projection");
+        let projection = propose_templates(x.view(), &classes).expect("projection");
         assert!(projection.measure < 1e-8, "{}", projection.measure);
         let (_, d5h) = project(
             x.view(),
             &classes,
             &d5h_ops(),
-            &inertia_orientations(x.view(), 7).expect("axes"),
+            &inertia_orientations_with(x.view(), 7, std::f64::consts::TAU / 5.0).expect("axes"),
         )
         .expect("d5h");
         assert!(d5h < 1e-8, "{d5h}");
@@ -1163,42 +1914,8 @@ mod tests {
         assert!((flipped.measure - projection.measure).abs() < 1e-8);
         let mut noisy = x.clone();
         noisy[2] += 0.25;
-        let shifted = propose(noisy.view(), &classes).expect("noisy");
+        let shifted = propose_templates(noisy.view(), &classes).expect("noisy");
         assert!(shifted.measure > 1e-3, "{}", shifted.measure);
-    }
-
-    #[test]
-    fn project_refuses_an_empty_group_a_bad_length_and_a_non_finite_point() {
-        let x = Array1::from_vec(vec![1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
-        let classes = [0, 0];
-        assert!(project(x.view(), &classes, &[], &[identity()]).is_none());
-        assert!(project(x.view(), &classes, &inversion_ops(), &[]).is_none());
-        assert!(project(x.view(), &[0], &inversion_ops(), &[identity()]).is_none());
-        let mut bad = x.clone();
-        bad[0] = f64::NAN;
-        assert!(project(bad.view(), &classes, &inversion_ops(), &[identity()]).is_none());
-        assert!(centre_and_scale(Array1::zeros(0).view(), 0).is_none());
-    }
-
-    #[test]
-    fn a_zero_orientation_is_not_a_measure() {
-        let x = Array1::from_vec(vec![1.0, 0.0, 0.0, -1.0, 0.0, 0.0]);
-        let zero = [[0.0; 3]; 3];
-        assert!(project(x.view(), &[0, 0], &inversion_ops(), &[zero]).is_none());
-    }
-
-    #[test]
-    fn a_pair_inside_the_singular_distance_is_not_proposed() {
-        let x = Array1::from_vec(vec![0.0, 0.0, 0.0, 0.005, 0.0, 0.0]);
-        assert!(propose(x.view(), &[0, 0]).is_none());
-    }
-
-    #[test]
-    fn a_nearly_axial_vector_uses_the_other_reference() {
-        let along_x = perpendicular([1.0, 0.0, 0.0]);
-        assert!(along_x[0].abs() < 1e-12);
-        let along_z = perpendicular([0.0, 0.0, 1.0]);
-        assert!(along_z[2].abs() < 1e-12);
     }
 
     #[test]
@@ -1241,7 +1958,7 @@ mod tests {
                         .collect::<Vec<_>>()
                 );
             }
-            let proposed = propose(x.view(), &classes).expect("propose");
+            let proposed = propose_templates(x.view(), &classes).expect("propose");
             let ungated = ungated_projection(x.view(), &classes).expect("ungated");
             assert_eq!(proposed.group, ungated.group);
             assert_eq!(proposed.measure.to_bits(), ungated.measure.to_bits());

@@ -34,6 +34,7 @@ from target_tol import DEFAULT_HIT_TOL  # noqa: E402
 from machine_provenance import (  # noqa: E402
     host_label,
     machine_columns,
+    stored_machine_id_compatible,
     machine_provenance,  # noqa: F401
     read_built_gmin_source,
     require_gmin_build_key,
@@ -597,7 +598,7 @@ def load_saved(
             or int(row["energy_only_entries"]) < 0
         ):
             raise ValueError(f"{path}: invalid gmin counters: {row}")
-    if row.get("machine_id") != machine_id or row.get("cpu_model") != cpu_model:
+    if not stored_machine_id_compatible(row.get("machine_id")) or row.get("cpu_model") != cpu_model:
         return None
     if not code_revision:
         return None

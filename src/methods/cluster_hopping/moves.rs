@@ -376,6 +376,7 @@ impl MoveLibrary {
                 core_fraction: cfg.symmetrise_core_fraction,
                 min_separation: cfg.min_separation,
                 fallback_step: LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
+                detected_symmetry: cfg.detected_symmetry,
             });
         }
         if cfg.point_symmetrise {
@@ -384,7 +385,15 @@ impl MoveLibrary {
                 tolerance: cfg.symmetry_tolerance,
                 pair_cutoff: cfg.symmetry_merge_radius,
                 fallback_step: LennardJonesPreset::SINGLE_POINT_STEP * cfg.length_scale,
+                detected_symmetry: cfg.detected_symmetry,
             });
+        }
+        if cfg.detected_symmetry {
+            for kernel in &mut kernels {
+                if let ClusterMove::Symmetrise(sym) = kernel {
+                    sym.orders = crate::symmetrise::orders_held(sym.n_points);
+                }
+            }
         }
         kernels
     }
@@ -553,6 +562,8 @@ pub enum ClusterMove {
         min_separation: f64,
         /// Half-width of the fallback single-point displacement.
         fallback_step: f64,
+        /// Use template-free detection across all orders the point count holds.
+        detected_symmetry: bool,
     },
     /// Push the structure onto the point group it nearly has, as a proposal.
     ///
@@ -573,6 +584,8 @@ pub enum ClusterMove {
         pair_cutoff: f64,
         /// Half-width of the fallback single-point displacement.
         fallback_step: f64,
+        /// Use template-free detection across all orders the point count holds.
+        detected_symmetry: bool,
     },
     /// Step away, in descriptor space, from the packings the population
     /// occupies, pulled back to Cartesian displacements through the SOAP
@@ -2211,9 +2224,11 @@ impl ClusterMove {
                 core_fraction,
                 min_separation,
                 fallback_step,
+                detected_symmetry,
             } => {
                 let n = *n_points;
-                if let Some(y) = crate::packing::on_new_basin(
+                if let Some(y) = crate::packing::on_new_basin_for(
+                    *detected_symmetry,
                     x,
                     n,
                     *tolerance,
@@ -2239,10 +2254,21 @@ impl ClusterMove {
                 tolerance,
                 pair_cutoff,
                 fallback_step,
+                detected_symmetry,
             } => {
                 let n = *n_points;
                 if n >= 3 {
-                    let cands = crate::symmetrise::detect_all(x, n, &[2, 3, 4, 5, 6], *tolerance);
+                    let cands = if *detected_symmetry {
+                        let orders = crate::symmetrise::orders_held(n);
+                        crate::symmetrise::detect_all(x, n, &orders, *tolerance)
+                    } else {
+                        crate::symmetrise::detect_all_crystallographic(
+                            x,
+                            n,
+                            &[2, 3, 4, 5, 6],
+                            *tolerance,
+                        )
+                    };
                     if !cands.is_empty() {
                         // One generator per distinct axis, lowest deviation
                         // first, at most three: two generate every axial and
@@ -2264,18 +2290,21 @@ impl ClusterMove {
                                 break;
                             }
                         }
-                        let group = crate::symmetrise::generate_group(&gens, 48);
-                        let y = if group.len() > 1 {
-                            crate::symmetrise::symmetrise_group(x, n, &group, *pair_cutoff)
-                        } else {
-                            crate::symmetrise::symmetrise(x, n, &cands[0], *pair_cutoff)
-                        };
-                        // An exactly symmetric structure comes back as itself;
-                        // proposing the incumbent wastes a quench, so fall
-                        // through to the displacement.
-                        let moved = y.iter().zip(x.iter()).any(|(a, b)| (a - b).abs() > 1e-9);
-                        if moved {
-                            return y;
+                        if let Some(group) =
+                            crate::symmetrise::generate_group_for(*detected_symmetry, &gens, 48)
+                        {
+                            let y = if group.len() > 1 {
+                                crate::symmetrise::symmetrise_group(x, n, &group, *pair_cutoff)
+                            } else {
+                                crate::symmetrise::symmetrise(x, n, &cands[0], *pair_cutoff)
+                            };
+                            // An exactly symmetric structure comes back as itself;
+                            // proposing the incumbent wastes a quench, so fall
+                            // through to the displacement.
+                            let moved = y.iter().zip(x.iter()).any(|(a, b)| (a - b).abs() > 1e-9);
+                            if moved {
+                                return y;
+                            }
                         }
                     }
                 }

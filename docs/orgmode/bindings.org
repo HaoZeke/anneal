@@ -6,6 +6,63 @@ The Python package =anneal= ships from PyPI as a maturin-built wheel.
 The Rust extension is exposed as the submodule =anneal._core=.
 The package source lives at =python/anneal/= in the repo and is installed via =maturin develop --features python= during development.
 
+PEP 561 =py.typed= metadata and =.pyi= stub files cover =anneal=,
+=anneal._core=, =anneal.ase=, =anneal.device=, =anneal.chemfit=,
+=anneal.tvm_ffi=, and =anneal._landfold=.
+
+Built-in cluster potentials (=PairPotential=, =BinaryLennardJones=,
+=SuttonChen=, =Gupta=, =Tip4pCluster=, and =GminTip4p=) and TIP4P chart
+helpers (=rigid_from_ohh=, =energy_ohh=, =block_from_interleaved_gmin=,
+=interleaved_gmin_from_block=, =gmin_tip4p_sites=) are exported from
+=anneal=. Each potential evaluates in Rust without per-call Python
+callbacks when handed directly to =cluster_search(pot, None, n, budget)=
+or =quench(pot, x0, gtol)=, converts to =PyObjective= via
+=pot.to_objective()=, and plugs into ASE =Atoms= via
+=anneal.ase.PotentialCalculator=.
+
+=anneal.Config= exposes every Rust =cluster_hopping::Config= preset
+(=recommended_with_scales=, =recommended_for_pair=,
+=for_cluster_with_scales=, =for_cluster_dual_core=, =with_scales=,
+=packing_superbasin=, =for_tip4p=, =for_molecular=,
+=recommended_molecular=), builder and inspection methods (=with_species=,
+=with_dual_orbit_core=, =with_rigid_bodies=, =with_flexible_molecules=,
+=resolved_json=, =resolved_sha256=, =check_removed_env=,
+=parse_prior_switches=), and read/write attributes for every active
+configuration field (including =rigid_body_geometry=, =two_phase=,
+=surfaces=, =reoccupy=, and =hmc=).
+=cluster_search= accepts =energy_scale= and a pre-configured =config=
+instance directly, and delegates scaled presets to
+=Config::recommended_with_scales= and =Config::for_cluster_with_scales=.
+
+=dmc_population_optimize= defaults (~target_n=None~ via
+=recommend_target_n(budget, dim)=, ~steps_per_control=2~, ~beta0=1.0~)
+match Rust =dmc_population::dmc_population_optimize=. =box_ensemble_optimize=,
+=ensemble_optimize=, =minimize=, and =global_optimize= expose the full
+=BoxEnsembleConfig=, =GleEscapeConfig=, and =BoxCoverageConfig= keyword
+surface (=identity_tol=, =shared_deposits=, =shared_visit_policy=,
+~escape="gaussian"|"langevin"~, =langevin_*=, =coverage_height=,
+=coverage_well_tempering=, =coverage_peer_weight=).
+=global_optimize_objective= accepts =noise_sigma= and =policy=,
+=osa_acceptance_rate= is exported at top level, and =BasinBias= supports
+~w0 >= 0~ along with =merge_radius=, =height=, =well_depth=, =wells=,
+=deepest_wells=, and =cap_basins=.
+
+=cluster_search= returns full =Outcome=, =RelaxStats=, and =SearchPhase=
+diagnostics (=spent=, =final=, =final_energy=, =basins=, =screened_out=,
+=restarts=, =visit_counts=, =escape_scale=, =escape_threshold=,
+=merge_radius=, =mean_step=, =arms=, =improvements=, =stop=, =quenched=,
+=energy_trace=, =converged=, =capped=, =screens=, =screen_charged=,
+=full_charged=, =check_charged=, =overlap_rejected=, =refused=,
+=screen_steps_taken=, =search_seconds=, =polish_seconds=, =polish_calls=;
+plus =screens=, =same_floor=, =artn=, and =best_at= under ~ras=True~).
+=Ledger= exposes =best_state=, =target=, =target_reached=, =stopped=,
+=answer_polish_calls=, =start_redraws=, =encounters=, =stop_below=,
+=below_target=, =charge=, =charge_many=, =charge_frac=, and =record=.
+=polish= includes =best_grad=, =global_optimize= and
+=global_optimize_objective= include =hop_state=, and
+=box_ensemble_optimize= and =ensemble_optimize= report
+=history_attempts= alongside =charged=.
+
 * C and C++ (cargo-c)
 
 The Rust crate produces a =cdylib=, =staticlib=, generated header =anneal-core.h=, and pkg-config metadata =anneal-core.pc= via cargo-c.

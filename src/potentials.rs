@@ -328,6 +328,13 @@ impl PairPotential {
     /// are installed.
     pub fn value_and_gradient(&self, x: ArrayView1<f64>) -> (f64, Array1<f64>) {
         let n = self.n_points;
+        assert_eq!(
+            x.len(),
+            3 * n,
+            "PairPotential expects {} coordinates, got {}",
+            3 * n,
+            x.len()
+        );
         let mut e = 0.0;
         let mut g = Array1::zeros(x.len());
         if let Some(coordinates) = x.as_slice()
