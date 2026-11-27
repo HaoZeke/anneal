@@ -16,9 +16,6 @@ CELLS = [
     ("lj75", "h2h_gmin_proof", -397.492331),
 ]
 SEEDS = range(2000, 2012)
-ARMS = {"A": ("/tmp/tgt6-A/release/examples", sys.argv[2]),
-        "A2": ("/tmp/tgt6-A2/release/examples", sys.argv[2]),
-        "R6": ("/tmp/tgt6-B/release/examples", sys.argv[3])}
 ORDERS = [["A", "A2", "R6"], ["A2", "R6", "A"], ["R6", "A", "A2"]]
 THREADS = ["OMP_NUM_THREADS", "OMP_THREAD_LIMIT", "MKL_NUM_THREADS", "MKL_DOMAIN_NUM_THREADS",
            "OPENBLAS_NUM_THREADS", "RAYON_NUM_THREADS", "NUMBA_NUM_THREADS", "NUMEXPR_NUM_THREADS",
@@ -37,7 +34,15 @@ def env():
 
 
 def main():
+    if len(sys.argv) != 5:
+        raise SystemExit("usage: run_arms.py ROWS REV_A REV_R6 BUILD_ROOT")
     rows_path = Path(sys.argv[1])
+    root = Path(sys.argv[4])
+    arms = {
+        "A": (root / "tgt6-A" / "release" / "examples", sys.argv[2]),
+        "A2": (root / "tgt6-A2" / "release" / "examples", sys.argv[2]),
+        "R6": (root / "tgt6-B" / "release" / "examples", sys.argv[3]),
+    }
     logs = rows_path.parent / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     done = set()
@@ -46,16 +51,16 @@ def main():
     else:
         with rows_path.open("w", newline="") as f:
             csv.writer(f, lineterminator="\n").writerow(FIELDS)
-    host = "machine-" + hashlib.sha256(Path("/etc/machine-id").read_bytes()).hexdigest()[:16]
-    shas = {(a, d): hashlib.sha256(Path(ARMS[a][0], d).read_bytes()).hexdigest()
-            for a in ARMS for d in ("h2h_morse", "h2h_gmin_proof")}
+    host = "unrecorded"
+    shas = {(a, d): hashlib.sha256(Path(arms[a][0], d).read_bytes()).hexdigest()
+            for a in arms for d in ("h2h_morse", "h2h_gmin_proof")}
     for cell, driver, ref in CELLS:
         for seed in SEEDS:
             order = ORDERS[seed % 3]
             for slot, arm in enumerate(order, 1):
                 if (cell, arm, str(seed)) in done:
                     continue
-                exe = Path(ARMS[arm][0], driver)
+                exe = Path(arms[arm][0], driver)
                 with tempfile.TemporaryDirectory() as wd:
                     started = time.time()
                     p = subprocess.run(["taskset", "-c", "0", str(exe), "run", cell, str(seed)],
@@ -73,7 +78,7 @@ def main():
                 bits = "0x%016x" % struct.unpack(">Q", struct.pack(">d", best))[0]
                 row = [cell, arm, seed, slot, int(hit), r["evals_to_hit"] if hit else r["budget"],
                        r["charged"], r["best"], bits, f"{wall:.6f}", f"{pot:.6f}", f"{out:.6f}",
-                       ARMS[arm][1], shas[(arm, driver)], host, 0,
+                       arms[arm][1], shas[(arm, driver)], host, 0,
                        f"{started:.0f}", f"{elapsed:.3f}"]
                 with rows_path.open("a", newline="") as f:
                     csv.writer(f, lineterminator="\n").writerow(row)

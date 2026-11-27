@@ -240,10 +240,7 @@ def provenance(repo: Path) -> dict[str, str]:
 
 
 def machine_id() -> str:
-    for candidate in (Path("/etc/machine-id"), Path("/sys/class/dmi/id/product_uuid")):
-        if candidate.is_file():
-            return hashlib.sha256(candidate.read_bytes().strip()).hexdigest()
-    raise SystemExit("machine id is unavailable")
+    return "unrecorded"
 
 
 def job_dir(run_dir: Path, job: dict) -> Path:

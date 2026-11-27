@@ -231,12 +231,7 @@ def sha256_file(path: Path) -> str:
 
 
 def hashed_machine_id() -> str:
-    for candidate in (Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")):
-        if candidate.is_file():
-            raw = candidate.read_text(encoding="utf-8").strip()
-            if raw:
-                return sha256_bytes(raw.encode("utf-8"))
-    raise RuntimeError("cannot read a machine id")
+    return "unrecorded"
 
 
 def new_session(machine_id: str) -> str:

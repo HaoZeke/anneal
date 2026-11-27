@@ -7,7 +7,6 @@ import argparse
 import csv
 import datetime as dt
 import hashlib
-import hmac
 import json
 import os
 import subprocess
@@ -147,9 +146,7 @@ def atomic_write_csv(path: Path, fieldnames: tuple[str, ...], rows: list[dict[st
 
 
 def machine_id_hash() -> str:
-    mid_path = Path("/etc/machine-id")
-    raw = mid_path.read_bytes().strip() if mid_path.exists() else b"unknown-machine"
-    return hmac.new(b"anneal-cap-turn-gate", raw, hashlib.sha256).hexdigest()[:16]
+    return "unrecorded"
 
 
 def read_loadavg_1m() -> float:

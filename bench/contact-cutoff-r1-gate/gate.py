@@ -164,7 +164,7 @@ def git_blob(path: Path) -> str:
 
 
 def machine_id() -> str:
-    return hashlib.sha256(Path("/etc/machine-id").read_text().strip().encode()).hexdigest()
+    return "unrecorded"
 
 
 def tree_of(source: Path) -> str:

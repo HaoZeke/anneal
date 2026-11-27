@@ -7,10 +7,13 @@ from __future__ import annotations
 import argparse
 import csv
 import os
-import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+from machine_provenance import host_label  # noqa: E402
 
 HIT_TOL = 0.001
 SEEDS_12 = tuple(range(2000, 2012))
@@ -260,7 +263,7 @@ def main() -> int:
     parser.add_argument("--session")
     args = parser.parse_args()
 
-    host = socket.gethostname()
+    host = host_label()
     if host != "bench":
         raise SystemExit(f"hostname is {host!r}, expected 'bench'")
     if os.sched_getaffinity(0) != {0}:
@@ -326,7 +329,7 @@ def main() -> int:
                     "budget": str(budget),
                     **res,
                     "code_revision": revision,
-                    "host": host,
+                    "host": "unrecorded",
                     "cpu": cpu,
                     "session": session,
                     "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
