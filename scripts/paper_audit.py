@@ -7398,9 +7398,9 @@ def crest_table(audit: Audit) -> None:
     audit.cell(TEX, "the hexamer charges one count", "1", float(len(charged)))
     records = octamer_records(audit)
     for path in (TEX, COVER):
-        audit.said(path, f"On tight-binding clusters anneal finds the water hexamer in {hits_of(anneal)} of "
-                         f"{len(anneal)} runs and CREST in {hits_of(crest)} of {len(crest)}, a difference that is not "
-                         "significant. The search wins on the ten-atom carbon ring and, with the opt-in "
+        audit.said(path, f"On tight-binding clusters the anneal software finds the water hexamer in {hits_of(anneal)} of "
+                         f"{len(anneal)} runs and the CREST conformer search in {hits_of(crest)} of {len(crest)}, a difference "
+                         "that is not significant. The search wins on the ten-atom carbon ring and, with the opt-in "
                          "\\texttt{polish\\_on\\_improve} option, on the water octamer.")
     if records is not None:
         water, nh3 = records["h2o8"], records["nh3"]
