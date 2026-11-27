@@ -6176,6 +6176,11 @@ def printed_definitions(audit: Audit) -> None:
         found = re.search(rf"{name}: f64 = ([0-9.eE+-]+);", text)
         return float(found.group(1)) if found else float("nan")
 
+    def matched(found, where: str, label: str) -> bool:
+        ok = found is not None
+        audit.record(ok, where, label, "matched", "matched" if ok else "absent")
+        return ok
+
     temperature = literal(preset, "TEMPERATURE")
     audit.said(TEX, f"runs at \\(T={temperature:g}\\).")
     audit.said(TEX, f"With \\(T={temperature:g}\\) in reduced units")
@@ -6211,22 +6216,22 @@ def printed_definitions(audit: Audit) -> None:
         audit.said(TEX, f"fell by more than \\(10^{{-{drop}}}\\).")
         audit.said(TEX, f"E_{{\\mathrm{{held}}}} - 10^{{-{drop}}}")
     patience = re.search(r"escape_stall_patience: ([0-9_]+),", config)
-    if patience:
+    if matched(patience, "src/methods/cluster_hopping/config.rs", "escape_stall_patience is printed"):
         calls = int(patience.group(1).replace("_", ""))
         audit.said(TEX, f"S - S_{{\\star}} \\ge {calls}.")
         audit.said(TEX, f"q \\ge \\max({calls},\\, 2\\, q_{{\\mathrm{{long}}}}).")
     tabu = re.search(r"tabu_capacity: (\d+),", config)
-    if tabu:
+    if matched(tabu, "src/methods/cluster_hopping/config.rs", "tabu_capacity is printed"):
         audit.said(TEX, f"up to {NUMBER_WORDS[int(tabu.group(1))]} basins")
         audit.said(TEX, f"m < {tabu.group(1)}")
     interval = re.search(r"interval: (\d+)", config)
-    if interval:
+    if matched(interval, "src/methods/cluster_hopping/config.rs", "the bias interval is printed"):
         audit.said(TEX, f"runs every {NUMBER_WORDS[int(interval.group(1))]} quenches.")
     gamma = re.search(r"bias_gamma: ([0-9.]+),", config)
-    if gamma:
+    if matched(gamma, "src/methods/cluster_hopping/config.rs", "bias_gamma is printed"):
         audit.said(SI, f"\\gamma = {float(gamma.group(1)):g}")
     warmup = re.search(r"bayes_warmup: (\d+),", config)
-    if warmup:
+    if matched(warmup, "src/methods/cluster_hopping/config.rs", "bayes_warmup is printed"):
         audit.said(TEX, f"the first {warmup.group(1)} observed full relaxations")
         audit.said(SI, f"after {warmup.group(1)} observations")
     cap = re.search(r"const PENTAGON_CAP: f64 = ([0-9.]+);", soap)
@@ -6238,63 +6243,63 @@ def printed_definitions(audit: Audit) -> None:
         audit.said(SI, f"{float(cap.group(1)):g},&N>13,\\\\{rmsd:g},&N\\leq13")
     hollow = re.search(r"hollow_cutoff: ([0-9.]+) \* r", lattice)
     clearance = re.search(r"clearance: ([0-9.]+) \* r", lattice)
-    if hollow:
+    if matched(hollow, "src/methods/lattice_search.rs", "hollow_cutoff is printed"):
         audit.said(SI, f"at most \\({hollow.group(1)}\\,\\ell\\)")
-    if clearance:
+    if matched(clearance, "src/methods/lattice_search.rs", "clearance is printed"):
         audit.said(SI, f"within \\({clearance.group(1)}\\,\\ell\\)")
     block = re.search(r"DEFAULT_SURFACE_BLOCK: usize = (\d+);", two_phase)
-    if block:
+    if matched(block, "src/methods/two_phase.rs", "DEFAULT_SURFACE_BLOCK is printed"):
         audit.said(TEX, f"holds it for {block.group(1)} hops.")
         audit.said(TEX, f"a block of {block.group(1)} hops")
     size = re.search(r"if n_points < (\d+) \{", config)
-    if size:
+    if matched(size, "src/methods/cluster_hopping/config.rs", "the n_points cutoff is printed"):
         audit.said(TEX, f"Below {size.group(1)} atoms the quench chooses a surface")
         audit.said(TEX, f"At {size.group(1)} atoms and above the penalty is absent")
         audit.said(TEX, f"N < {size.group(1)}")
     relative = re.search(r"TwoPhase::relative\(([0-9.]+),", config)
-    if relative:
+    if matched(relative, "src/methods/cluster_hopping/config.rs", "TwoPhase relative step is printed"):
         audit.said(TEX, f"D(x) &= {relative.group(1)} \\max")
     audit.record("mu: vec![0.0; n_arms]," in allocate and "kappa: vec![1e-6; n_arms]," in allocate
                  and "alpha: vec![1.0; n_arms]," in allocate and "beta: vec![1.0; n_arms]," in allocate,
                  "src/allocate.rs", "the depth prior is the printed Normal-Gamma",
                  "0, 1e-6, 1, 1", "present")
     kappa = re.search(r"kappa: vec!\[([0-9.eE+-]+);", allocate)
-    if kappa:
+    if matched(kappa, "src/allocate.rs", "the depth prior kappa is printed"):
         exponent = int(round(-math.log10(float(kappa.group(1)))))
         audit.said(TEX, f"\\mu_k = 0, \\quad \\kappa_k = 10^{{-{exponent}}}, \\quad \\alpha_k = 1, \\quad \\beta_k = 1.")
     rigid = audit.text("src/methods/rigid_quench.rs")
     stall = audit.text("src/methods/stall_archive.rs")
     stagnation = re.search(r"STAGNATION_HOPS: usize = (\d+);", rigid)
-    if stagnation:
+    if matched(stagnation, "src/methods/rigid_quench.rs", "STAGNATION_HOPS is printed"):
         audit.said(TEX, f"h - h_{{\\star}} > {stagnation.group(1)}.")
     seats = re.search(r"pub const SEATS: usize = (\d+);", stall)
     memory = re.search(r"pub const MEMORY: usize = (\d+);", stall)
-    if seats:
+    if matched(seats, "src/methods/stall_archive.rs", "SEATS is printed"):
         audit.said(TEX, f"the {NUMBER_WORDS[int(seats.group(1))]} lowest distinct minima")
-    if memory:
+    if matched(memory, "src/methods/stall_archive.rs", "MEMORY is printed"):
         audit.said(TEX, f"one of its last {NUMBER_WORDS[int(memory.group(1))]} stall destinations")
     screen = re.search(r"rec\.bayes_threshold - ([0-9.]+) / ([0-9.]+)", hop)
-    if screen:
+    if matched(screen, "src/methods/cluster_hopping.rs", "the Bayes screen fraction is printed"):
         audit.said(SI, f"\\frac{{{int(float(screen.group(1)))}}}{{{int(float(screen.group(2)))}}}")
     exploration = re.search(r"bayes_exploration: ([0-9.]+),", config)
-    if exploration:
+    if matched(exploration, "src/methods/cluster_hopping/config.rs", "bayes_exploration is printed"):
         audit.said(SI, f"a fraction \\({float(exploration.group(1)):g}\\) is finished")
     window = re.search(r"const WINDOW: usize = (\d+);", hop)
     warm = re.search(r"const WARMUP: usize = (\d+);", hop)
-    if window:
+    if matched(window, "src/methods/cluster_hopping.rs", "WINDOW is printed"):
         audit.said(SI, f"the last {window.group(1)} partial relaxations")
-    if warm:
+    if matched(warm, "src/methods/cluster_hopping.rs", "WARMUP is printed"):
         audit.said(SI, f"until {warm.group(1)} full relaxations")
     margin = literal(preset, "SCREEN_MARGIN")
     audit.said(SI, f"\\Delta_s={margin:g}")
     orders = re.search(r"orders: vec!\[([0-9, ]+)\]", moves)
-    if orders:
+    if matched(orders, "src/methods/cluster_hopping/moves.rs", "the move orders are printed"):
         listed = ", ".join(part.strip() for part in orders.group(1).split(",") if part.strip())
         head, last = listed.rsplit(", ", 1)
         audit.said(TEX, f"order \\({head},\\) and \\({last}\\)")
         audit.said(SI, f"m\\in\\{{{orders.group(1).split(',')[0].strip()},\\ldots,{orders.group(1).split(',')[-1].strip()}\\}}")
     coordination = re.search(r"interior_coordination: (\d+),", lattice)
-    if coordination:
+    if matched(coordination, "src/methods/lattice_search.rs", "interior_coordination is printed"):
         audit.said(SI, f"fewer than {coordination.group(1)} neighbors")
     audit.said(SI, f"root-mean-square displacement \\({literal(preset, 'SOAP_RMSD'):g}\\)")
     audit.said(SI, f"at most \\({literal(preset, 'SYMMETRISE_CUTOFF'):g}\\)")

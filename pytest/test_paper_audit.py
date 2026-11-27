@@ -2513,6 +2513,19 @@ def test_the_rendered_abstract_is_counted_without_page_numbers():
         "body has 7001 words, outside 5000-7000"]
 
 
+def test_a_missed_printed_definition_is_a_drift():
+    """A definition pattern that no longer matches the source is a drift, not a skip."""
+    audit = audit_mod.Audit()
+    path = "src/methods/cluster_hopping/config.rs"
+    text = audit.text(path)
+    old = "tabu_capacity: 8,"
+    assert text.count(old) == 1
+    audit.text_cache[path] = text.replace(old, "tabu_size: 8,", 1)
+    audit_mod.printed_definitions(audit)
+    assert [row for row in audit.drifts() if row[2] == "tabu_capacity is printed"] == [
+        ("DRIFT", path, "tabu_capacity is printed", "matched", "absent")]
+
+
 def cross_labels():
     spec = importlib.util.spec_from_file_location("cross_labels", ROOT / "paper/jctc/scripts/cross_labels.py")
     module = importlib.util.module_from_spec(spec)
