@@ -54,7 +54,7 @@ Each seed is anneal, CREST, CREST, anneal, and each arm has two repeats.
 Seeds 2000-2005 keep the wall time, cpu time, and final energy from this kit.
 Seeds 2006-2011 keep those three fields from the rows already on this branch.
 Seeds 2000-2005 use `host_tag` `da5ae9b9-9259-4a28-95e3-53ff0ab39756`.
-That tag is the uuid4 from r2 `run.py` lines 174-182.
+That tag is the uuid4 session label recorded for those seeds.
 Seeds 2006-2011 keep the branch label `vm0`.
 Those blocks are different VMs and different sessions, so wall times across the two blocks are not directly comparable.
 CREST `wall_s` for 2006-2011 is `/usr/bin/time` elapsed wall clock at 0.01 s resolution (`crest_run.py` reads `Elapsed (wall clock)`).
@@ -66,6 +66,9 @@ For `vm0`, anneal has n=12, wall_s_sum 15639.847620, wall_s_median 1301.8362105,
 
 `total_calls` and `exit_code` for anneal seeds 2000-2005 are `energy_calls` and the process exit from each run's `run.txt`.
 Those files are in `logs/anneal/`.
+`wall_s` in those files is the in-process search timer: it starts after the engine is loaded and stops when the search returns (`examples/gfn2_mol_h2h.rs`).
+`wall_s` in `rows-abba.csv` is the parent monotonic clock around the whole child process (`run.py` writes `time.txt`, and `abba.py` copies it).
+On these twelve runs the csv clock is longer by 0.019 s to 0.239 s. That gap is process start, engine load, and the short work after the search timer stops.
 `logs/anneal-abba.txt` is those two fields, one line per run.
 Those 12 runs spent 151738 calls and exited 0.
 Seeds 2006-2011 have no ABBA anneal call log in this tree, so those two cells are `NA`.

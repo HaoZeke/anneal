@@ -135,8 +135,8 @@ def crest_once(binary: Path, crest: Path, xtb: Path, xtb_lib: Path, crest_lib: P
 
 
 # Recorded run origin, not a fresh label. Seeds 2000-2005 share the uuid4
-# written by r2 run.py:174-182. Seeds 2006-2011 share the vm0 label from
-# that session. The seed range only selects which recorded tag to copy.
+# session label da5ae9b9-9259-4a28-95e3-53ff0ab39756. Seeds 2006-2011 share
+# the recorded label vm0. The seed range only selects which recorded tag to copy.
 TAG_2000 = "da5ae9b9-9259-4a28-95e3-53ff0ab39756"
 TAG_2006 = "vm0"
 
