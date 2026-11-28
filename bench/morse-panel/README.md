@@ -15,26 +15,26 @@ Cambridge Cluster Database Morse table, epsilon = 1. A bold entry is the global 
 | m80r10 | 80D | 10 | -344.911381 | 4000000 |
 | m80r14 | 80G | 14 | -340.811371 | 4000000 |
 
-Budgets follow the Lennard-Jones paper list: 1e6 below 75 atoms, 4e6 at 80. Twelve seeds, 2000-2011. `Config::recommended`. Serial, one core, hostname `bench`, working directory `/work`. `pot_s` is inside the potential. `outside_s` is the rest. Per-seed rows are `seeds.csv`. Type-7 medians, two-sided Fisher exact tests and two-sided Mann-Whitney tests are `summary.csv`.
+Budgets follow the Lennard-Jones paper list: 1e6 below 75 atoms, 4e6 at 80. Twelve seeds, 2000-2011. `Config::recommended`. Serial, one core, hostname `bench`, working directory `/work`. `pot_s` is inside the potential. `outside_s` is the rest. Per-seed rows are `seeds.csv`. Type-7 medians are below. Anneal counts one energy-and-gradient pass and GMIN counts a potential entry, so this note prints no Fisher or Mann-Whitney value. `summary.csv` keeps the stored columns.
 
 GMIN is the public Wales build, revision `aac1548a8aec13b53ad12a8d6904625081685d2e`. The data file is `examples/h2h_gmin_morse.data` plus `MORSE <rho>` and `RANSEED`. GMIN rows already stored at the same system, seed and budget are copied and not run again: m55r6 seeds 2000-2005 from `bench/morse-h2h`, and every m55r14 and m80r14 seed from `bench/morse14-h2h`.
 
 The anneal walk is the recommended preset after the portable math and fused pair gradient. The acceptance dial for a steep well was checked on this preset and did not move a row: m55r6 seeds 2000 and 2006, m55r14 seeds 2000 and 2006, m70r3 seed 2000 and m80r3 seed 2000 kept the same hit call and the same best energy. A later rigid-replica start is not this search. `run_with_gradient` is one chain, and the preset is not a rigid body.
 
-| system | anneal | gmin | Fisher p | MW calls | MW wall | MW pot | MW outside |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| m55r6 | 12/12 | 12/12 | 1 | 3.60e-5 | 3.64e-5 | 3.66e-5 | 3.66e-5 |
-| m55r14 | 6/12 | 0/12 | 0.0137 | 0.00705 | 0.0885 | 0.507 | 0.00244 |
-| m70r3 | 11/12 | 12/12 | 1 | 0.341 | 0.0166 | 0.0606 | 3.08e-4 |
-| m70r6 | 9/12 | 11/12 | 0.590 | 0.0826 | 0.00295 | 0.00610 | 4.69e-5 |
-| m70r10 | 2/12 | 0/12 | 0.478 | 0.166 | 5.92e-4 | 5.92e-4 | 3.66e-5 |
-| m70r14 | 3/12 | 0/12 | 0.217 | 0.0788 | 3.66e-5 | 3.66e-5 | 3.66e-5 |
-| m80r3 | 12/12 | 12/12 | 1 | 0.00862 | 7.31e-4 | 0.00135 | 1.23e-4 |
-| m80r6 | 12/12 | 12/12 | 1 | 1.96e-4 | 4.69e-5 | 9.73e-5 | 3.66e-5 |
-| m80r10 | 2/12 | 0/12 | 0.478 | 0.166 | 5.92e-4 | 0.00610 | 3.66e-5 |
-| m80r14 | 10/12 | 0/12 | 6.73e-5 | 1.25e-4 | 0.175 | 0.507 | 5.92e-4 |
+| system | anneal hits | gmin hits |
+| --- | --- | --- |
+| m55r6 | 12/12 | 12/12 |
+| m55r14 | 6/12 | 0/12 |
+| m70r3 | 11/12 | 12/12 |
+| m70r6 | 9/12 | 11/12 |
+| m70r10 | 2/12 | 0/12 |
+| m70r14 | 3/12 | 0/12 |
+| m80r3 | 12/12 | 12/12 |
+| m80r6 | 12/12 | 12/12 |
+| m80r10 | 2/12 | 0/12 |
+| m80r14 | 10/12 | 0/12 |
 
-Type-7 medians. Calls are `evals_to_hit`. A miss is entered at the budget.
+Type-7 medians. Calls are `evals_to_hit`. A miss is entered at the budget. Each column is that arm's own median.
 
 | system | anneal calls | gmin calls | anneal wall | gmin wall | anneal pot | gmin pot | anneal outside | gmin outside |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -49,6 +49,6 @@ Type-7 medians. Calls are `evals_to_hit`. A miss is entered at the budget.
 | m80r10 | 4000000 | 4000000 | 307.70 | 138.69 | 236.09 | 129.53 | 71.46 | 9.15 |
 | m80r14 | 2479560 | 4000000 | 184.71 | 138.84 | 146.67 | 128.22 | 38.04 | 10.67 |
 
-At rho = 6 and at M80 rho = 3 both arms hit every seed. Anneal's median call count is lower at M55 rho = 6 (233 against 27462) and higher at M80 rho = 6 (1.07e6 against 3.46e5). GMIN's median wall is shorter wherever the search runs for a sizable fraction of the budget, because almost all of that wall is inside the potential.
+At rho = 6 and at M80 rho = 3 both arms hit every seed. At M55 rho = 6 the call medians are 233 for anneal and 27462 for GMIN. At M80 rho = 6 the call medians are 1.07e6 for anneal and 3.46e5 for GMIN. Each wall in the table is that arm's own median.
 
 Four of the six M55 rho = 14 misses finish at -220.518533, the Cambridge 55D energy. The two M80 rho = 14 misses are seed 2009 at -340.387336 and seed 2010 at -340.802563, 0.0088 above 80G. M80 rho = 6 seed 2010 reaches -378.333465 at call 757199.

@@ -108,12 +108,14 @@ def summary(system: str, arms: dict[str, list[dict[str, str]]], preset: str) -> 
         raise SystemExit(f"ase_table: {system} cap is not three times the slowest {preset} wall")
     hits = {arm: sum(r["hit"] == "1" for r in rows) for arm, rows in arms.items()}
     stops = {arm: sum(r["stop"] == "wall" for r in rows) for arm, rows in arms.items()}
+    mix = {arm: stop_mix(rows) for arm, rows in arms.items()}
     if stops["recommended"]:
         raise SystemExit(f"ase_table: {system} a run of this code stopped at the cap")
     return {
         "cap": float(next(iter(caps))),
         "hits": hits,
         "stops": stops,
+        "mix": mix,
         "wall": {arm: statistics.median(float(r["wall_s"]) for r in rows) for arm, rows in arms.items()},
         "calls": {arm: (min(int(r["charged"]) for r in rows), max(int(r["charged"]) for r in rows))
                   for arm, rows in arms.items()},
@@ -144,16 +146,32 @@ def show_wall(value: float) -> str:
     return f"{value:.3f}" if value < 100.0 else f"{value:.1f}"
 
 
+def stop_mix(rows: list[dict[str, str]]) -> str:
+    """How many runs ended at a hit, at the budget, and at the wall cap."""
+    hit = sum(r["stop"] == "hit" for r in rows)
+    budget = sum(r["stop"] == "budget" for r in rows)
+    wall = sum(r["stop"] == "wall" for r in rows)
+    if hit + budget + wall != len(rows):
+        raise SystemExit("ase_table: a row stop is not hit, budget, or wall")
+    return f"{hit}/{budget}/{wall}"
+
+
 def body(specs: dict[str, tuple], panel: dict[str, dict]) -> list[str]:
+    """One row per arm, so one wall is not a cell beside the other arms' walls."""
     lines = []
+    names = {"recommended": "This code", "ase_bh": "BH", "ase_mh": "MH"}
     for system, (_, budget, _, label) in specs.items():
         s = panel[system]
-        lines.append(" & ".join([
-            label, show_budget(budget), show_wall(s["cap"]),
-            *(f"{s['hits'][arm]}/12" for arm in ("recommended", *ASE_ARMS)),
-            *(str(s["stops"][arm]) for arm in ASE_ARMS),
-            *(show_wall(s["wall"][arm]) for arm in ("recommended", *ASE_ARMS)),
-        ]) + " \\\\")
+        for index, arm in enumerate(("recommended", *ASE_ARMS)):
+            lines.append(" & ".join([
+                label if index == 0 else "",
+                show_budget(budget) if index == 0 else "",
+                show_wall(s["cap"]) if index == 0 else "",
+                names[arm],
+                s["mix"][arm],
+                f"{s['hits'][arm]}/12",
+                show_wall(s["wall"][arm]),
+            ]) + " \\\\")
     return lines
 
 
@@ -165,11 +183,10 @@ def table(caption: list[str], label: str, rows: list[str]) -> str:
         "\\centering",
         "\\scriptsize",
         "\\setlength{\\tabcolsep}{3pt}",
-        "\\begin{tabular}{@{}lrrrrrrrrrr@{}}",
+        "\\setlength{\\arraystretch}{0.92}",
+        "\\begin{tabular}{@{}llrllll@{}}",
         "\\toprule",
-        " & & & \\multicolumn{3}{c}{Hits} & \\multicolumn{2}{c}{Stops} & \\multicolumn{3}{c}{Wall (s)} \\\\",
-        "\\cmidrule(lr){4-6}\\cmidrule(lr){7-8}\\cmidrule(lr){9-11}",
-        "Cluster & Budget & Cap & This code & BH & MH & BH & MH & This code & BH & MH \\\\",
+        "Cluster & Budget & Cap & Arm & Stop & Hits & Wall (s) \\\\",
         "\\midrule",
         *rows,
         "\\bottomrule",
@@ -182,9 +199,10 @@ COMMON = [
     "The budget of this code counts one call per combined energy and gradient pass.",
     "Cap is the wall in seconds after which a run stops at its next check, three times",
     "the slowest wall of the cluster preset of this code on that cluster.",
-    "Stops counts the BH and MH runs that ended at the cap; those runs",
-    "are misses with fewer calls than the budget, and no run of this code ended at the cap.",
-    "Wall is the median over the 12 runs of the seconds each run took;",
+    "Stop counts the runs that ended at a hit, at the budget, and at the wall cap, in that order.",
+    "A wall count is a miss still under the budget. A budget count used the full call budget and missed.",
+    "No run of this code ended at the wall cap.",
+    "Wall is the median over the 12 runs of the seconds that arm took;",
     "a BH or MH run that ended at the cap is counted at its wall.",
     "No cross-arm test is reported: starts differ; every arm has the same numeric call",
     "ceiling and wall cap for that cluster, and runs reaching the shared cap are censored.",

@@ -794,6 +794,9 @@ def table_lines(summary: list[dict[str, str]], tex: bool) -> list[list[str]]:
         for arm in ("anneal", "gmin"):
             label = ("this work" if tex else "anneal") if arm == "anneal" else "GMIN"
             first = arm == "anneal"
+            # Every stored row counts an energy-and-gradient pass for this code
+            # and a POTENTIAL entry for GMIN. Those are not one stopping rule,
+            # so every printed Fisher and Mann-Whitney cell is blank.
             out.append(
                 [
                     name if first else "",
@@ -805,16 +808,12 @@ def table_lines(summary: list[dict[str, str]], tex: bool) -> list[list[str]]:
                     show_s(float(line[f"{arm}_wall_median_s"])),
                     show_s(float(line[f"{arm}_pot_median_s"])),
                     show_s(float(line[f"{arm}_outside_median_s"])),
-                    show_p(float(line["fisher_p"]), tex) if first else "",
-                    show_opt_p(line["mannwhitney_p_calls"], tex) if first else "",
-                    show_opt_p(line["mannwhitney_p_wall"], tex) if first else "",
                 ]
             )
     return out
 
 
-HEADER = ["System", "Budget", "Arm", "Hits", "Median calls", "IQR", "Wall (s)", "Inside (s)", "Outside (s)",
-          "Fisher p", "MW p calls", "MW p wall"]
+HEADER = ["System", "Budget", "Arm", "Hits", "Median calls", "IQR", "Wall (s)", "Inside (s)", "Outside (s)"]
 
 
 def _commit_held(revision: str) -> bool:
@@ -982,16 +981,15 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
     if all(system in by_system for system in morse):
         values = [by_system[system] for system in morse]
         prose = [
-            "On the four Morse rows, this work and GMIN both hit 12 of 12 at",
+            "On the four Morse rows, this work's hit counts and GMIN's hit counts",
+            "are each 12 of 12 at",
             "\\(\\rho=6\\) for M\\(_{55}\\) and M\\(_{80}\\).",
-            "At \\(\\rho=14\\), this work hits "
-            f"{values[1]['anneal_hits']} of 12 against GMIN's {values[1]['gmin_hits']} "
-            "of 12 on M\\(_{55}\\), and "
-            f"{values[3]['anneal_hits']} of 12 against {values[3]['gmin_hits']} "
-            "of 12 on M\\(_{80}\\).",
-            "The corresponding two-sided Fisher values are "
-            f"{show_p(float(values[1]['fisher_p']), True)} and "
-            f"{show_p(float(values[3]['fisher_p']), True)}, respectively.",
+            "At \\(\\rho=14\\), this work's hit count is "
+            f"{values[1]['anneal_hits']} of 12 on M\\(_{55}\\) and "
+            f"{values[3]['anneal_hits']} of 12 on M\\(_{80}\\).",
+            "GMIN's hit counts on those two clusters are "
+            f"{values[1]['gmin_hits']} of 12 and {values[3]['gmin_hits']} of 12.",
+            "The call units differ, so no Fisher value is printed.",
             "",
         ]
     elif not any(system in by_system for system in morse):
@@ -1007,24 +1005,19 @@ def tex_table(summary: list[dict[str, str]], revision: str) -> str:
             "calls to the minimum, with a miss at the full budget.",
             "Wall, In and Out are the median seconds of the run, inside the",
             "potential and outside it.",
-            "\\(p_\\mathrm{F}\\) is the two-sided Fisher exact test on hits;",
-            "\\(p_\\mathrm{calls}\\) and \\(p_\\mathrm{wall}\\) are the two-sided",
-            "continuity-corrected asymptotic Mann--Whitney test on calls and on wall to the",
-            "minimum (`--' where call-capped misses leave cross-arm wall times censored at",
-            "unequal horizons).}",
+            "The two arms count different operations, so no Fisher or Mann--Whitney",
+            "value is printed.}",
             "\\label{tab:gmin}",
             "\\centering",
             "\\scriptsize",
             "\\setlength{\\tabcolsep}{2pt}",
-            "\\resizebox{\\textwidth}{!}{%",
-            "\\begin{tabular}{@{}lrlrrrrrrrrr@{}}",
+            "\\begin{tabular}{@{}lrlrrrrrr@{}}",
             "\\toprule",
-            "Cluster & Budget & Arm & Hits & Calls & IQR & Wall & In & Out & \\(p_\\mathrm{F}\\) & \\(p_\\mathrm{calls}\\) & \\(p_\\mathrm{wall}\\) \\\\",
+            "Cluster & Budget & Arm & Hits & Calls & IQR & Wall & In & Out \\\\",
             "\\midrule",
             *body,
             "\\bottomrule",
             "\\end{tabular}",
-            "}",
             "\\end{table}",
         ]
     )

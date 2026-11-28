@@ -329,6 +329,9 @@ bench/water-h2o20-goat/.asv/
 # Raw logs, trajectories, frames, and Zenodo-bound archives.
 # paper/jctc/scripts/fetch_bench_data.py restores them.
 paper/jctc/logs/
+# achemso rewrites these. A comment-only copy shadows the outdir control file.
+paper/jctc/acs-manuscript.bib
+paper/jctc/acs-si.bib
 paper/jctc/data/**/*.min
 paper/jctc/data/**/*.xyz
 paper/jctc/data/**/*.ld

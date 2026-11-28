@@ -1,7 +1,9 @@
-abstract_words=224
-abstract_numerals=36
-body_words=7895
-pages=29
-sha256 7624cc71269eb76b9eec64c264a39980e837a7a0d8f99d560ed97babec278221  paper/jctc/manuscript.tex
-sha256 0b51b450ad5566915e8d7db0482061d6bfd0e75a2784a96e4a2f3fa4338ee5b0  paper/jctc/macros.tex
-sha256 0ff739b08e3d29436c444b3ebe836a46f34f309401de2f891cff27fb2e514157  paper/jctc/labels-si.tex
+# abstract_words: poppler pdftotext default, no -layout, whitespace tokens
+# a section number alone before its heading is not a word; a page number is not a numeral
+abstract_words=85
+abstract_numerals=0
+body_words=6890
+pages=28
+sha256 5ff3458ba3ae6005091ccc6642438097858828bf3df0591199528ff4f82dceea  paper/jctc/manuscript.tex
+sha256 23fc4d2c12f95c6cc39378df154c6fdc876591aecf5495b945038189cce9e80b  paper/jctc/macros.tex
+sha256 e1702d82b3fec934833626a8279e26d5faf844cc60f5dfd34f0c0bb30304bbca  paper/jctc/labels-si.tex

@@ -14,6 +14,6 @@ Seeds 2000–2011, budget 2_000_000 charged evaluations, serial, one core, hostn
 | exchange | `63a0d1513d3460983db3f337fb488f63742b66aa` | contact-exchange polish on a stalled basin | 8/12 | 4/12 | 0/12 | 12/36 |
 | gmin | — | fixed step | 0/12 | 0/12 | 0/12 | 0/36 |
 
-The shell total is 14/36. The chain library reaches 15/36 and drops (H₂O)₂₀ from 5/12 to 2/12. No other arm beats 14/36 without a larger drop.
+The shell total is 14/36. The chain library records 15/36 and (H₂O)₂₀ moves from 5/12 to 2/12.
 
 Per-seed rows are `rows-n12.csv`.

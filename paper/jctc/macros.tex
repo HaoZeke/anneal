@@ -34,3 +34,6 @@
 \newcommand{\rerun}[1]{\textbf{[RERUN: item #1]}}
 % A claim that waits on a run not yet made carries the marker; paper_audit --pre-submission refuses a marker.
 \newcommand{\todo}[1]{\textbf{[TODO: #1]}}
+% labels-si.tex prefixes every SI number with S. The manuscript keeps that
+% S, so an SI equation does not render as a bare main-text equation.
+\newcommand{\sieqref}[1]{\csname si@#1\endcsname}

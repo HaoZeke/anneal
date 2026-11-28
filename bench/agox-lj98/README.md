@@ -12,13 +12,9 @@ That binary does not time the potential, so its inside and outside columns
 are empty. The AGOX rows include both.
 
 Current AGOX hit 0 of 6. Median wall 7031.920068 s.
-Median wall ratio, current AGOX over anneal, type 7: 87.498181.
-Median wall ratio, anneal over current AGOX, type 7: 0.011434.
-
 Documented AGOX hit 0 of 6. Median wall 8399.304438 s.
-Median wall ratio, documented AGOX over anneal, type 7: 103.653286.
-Median wall ratio, anneal over documented AGOX, type 7: 0.009648.
-
-Anneal hit 2 of 6, seeds 6403 and 6404. Median wall 81.334000 s.
+Anneal hit 2 of 6, seeds 6403 and 6404, and those two stopped at a hit.
+The other four anneal seeds and every AGOX seed ran the full budget.
+The arms do not share one stop, so this note prints no wall ratio.
 
 `scripts/agox_lj98/summarize.py` reprints these medians and hit counts.

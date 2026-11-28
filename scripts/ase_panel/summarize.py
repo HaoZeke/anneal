@@ -207,6 +207,35 @@ def joined(rows: list[dict[str, str]], key: str) -> str:
     return ", ".join(dict.fromkeys(row[key] for row in rows))
 
 
+def stop_mix(rows: list[dict[str, str]]) -> tuple[int, int, int]:
+    """Hit, budget, and wall counts. A ratio needs this mix to match."""
+    return (
+        sum(row.get("stop") == "hit" for row in rows),
+        sum(row.get("stop") == "budget" for row in rows),
+        sum(row.get("stop") == "wall" for row in rows),
+    )
+
+
+def stop_phrase(rows: list[dict[str, str]]) -> str:
+    """The stop the rows record, read from the stop column."""
+    hit, budget, wall = stop_mix(rows)
+    count = len(rows)
+    if wall == count:
+        return f"wall cap on {wall}"
+    if hit == count:
+        return "hit"
+    if budget == count:
+        return "budget"
+    parts = []
+    if hit:
+        parts.append("hit")
+    if budget:
+        parts.append("budget")
+    if wall:
+        parts.append("wall")
+    return " or ".join(parts)
+
+
 def render(system: str) -> tuple[str, str]:
     _, budget, reference, title = SYSTEMS[system]
     grouped = load(system)
@@ -237,10 +266,15 @@ def render(system: str) -> tuple[str, str]:
             over = wall / base_wall
             back = base_wall / wall
             fisher_p = comparison(group, anneal)
+        # The cell is this arm's median wall divided by anneal's median wall.
+        # Leave it empty when the stop mix differs.
+        same_stop = arm == "anneal" or stop_mix(group) == stop_mix(anneal)
+        over_cell = f"{over:.6f}" if same_stop else ""
+        back_cell = f"{back:.6f}" if same_stop else ""
         versus = {other: comparison(group, grouped[other]) for other in ASE_ARMS}
         lines.append(
             f"{arm},{hits},12,{best:.8f},{best - reference:.8f},{wall:.6f},{inside:.6f},{outside:.6f},"
-            f"{over:.6f},{back:.6f},{fisher_p},{wall_stops},{cap},"
+            f"{over_cell},{back_cell},{fisher_p},{wall_stops},{cap},"
             f"{versus['ase_bh']},{versus['ase_mh']}"
         )
         wall_charged = [int(row["charged"]) for row in group if row["stop"] == "wall"]
@@ -275,52 +309,136 @@ def render(system: str) -> tuple[str, str]:
             f"The recorded wall caps are {'; '.join(cap_details)}. A wall-stopped row did not receive",
             "the full call budget, so its call count is right-censored at `charged`.",
         ])
-    report.extend([
-        "",
-        "| arm | hits | Fisher p vs anneal | median best | "
-        f"gap to {reference_text(reference)} | median wall s | over anneal | anneal over | "
-        "median inside s | median outside s |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-    ])
+    if system == "lj38":
+        report.extend([
+            "",
+            "| arm | stop | hits | median best | "
+            f"gap to {reference_text(reference)} | median wall s | "
+            "median inside s | median outside s |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ])
+    else:
+        report.extend([
+            "",
+            "| arm | hits | Fisher p vs anneal | median best | "
+            f"gap to {reference_text(reference)} | median wall s | over anneal | anneal over | "
+            "median inside s | median outside s |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        ])
+    def signature(arm: str) -> tuple[int, int, int]:
+        return stop_mix(grouped[arm])
+
     stop_notes = []
     for (
         arm, hits, best, wall, inside, outside, over, back, fisher_p,
         wall_stops, cap, low_charged, high_charged, versus,
     ) in reports:
-        report.append(
-            f"| {LABELS[arm]} | {hits}/12 | {fisher_p} | {best:.8f} | {best - reference:.8f} | "
-            f"{wall:.6f} | {over:.6f} | {back:.6f} | {inside:.6f} | {outside:.6f} |"
-        )
+        same_stop = signature(arm) == signature("anneal")
+        if system == "lj38":
+            report.append(
+                f"| {LABELS[arm]} | {stop_phrase(grouped[arm])} | {hits}/12 | {best:.8f} | "
+                f"{best - reference:.8f} | {wall:.6f} | {inside:.6f} | {outside:.6f} |"
+            )
+        else:
+            # The cell is this arm's median wall divided by anneal's median wall.
+            # Blank it when the stop mix differs.
+            fisher_cell = fisher_p if same_stop else "—"
+            over_cell = f"{over:.6f}" if same_stop else "—"
+            back_cell = f"{back:.6f}" if same_stop else "—"
+            report.append(
+                f"| {LABELS[arm]} | {hits}/12 | {fisher_cell} | {best:.8f} | {best - reference:.8f} | "
+                f"{wall:.6f} | {over_cell} | {back_cell} | {inside:.6f} | {outside:.6f} |"
+            )
         if wall_stops:
             stop_notes.append(
                 f"{LABELS[arm].capitalize()} stopped at the wall cap on {wall_stops}/12 seeds; "
                 f"those rows charged {low_charged:,}-{high_charged:,} calls."
             )
+        # The summary stores a wall ratio only when the stop mixes match.
+        # The note prints a test or a ratio only when the stop mixes match.
+        if system == "lj38" and wall_stops == 12:
+            report[-1] = report[-1].replace(f"| {fisher_p} |", "| — |", 1)
     recommended = next(item for item in reports if item[0] == "recommended")
     recommended_hits = recommended[1]
     recommended_versus = recommended[-1]
-    report.extend(["", *stop_notes, "",
-        "Fisher below compares recommended with each ASE arm.",
-        "",
-        "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
-        "| --- | --- | --- | --- | --- |",
-    ])
-    for other in ASE_ARMS:
+    mixed_wall = any(signature(item[0]) != signature("anneal") for item in reports) or any(
+        signature(other) != signature("recommended") for other in ASE_ARMS
+    )
+    pair_shared = any(signature(other) == signature("recommended") for other in ASE_ARMS)
+    if system == "lj38":
+        report.extend(["", *stop_notes, "",
+            "Basin hopping and minima hopping stopped at the wall on every seed.",
+            "Recommended did not. The stops differ, and there is no paired test.",
+            "Medians are type 7. Each wall is that arm's own median. The Rust and",
+            "NumPy random generators do not make a shared starting geometry from the",
+            "same numeric seed, so the report does not treat seed labels as pairs.",
+        ])
+    elif mixed_wall and not pair_shared:
+        report.extend(["", *stop_notes, "",
+            "Ratios and tests are printed only for same-stop pairs.",
+            "",
+            "| comparison | hits | Fisher p |",
+            "| --- | --- | --- |",
+        ])
+    elif mixed_wall:
+        report.extend(["", *stop_notes, "",
+            "Ratios and tests are printed only for same-stop pairs.",
+            "",
+            "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
+            "| --- | --- | --- | --- | --- |",
+        ])
+    else:
+        report.extend(["", *stop_notes, "",
+            "Fisher below compares recommended with each ASE arm.",
+            "",
+            "| comparison | hits | Fisher p | median wall ratio | inverse ratio |",
+            "| --- | --- | --- | --- | --- |",
+        ])
+    for other in (() if system == "lj38" else ASE_ARMS):
         other_report = next(item for item in reports if item[0] == other)
         other_hits = other_report[1]
         fisher_text = recommended_versus[other]
-        wall_ratio = recommended[3] / other_report[3]
-        inverse_ratio = other_report[3] / recommended[3]
-        report.append(
-            f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
-            f"{fisher_text} | {wall_ratio:.6f} | {inverse_ratio:.6f} |"
-        )
-    report.extend(["",
-        "Fisher is the two-sided exact test on hits under the recorded stopping rule.",
-        "Medians are type 7. Wall ratios are ratios of arm medians. The Rust and",
-        "NumPy random generators do not make a shared starting geometry from the",
-        "same numeric seed, so the report does not treat seed labels as pairs.",
-    ])
+        same_pair = signature(other) == signature("recommended")
+        if system == "lj38":
+            if other_report[9] == 12 and recommended[9] != 12:
+                fisher_text = "—"
+        elif not same_pair:
+            fisher_text = "—"
+        if system != "lj38" and (not mixed_wall or pair_shared):
+            if same_pair:
+                wall_ratio = f"{recommended[3] / other_report[3]:.6f}"
+                inverse_ratio = f"{other_report[3] / recommended[3]:.6f}"
+            else:
+                wall_ratio = inverse_ratio = "—"
+            report.append(
+                f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
+                f"{fisher_text} | {wall_ratio} | {inverse_ratio} |"
+            )
+        else:
+            report.append(
+                f"| recommended against {LABELS[other]} | {recommended_hits}/12 vs {other_hits}/12 | "
+                f"{fisher_text} |"
+            )
+    if system == "lj38":
+        fisher_line = ""
+    elif mixed_wall:
+        fisher_line = "The Fisher cells above are blank where the arms do not share a stop."
+    else:
+        fisher_line = "Fisher is the two-sided exact test on hits under the recorded stopping rule."
+    if system != "lj38" and mixed_wall:
+        report.extend(["",
+            fisher_line,
+            "Medians are type 7. Each wall is that arm's own median. The Rust and",
+            "NumPy random generators do not make a shared starting geometry from the",
+            "same numeric seed, so the report does not treat seed labels as pairs.",
+        ])
+    elif system != "lj38":
+        report.extend(["",
+            fisher_line,
+            "Medians are type 7. Wall ratios are ratios of arm medians. The Rust and",
+            "NumPy random generators do not make a shared starting geometry from the",
+            "same numeric seed, so the report does not treat seed labels as pairs.",
+        ])
     if system == "au55":
         report.extend([
             "",

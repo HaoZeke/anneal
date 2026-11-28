@@ -3,12 +3,11 @@
 """OCCat against anneal and GMIN, one core, paper evaluation budgets.
 
 Every system runs seeds 2000-2005. It continues through seed 2011 when
-six more seeds of the slower code fit in six hours. A table of six or
-twelve seeds carries a two-sided Fisher exact test on hits and a
-two-sided Mann-Whitney test on evaluations, wall, time inside the
-potential, and time outside it. A stored GMIN row at the same seed and
-budget is copied. A miss is the full budget. Medians are Hyndman-Fan
-type 7.
+six more seeds of the slower code fit in six hours. The stored test
+file keeps one row per system. The note prints each code's own medians
+and no cross-arm test: the codes do not count one operation. A stored
+GMIN row at the same seed and budget is copied. A miss is the full
+budget. Medians are Hyndman-Fan type 7.
 """
 
 from __future__ import annotations
@@ -868,36 +867,18 @@ def write_readme(summary: Path, tests: Path, path: Path) -> None:
         "A miss is the full paper budget.",
         "Medians are Hyndman-Fan type 7.",
         "Inside is time in the potential. Outside is the rest of the wall.",
-        "The wall ratio is that code's median wall divided by anneal's.",
+        "Each wall is that code's own median. The note prints no wall ratio and no cross-arm test.",
         "",
-        "| System | Code | Hits | Median evals | Median wall (s) | Median inside (s) | Median outside (s) | Ratio |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| System | Code | Hits | Median evals | Median wall (s) | Median inside (s) | Median outside (s) |",
+        "| --- | --- | --- | --- | --- | --- | --- |",
     ]
     with summary.open() as handle:
         for row in csv.DictReader(handle):
             lines.append(
-                "| {system} | {code} | {hits_over_n} | {evals_median} | {wall_median_s} | {pot_median_s} | {outside_median_s} | {wall_ratio} |".format(
+                "| {system} | {code} | {hits_over_n} | {evals_median} | {wall_median_s} | {pot_median_s} | {outside_median_s} |".format(
                     **row
                 )
             )
-    if tests.is_file() and tests.stat().st_size > 0:
-        body = list(csv.DictReader(tests.open()))
-        if body:
-            lines.extend(
-                [
-                    "",
-                    "Fisher is the two-sided exact test on hits against anneal. Mann-Whitney is two-sided on evaluations, wall, time inside the potential, and time outside it. A miss is stored as the budget. A system runs seeds 2000-2005 and continues through 2011 when six more seeds of the slower code fit in six hours.",
-                    "",
-                    "| System | n | Anneal | OCCat | GMIN | Fisher OCCat | Fisher GMIN | MW evals OCCat | MW wall OCCat | MW inside OCCat | MW outside OCCat | MW evals GMIN | MW wall GMIN | MW inside GMIN | MW outside GMIN |",
-                    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
-                ]
-            )
-            for row in body:
-                lines.append(
-                    "| {system} | {n} | {anneal_hits} | {occat_hits} | {gmin_hits} | {fisher_occat} | {fisher_gmin} | {mannwhitney_evals_occat} | {mannwhitney_wall_occat} | {mannwhitney_pot_occat} | {mannwhitney_outside_occat} | {mannwhitney_evals_gmin} | {mannwhitney_wall_gmin} | {mannwhitney_pot_gmin} | {mannwhitney_outside_gmin} |".format(
-                        **row
-                    )
-                )
     lines.append("")
     path.write_text("\n".join(lines))
 

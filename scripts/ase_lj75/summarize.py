@@ -71,6 +71,22 @@ def mann_whitney(left: list[float], right: list[float]) -> tuple[float, float]:
     return float(result.statistic), float(result.pvalue)
 
 
+def stop_mix(rows: list[dict[str, str]]) -> tuple[int, int, int]:
+    return (
+        sum(row.get("stop") == "hit" for row in rows),
+        sum(row.get("stop") == "budget" for row in rows),
+        sum(row.get("stop") == "wall" for row in rows),
+    )
+
+
+def note_ratio(group: list[dict[str, str]], anneal: list[dict[str, str]]) -> str:
+    """The note prints a wall ratio only when the stop mixes match."""
+    if stop_mix(group) != stop_mix(anneal):
+        return "—"
+    ratios = [float(a["wall_s"]) / float(b["wall_s"]) for a, b in zip(group, anneal)]
+    return f"{median(ratios):.6f}"
+
+
 def main() -> None:
     grouped = load()
     anneal = grouped["anneal"]
@@ -81,6 +97,7 @@ def main() -> None:
     base_hits = sum(row["hit"] == "1" for row in anneal)
     caps = sorted({row["cap_s"] for row in grouped["ase_bh"] + grouped["ase_mh"] if row.get("cap_s")})
     print("LJ75 seeds 2000-2011, budget 4000000, host bench, reference -397.492331")
+    print("Ratios and tests are printed only for same-stop pairs.")
     if caps:
         print(f"ASE wall cap {caps[0]}")
     for arm in ARMS:
@@ -104,15 +121,20 @@ def main() -> None:
             back = median(back_ratios)
             fisher_p = fisher(hits, base_hits)
             u_stat, mw_p = mann_whitney([calls(row) for row in group], base_calls)
+            print(f"{arm} note ratio {note_ratio(group, anneal)}")
+        # Leave the stored ratio empty when the stop mix differs. The value is
+        # the median of the paired wall ratios when the mixes match.
+        same_stop = stop_mix(group) == stop_mix(anneal)
+        over_cell = f"{over:.6f}" if same_stop else ""
+        back_cell = f"{back:.6f}" if same_stop else ""
         print(
             f"{arm} hits {hits}/12 median_best {best:.8f} gap {best - REFERENCE:.8f} "
             f"wall {wall:.6f} inside {inside:.6f} outside {outside:.6f} "
-            f"over {over:.6f} back {back:.6f} fisher {fisher_p:.6g} U {u_stat:.6g} mw {mw_p:.6g} "
             f"wall_stops {wall_stops}"
         )
         lines.append(
             f"{arm},{hits},12,{best:.8f},{best - REFERENCE:.8f},{wall:.6f},{inside:.6f},{outside:.6f},"
-            f"{over:.6f},{back:.6f},{fisher_p:.6g},{u_stat:.6g},{mw_p:.6g},{wall_stops},{cap}"
+            f"{over_cell},{back_cell},{fisher_p:.6g},{u_stat:.6g},{mw_p:.6g},{wall_stops},{cap}"
         )
     SUMMARY.write_text("\n".join(lines) + "\n")
 

@@ -66,12 +66,8 @@ reran both arms of Au55 under the Gupta input above (4/12 against 1/12).
 
 Wall is the search wall each code reports. Inside is `pot_s`, the time
 inside the potential; outside is the rest of the wall. Medians and
-interquartile ranges are Hyndman-Fan type 7. Fisher is the two-sided exact
-test on hits. Mann-Whitney (MW) is two-sided, the normal approximation with
-the tie and continuity corrections, on calls to the minimum (misses ranked
-above every hit) and on wall to the minimum where call-cap censoring leaves
-every cross-arm pair order observed (`-` where misses censor wall time at
-unequal horizons).
+interquartile ranges are Hyndman-Fan type 7. Fisher and Mann-Whitney are
+not printed, because the two arms do not share a stop.
 
 During session `20261117T035457Z` the virtual machine was suspended three
 times: the `utc` stamps of three rows lie 476 s, 2057 s and 2068 s after
@@ -81,8 +77,8 @@ both inside and outside rates stayed within the other seeds of the same
 system and arm. On LJ98 GMIN seed 2000 (wall 194.9 s), `pot_s` stayed at
 161.9 s while `outside_s` rose to 33.0 s against 19.4-24.8 s on the other
 eleven seeds, and LJ98 GMIN seed 2005 right after the third resume took
-225.3 s (inside 200.5 s); because both LJ98 arms carry misses, `MW p wall`
-is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
+225.3 s (inside 200.5 s). No Mann-Whitney value is printed, because the two
+arms do not share a stop, and `hit` and `evals_to_hit` are unaffected.
 
 - `rows.csv`: one row per run, appended and never rewritten; `--summarize`
   scores the latest stored row of each seed. `code_revision` is the anneal
@@ -123,33 +119,35 @@ is already omitted as censored, and `hit` and `evals_to_hit` are unaffected.
   `9837358ae1027067ff654fac8b48969020853452`, the anneal commit the
   session ran. That commit is an ancestor of the record commit.
 
+Every row counts an energy-and-gradient pass for this code and a POTENTIAL entry for GMIN. Those stops differ, so no Fisher or Mann-Whitney value is printed. The Holm family for GMIN is empty.
+
 <!-- gmin-panel table: start -->
-| System | Budget | Arm | Hits | Median calls | IQR | Wall (s) | Inside (s) | Outside (s) | Fisher p | MW p calls | MW p wall |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| LJ38 | 400000 | anneal | 12/12 | 10615.5 | 3591.25 | 0.075 | 0.029 | 0.047 | 0.037 | 3.4e-5 | 3.4e-5 |
-|  |  | GMIN | 7/12 | 389399 | 173127.75 | 3.658 | 2.673 | 0.979 |  |  |  |
-| LJ55 | 1000000 | anneal | 12/12 | 12242 | 22988.5 | 0.142 | 0.062 | 0.082 | 1 | 0.75 | 0.31 |
-|  |  | GMIN | 12/12 | 12764.5 | 12435.75 | 0.236 | 0.191 | 0.045 |  |  |  |
-| LJ75 | 4000000 | anneal | 12/12 | 1409229.5 | 983622 | 27.019 | 12.543 | 13.818 | 7.4e-7 | 1.0e-5 | 1.0e-5 |
-|  |  | GMIN | 0/12 | 4000000 | 0 | 119.9 | 102.9 | 16.952 |  |  |  |
-| LJ98 | 4000000 | anneal | 10/12 | 1511030.5 | 1985194.5 | 41.586 | 23.825 | 17.949 | 6.7e-5 | 1.3e-4 | - |
-|  |  | GMIN | 0/12 | 4000000 | 0 | 182.5 | 161.9 | 20.311 |  |  |  |
-| LJ102 | 4000000 | anneal | 9/12 | 894801 | 3401143.75 | 27.445 | 15.463 | 11.982 | 0.21 | 0.093 | - |
-|  |  | GMIN | 5/12 | 4000000 | 2463305.5 | 194.4 | 173.8 | 20.614 |  |  |  |
-| LJ103 | 4000000 | anneal | 8/12 | 2293133 | 2608443.75 | 66.188 | 39.673 | 26.763 | 0.10 | 0.047 | - |
-|  |  | GMIN | 3/12 | 4000000 | 239453.25 | 204.9 | 183.1 | 21.660 |  |  |  |
-| LJ104 | 4000000 | anneal | 9/12 | 2328723 | 2947098 | 69.306 | 39.241 | 30.064 | 0.40 | 0.16 | - |
-|  |  | GMIN | 6/12 | 3696118 | 1285122.25 | 193.6 | 173.6 | 20.007 |  |  |  |
-| LJ150 | 4000000 | anneal | 5/12 | 4000000 | 1477851 | 237.2 | 139.7 | 96.075 | 0.21 | 0.17 | - |
-|  |  | GMIN | 9/12 | 3129518.5 | 3240050.5 | 326.1 | 302.1 | 23.955 |  |  |  |
-| Au55 | 1000000 | anneal | 4/12 | 1000000 | 736743.75 | 35.723 | 26.395 | 9.241 | 0.32 | 0.21 | - |
-|  |  | GMIN | 1/12 | 1000000 | 0 | 59.384 | 56.245 | 3.135 |  |  |  |
-| M55 ρ=6 | 1000000 | anneal | 12/12 | 22596 | 51763.75 | 0.406 | 0.285 | 0.121 | 1 | 0.93 | 0.84 |
-|  |  | GMIN | 12/12 | 37047.5 | 37358.75 | 0.667 | 0.566 | 0.101 |  |  |  |
-| M55 ρ=14 | 1000000 | anneal | 9/12 | 451561.5 | 773925.5 | 7.377 | 5.656 | 1.721 | 3.4e-4 | 3.8e-4 | - |
-|  |  | GMIN | 0/12 | 1000000 | 0 | 17.661 | 15.244 | 2.403 |  |  |  |
-| M80 ρ=6 | 4000000 | anneal | 12/12 | 62677 | 575467.75 | 2.265 | 1.663 | 0.602 | 1 | 0.26 | 0.29 |
-|  |  | GMIN | 12/12 | 268934 | 268091.5 | 9.666 | 8.660 | 1.005 |  |  |  |
-| M80 ρ=14 | 4000000 | anneal | 6/12 | 3901429 | 1446773 | 136.9 | 102.2 | 34.159 | 0.014 | 7.1e-3 | - |
-|  |  | GMIN | 0/12 | 4000000 | 0 | 141.6 | 128.3 | 13.346 |  |  |  |
+| System | Budget | Arm | Hits | Median calls | IQR | Wall (s) | Inside (s) | Outside (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| LJ38 | 400000 | anneal | 12/12 | 10615.5 | 3591.25 | 0.075 | 0.029 | 0.047 |
+|  |  | GMIN | 7/12 | 389399 | 173127.75 | 3.658 | 2.673 | 0.979 |
+| LJ55 | 1000000 | anneal | 12/12 | 12242 | 22988.5 | 0.142 | 0.062 | 0.082 |
+|  |  | GMIN | 12/12 | 12764.5 | 12435.75 | 0.236 | 0.191 | 0.045 |
+| LJ75 | 4000000 | anneal | 12/12 | 1409229.5 | 983622 | 27.019 | 12.543 | 13.818 |
+|  |  | GMIN | 0/12 | 4000000 | 0 | 119.9 | 102.9 | 16.952 |
+| LJ98 | 4000000 | anneal | 10/12 | 1511030.5 | 1985194.5 | 41.586 | 23.825 | 17.949 |
+|  |  | GMIN | 0/12 | 4000000 | 0 | 182.5 | 161.9 | 20.311 |
+| LJ102 | 4000000 | anneal | 9/12 | 894801 | 3401143.75 | 27.445 | 15.463 | 11.982 |
+|  |  | GMIN | 5/12 | 4000000 | 2463305.5 | 194.4 | 173.8 | 20.614 |
+| LJ103 | 4000000 | anneal | 8/12 | 2293133 | 2608443.75 | 66.188 | 39.673 | 26.763 |
+|  |  | GMIN | 3/12 | 4000000 | 239453.25 | 204.9 | 183.1 | 21.660 |
+| LJ104 | 4000000 | anneal | 9/12 | 2328723 | 2947098 | 69.306 | 39.241 | 30.064 |
+|  |  | GMIN | 6/12 | 3696118 | 1285122.25 | 193.6 | 173.6 | 20.007 |
+| LJ150 | 4000000 | anneal | 5/12 | 4000000 | 1477851 | 237.2 | 139.7 | 96.075 |
+|  |  | GMIN | 9/12 | 3129518.5 | 3240050.5 | 326.1 | 302.1 | 23.955 |
+| Au55 | 1000000 | anneal | 4/12 | 1000000 | 736743.75 | 35.723 | 26.395 | 9.241 |
+|  |  | GMIN | 1/12 | 1000000 | 0 | 59.384 | 56.245 | 3.135 |
+| M55 ρ=6 | 1000000 | anneal | 12/12 | 22596 | 51763.75 | 0.406 | 0.285 | 0.121 |
+|  |  | GMIN | 12/12 | 37047.5 | 37358.75 | 0.667 | 0.566 | 0.101 |
+| M55 ρ=14 | 1000000 | anneal | 9/12 | 451561.5 | 773925.5 | 7.377 | 5.656 | 1.721 |
+|  |  | GMIN | 0/12 | 1000000 | 0 | 17.661 | 15.244 | 2.403 |
+| M80 ρ=6 | 4000000 | anneal | 12/12 | 62677 | 575467.75 | 2.265 | 1.663 | 0.602 |
+|  |  | GMIN | 12/12 | 268934 | 268091.5 | 9.666 | 8.660 | 1.005 |
+| M80 ρ=14 | 4000000 | anneal | 6/12 | 3901429 | 1446773 | 136.9 | 102.2 | 34.159 |
+|  |  | GMIN | 0/12 | 4000000 | 0 | 141.6 | 128.3 | 13.346 |
 <!-- gmin-panel table: end -->

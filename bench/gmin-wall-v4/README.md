@@ -11,6 +11,6 @@ GMIN is Wales revision `aac1548a8aec13b53ad12a8d6904625081685d2e`, built without
 | LJ104 | anneal | 3/6 | 265.068 | 0.702 | 0.770 | 20.28 | 58.29 |
 | LJ104 | gmin | 2/6 | 186.079 | 0.702 | 0.770 |  |  |
 
-The earlier ratios are the previous same-session panel, after the scan change and before this dual seeding. Hit counts are unchanged: anneal 4/6 and 3/6, GMIN 0/6 and 2/6. Anneal's median wall is slower on both sizes, and LJ104 remains behind GMIN.
+The earlier ratios are the previous same-session panel, after the scan change and before this dual seeding. Hit counts are unchanged: anneal 4/6 and 3/6, GMIN 0/6 and 2/6. Anneal's median wall is slower on both sizes. On LJ104 the same-session wall ratio is 0.770. Both arms stop at the first hit or the budget wall.
 
 A `cpu-clock` profile of the same release binary, LJ104 seed 2000, budget 300_000, still on core 0, puts 26.1% of samples in `PairPotential::value_and_gradient` (the run's `pot_s` was 6.10 s of 23.29 s). Outside the potential, the dense assignment is the large share: `scan_avx2` 15.9%, the squared-distance matrix fill in `minimum_cost_squared_distance_warm` 15.4%, and `prepare_duals` 14.5%. The unseeded fallback scan is 1.3%. Symmetry detection is 5.0%, orbit completion 1.9%.

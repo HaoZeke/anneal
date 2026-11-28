@@ -1,5 +1,8 @@
 % Copyright (c) anneal developers
 \documentclass[journal=jctcce,manuscript=suppinfo]{achemso}
+% achemso prefixes figures and tables. Sections and equations need the same S.
+\renewcommand{\thesection}{S\arabic{section}}
+\renewcommand{\theequation}{S\arabic{equation}}
 \usepackage{amsmath,booktabs,longtable,siunitx}
 \usepackage{url,seqsplit}
 \urlstyle{tt}
@@ -7,11 +10,17 @@
 \sisetup{scientific-notation=true,exponent-product=\times}
 \graphicspath{{figs/}}
 \input{macros}
-\title{Template-free basin hopping with adaptive moves for funnelled
+\input{labels-manuscript}
+% A manuscript equation cited here names the main text. A section or a
+% table keeps the printed number.
+\newcommand{\msref}[1]{\csname ms@#1\endcsname\mseqmark#1:\relax}
+\def\mseqmark#1#2#3\relax{\ifx#1e\ifx#2q\ of the main text\fi\fi}
+\title{Template-free basin hopping with adaptive moves for funneled
 cluster landscapes}
 \author{Rohit Goswami}
 \affiliation{SURF B.V., Amsterdam}
 \alsoaffiliation{TurtleTech ehf., Reykjavik, Iceland}
+\email{rgoswami@ieee.org}
 \author{Ruhila Goswami}
 \affiliation{Faculty of Life and Environmental Sciences,
 University of Iceland, Reykjavik, Iceland}
@@ -28,7 +37,6 @@ Massachusetts Institute of Technology, Cambridge,
 Massachusetts 02139, United States}
 \alsoaffiliation{Department of Chemistry,
 Indian Institute of Technology Kanpur, Kanpur, India}
-\email{dgoswami@iitk.ac.in}
 \begin{document}
 
 \section{Board constants}
@@ -55,7 +63,7 @@ The Table 2 rows of that source are genetic-algorithm means at 75 and
 It has no genetic-algorithm row at 104 atoms.
 
 \section{TIP4P pair constants}
-\path{paper/jctc/logs/tip4p_constants.txt} records Jorgensen's
+The log \path{paper/jctc/logs/tip4p_constants.txt} records Jorgensen's
 \(A = 2510400\) and \(C = 2552.24\).
 \cite{jorgensen1983} The units are kJ \AA\(^{12}\) mol\(^{-1}\) and kJ
 \AA\(^{6}\) mol\(^{-1}\).
@@ -124,6 +132,18 @@ Those presets enable both the trail and climb responses to a stuck chain.
 The GMIN harness removes every \texttt{H2H\_*} and \texttt{ANNEAL\_*}
 variable before it starts this code, so the printed rows used the preset
 value of \texttt{trail\_on\_stall}.
+
+The tuned GMIN counts of the main text are the rows of
+\path{bench/gmin-tuned/rows-shard2.csv}, one session on seeds 2000--2011
+at \(4\times 10^{6}\) in each arm's unit, both arms from the start this code
+writes for the seed.
+GMIN runs \path{bench/gmin-tuned/inputs/lj98.data} and
+\path{lj104.data}, tuned per cluster by one procedure from the documented
+defaults, built from the same pinned tarball with the panel patches, as
+\path{bench/gmin-tuned/build.txt} records.
+This code runs untuned at revision \texttt{5eb79cdc}.
+Two more GMIN arms on LJ\(_{98}\), with the same binary and input, hit 1 of
+12 seeds each.
 
 \section{Host and commands}
 \label{sec:host}
@@ -239,6 +259,12 @@ The TIP4P rows of the GMIN comparison were recorded by revision
 \texttt{\seqsplit{e1a69a57a8dda1b44fdde9413ae31e3fc3af1889}}, an ancestor
 of the submitted revision.
 
+The Si\(_{10}\) and C\(_{20}\) rows name \texttt{f3d6a050} and
+\texttt{5351f272}, local builds that are not commits of the repository.
+The C\(_{10}\) rows name no revision.
+The ammonia octamer row is the hit rate in Section~\ref{sec:si-crest}.
+Section~\ref{sec:si-crest} names the record of each row.
+
 \section{Earlier template-assisted revision}
 \label{sec:si-template-era}
 Table~\ref{tab:si-template-era} pairs the archived rows of this code from the
@@ -337,6 +363,14 @@ fewest of the ten.
 The record pairs these rows with stored GMIN rows of earlier sessions, which
 name no machine for any cluster and no GMIN revision for five of the ten, so
 the article prints this code alone here.
+On M\(_{70}\) the earlier GMIN record is \path{bench/morse-panel/seeds.csv},
+whose rows name no revision or host.
+This code's counts are the rows of the table.
+Both arms use a budget of \(10^{6}\) calls and a miss stops at that budget.
+At \(\rho=3\) and 6 GMIN's hit counts are 12 and 11 of 12 and this code's are 11 and 11 of 12.
+At \(\rho=10\) and 14 this code's hit counts are 6 and 10 of 12 and GMIN's are 0 and 0 of 12.
+The two arms do not record one shared call unit, so there is no paired test.
+This session has no GMIN arm.
 The rows are copied from commit \texttt{\seqsplit{4256269394435f77787d2bfdbead2321e08340a6}}
 of \path{record/g1-develop-stock}, as \path{paper/jctc/data/gmin_g1/PROVENANCE}
 names, and \path{paper/jctc/scripts/morse_g1_table.py} writes the table.
@@ -411,15 +445,15 @@ printed.
 
 % outside table: start
 \begin{table}
-\caption{Outside time of the submitted revision \texttt{61fa67cf} in one session of
-\texttt{record/outside-perf3-r2} (commit \texttt{9178884e}): the arms \texttt{develop} and
+\caption{Outside time of the submitted revision \texttt{61fa67cf} in one session, commit
+\texttt{9178884e} of \texttt{record/outside-perf3-r2}: the arms \texttt{develop} and
 \texttt{develop\_prime} are two builds of that source, with the same binary digest, run on
 seeds 2000--2011 on core 0.
 Both arms take the same calls to the same minimum on every seed.
 Hits are those of either arm; the next two columns are the median seconds outside the
 potential, Change is the second median over the first less one, and \(p\) is the
 two-sided exact Wilcoxon signed-rank test on the per-seed outside seconds.
-The rows are \texttt{paper/jctc/data/outside\_perf/rows.csv}.}
+The rows are \texttt{paper/\allowbreak jctc/\allowbreak data/\allowbreak outside\_perf/\allowbreak rows.csv}.}
 \label{tab:si-outside}
 \centering
 \begin{tabular}{@{}lrrrrrr@{}}
@@ -462,11 +496,337 @@ On Au\(_{55}\) the median best energy lies 0.051~eV above the reference for
 this code, 1.232~eV for basin hopping, and 0.737~eV for minima hopping.
 On the Morse clusters ASE evaluates its own Morse calculator.
 
+\section{Definitions}
+\label{sec:definitions}
+This section defines the operators that the main text names.
+A configuration is \(x=(x_1,\ldots,x_N)\) with \(x_i\in\mathbf{R}^3\), and
+every constant is that of the preset in reduced units.
+
+\emph{Descriptor.}
+Let \(r_{ij}=\lVert x_i-x_j\rVert\), and let \(d(x)\) hold the
+\(N(N-1)/2\) distances \(r_{ij}\), \(i<j\), in ascending order.
+The descriptor distance is
+\begin{equation}
+\delta(x,x') = \lVert d(x)-d(x')\rVert_2 .
+\label{eq:descriptor}
+\end{equation}
+It is unchanged by translation, rotation, reflection, and relabeling of the
+atoms.
+A multiset of distances does not fix a structure, so two homometric sets have
+\(\delta=0\) without being congruent.
+Two configurations lie in one region when \(\delta<\rho_m\), with the merge
+radius \(\rho_m=0.7\).
+For a selected fivefold axis \(a\), let \(R_a\) rotate by \(2\pi/5\), and
+let \(\pi\) be the minimum-cost atom assignment between the original and
+rotated coordinates.
+The residual is
+\begin{equation}
+\begin{gathered}
+r_i=x_i-\bigl[R_a x\bigr]_{\pi(i)},\qquad
+y_i =
+\begin{cases}
+x_i+c\,r_i,&i\in A,\\
+x_i,&i\notin A,
+\end{cases}\\
+c=\frac{b_N}{\sqrt{|A|^{-1}\sum_{j\in A}\lVert r_j\rVert^2}},
+\qquad
+b_N=\begin{cases}0.75,&N>13,\\0.35,&N\leq13.\end{cases}
+\end{gathered}
+\label{eq:soap-step}
+\end{equation}
+For \(N>13\), \(A\) contains the five atoms with the largest
+\(\lVert r_i\rVert\).
+The move requires two eligible fivefold axes and draws between the axes
+nearest the two reconstructable shell openings.
+For \(N\leq13\), \(A\) contains every atom and the best axis is
+used.
+An exactly fivefold residual instead uses a pentagon-breaking displacement
+over all atoms at the same root-mean-square amplitude.
+If the drawn-axis proposal does not move, the arm tries the measured
+best-axis residual: when its fivefold gate passes, it moves all atoms with
+root-mean-square displacement \(0.35\); otherwise it leaves \(x\) unchanged.
+
+\emph{Screen and merge.}
+Let \(\tilde y\) be a proposal after the partial relaxation and let
+\(E^\star\) be the stored best.
+The recommended preset forms
+\begin{equation}
+\begin{aligned}
+z(\tilde y)&=\bigl(1,E(\tilde y),\delta(\tilde y,x),
+E(\tilde y)\delta(\tilde y,x)\bigr),\\
+p(\tilde y)&=\Pr\!\left(E(y)<E^\star\mid z(\tilde y),\mathcal D\right),
+\qquad p(\tilde y)\geq\frac{7}{15},
+\end{aligned}
+\label{eq:bayes-screen}
+\end{equation}
+where the posterior predictive distribution is Student-\(t\) and
+\(\mathcal D\) contains the feature vector and fully quenched energy of each
+finished proposal.
+The inequality is the rule for finishing a proposal after 300 observations;
+a fraction \(0.1\) is finished independently of it, and
+\(E(\tilde y)<E^\star\) always finishes.
+
+The non-default calibrated-margin path, which the recommended preset
+bypasses because it enables the Bayesian screen, instead withholds the full
+quench when
+\begin{equation}
+E(\tilde y)-a>E^\star+\Delta_s,\qquad \Delta_s=2 ,
+\label{eq:screen}
+\end{equation}
+where \(a\ge 0\) is the upper decile of the energy that the last 256
+partial relaxations left undone, and \(a=0\) until 8 full relaxations have
+been seen.
+The merge test calls \(\tilde y\) a return to the occupied basin when
+\(\delta(\tilde y,x)<\rho_m\).
+In both cases the partial relaxation is what enters
+equation~\msref{eq:metropolis}.
+
+\emph{Basin bias.}
+Regions \(b=1,2,\ldots\) open on a deposit.
+Region \(b\) has a center \(c_b=d(x_b)\), the descriptor of the first
+configuration deposited in it, and a height \(V_b\) that is zero before that
+deposit.
+The bias of equation~\msref{eq:delta} is
+\begin{equation}
+V(x) =
+\begin{cases}
+V_{b(x)} & \text{if } \delta\bigl(x,x_{b(x)}\bigr) < \rho_m,\\
+0 & \text{otherwise,}
+\end{cases}
+\label{eq:bias}
+\end{equation}
+where \(b(x)\) is the latest region opened with
+\(\delta(x,x_b)<\rho_m\).
+A deposit in region \(b\) at temperature \(T\) raises its height by
+\begin{equation}
+V_b \leftarrow V_b + w_0\exp\!\Bigl(-\frac{V_b}{(\gamma-1)\,T}\Bigr),
+\qquad w_0 = 0.25,\quad \gamma = 5 .
+\label{eq:deposit}
+\end{equation}
+This is the well-tempered rule applied to regions in place of a continuous
+variable.
+\cite{Barducci_Bussi_Parrinello_2008}
+
+\emph{Tabu.}
+Let \(\mathcal{T}\) hold at most 8 descriptors.
+A proposal that equation~\msref{eq:metropolis} accepts is refused when
+\begin{equation}
+\min_{t\in\mathcal{T}}\ \delta(y,t) \le \rho_m .
+\label{eq:tabu}
+\end{equation}
+While equation~\msref{eq:stuck} holds, \(d(x)\) joins \(\mathcal{T}\) unless a
+member is within \(\rho_m\), and the oldest member leaves when \(\mathcal{T}\)
+is full.
+
+\emph{Symmetrization.}
+Let \(c\) be the centroid, let \(a\) be a unit axis through \(c\), let
+\(m\in\{2,\ldots,6\}\), and let \(R\) turn by \(2\pi/m\) about \(a\).
+For atom \(i\) set \(i_0=i\) and let \(i_{k+1}\) be the atom nearest to
+\(c+R(x_{i_k}-c)\).
+The orbit of \(i\) closes when every such nearest distance is at most
+\(2.5\) and \(i_m=i_0\).
+The projection replaces each member of a closed orbit by
+\begin{equation}
+y_{i_k} = c + R^{k}\,\bar u_i,
+\qquad
+\bar u_i = \frac1m\sum_{l=0}^{m-1} R^{-l}\,(x_{i_l}-c),
+\label{eq:symmetrize}
+\end{equation}
+and leaves an atom whose orbit does not close where it is.
+The move applies this to the trial axis whose atoms have the smallest
+root-mean-square distance to their images.
+\cite{oakley2013}
+
+\emph{Continuous-symmetry projection.}
+Let \(s=\max_i\lVert x_i-c\rVert\) and \(y_i=(x_i-c)/s\).
+Let \(Q\) range over the orthogonal matrices built from the axes of inertia
+and one fixed one-fifth turn, and let \(G\) be one of \(C_i\), \(C_5\), and
+\(D_{5h}\).
+For each \(g\in G\), let \(\pi_g\) be the assignment, within atoms of one
+species, that best matches \(g\,Qy\) to \(Qy\).
+Then
+\begin{equation}
+\hat y_i = \frac1{|G|}\sum_{g\in G} g\,Qy_{\pi_g(i)},
+\qquad
+S(G,Q) = \frac{\sum_i\lVert Qy_i-\hat y_i\rVert^2}{\sum_i\lVert y_i\rVert^2},
+\label{eq:csm}
+\end{equation}
+and the projection returns the \(\hat y\) of lowest \(S\), turned back and
+rescaled by \(s\).
+\(S=0\) is exact symmetry, and the projection draws no random number.
+It runs every ten quenches.
+\cite{oakley2013}
+
+\emph{Lattice.}
+Let \(\ell\) be the median nearest-neighbor length of \(x\).
+The vacant sites \(\mathcal{S}(x)\) are the points at distance \(\ell\) from the
+three atoms of every triangle whose sides are at most \(1.47\,\ell\), kept when
+no atom lies within \(0.85\,\ell\), with near-coincident sites merged.
+Let \(M\) be the atoms with fewer than 12 neighbors within the bond cutoff, and
+let \(\Delta_{is}\) be the unrelaxed energy rise of moving \(i\in M\) to
+\(s\in\mathcal{S}(x)\).
+The move draws one of the offers \((i,s)\) of smallest rise with weight
+\begin{equation}
+w_{is} \propto \exp\!\bigl(-\Delta_{is}/T\bigr),
+\label{eq:lattice-weight}
+\end{equation}
+and the quench decides whether it stays.
+\cite{shaoChengCai2004}
+The crossing growth of equation~\msref{eq:hold} reads the shell of the atom of
+highest coordination, \(O=\{x_j-x_{i_0}: \lVert x_j-x_{i_0}\rVert<1.6\}\), and
+places copies of \(O\) around placed sites, breadth first, dropping a site that
+lies within half a spacing of one already placed.
+
+\section{Units and atom-count gates}
+\label{sec:units}
+The temperature \(0.8\) is the value Wales and Doye used for Lennard-Jones
+basin hopping \cite{wales1997}, and every length and energy above is in the
+reduced units of the Lennard-Jones pair.
+The Morse and gold drivers of Table~\msref{tab:gmin} run
+\texttt{Config::recommended} without rescaling its lengths to the pair
+minimum of their potential.
+No row of Table~\msref{tab:gmin} rescales those lengths to the Morse pair
+minimum; the Morse rows of Table~\msref{tab:ase-morse} run
+\texttt{Config::recommended\_with\_scales} at that length scale.
+For atomic clusters the preset has one atom-count gate: the diameter penalty
+of equation~\msref{eq:penalty} is used only below 98 atoms.
+The revisions with the structure priors on had a second, the growth hold of
+equation~\msref{eq:hold}.
+A rigid-body run has a gate of its own: at 10 molecules or fewer a factor on
+its acceptance temperature starts at 24 and moves between 1 and 24 with the
+share of hops that reach a new minimum, and above 10 that factor stays at 4
+and its orientation step follows the acceptance rate.
+The exact assignment inside the symmetry projections also changes algorithm
+at 98 atoms, and both algorithms return an assignment of the optimal cost.
+No constant was refitted for a size.
+
+\section{Structure priors and templates}
+\label{sec:priors}
+The earlier template-assisted preset carried six switches that use the
+structure of close-packed clusters, all on.
+\texttt{prior\_soap} adds a fivefold proposal in the smooth overlap of atomic
+positions, and it remains in the code.
+\texttt{prior\_reseed} drew a fresh random cluster while the walker stood on
+a structure of icosahedral order, at most once every five hops, closed its
+core orbits, and adopted the quench as the walker.
+\texttt{prior\_growth} regrew the structure on a stall from a lattice order.
+\texttt{prior\_core} quenched the sites of a face-centered cubic lattice, two
+interpenetrating icosahedra, and a Mackay icosahedron for a run whose atoms
+carry species labels, and \texttt{prior\_handover} stopped those cuts once
+they stalled and continued from the best of them.
+\texttt{prior\_motif} grew the best structure on a face-centered cubic,
+pentagonal, or icosahedral lattice when a run had gone half its budget without
+improvement.
+The template-free revision removed the structure templates, the builders of
+face-centered cubic, polyicosahedral, Mackay, and axial-spine cuts behind the
+last five priors; the builders are parameterized by the atom count and a
+nearest-neighbor length and hold no coordinate table for one cluster.
+Section~\msref{sec:knockouts} tests the removal.
+
+\section{Protocol of the CREST comparison}
+\label{sec:si-crest}
+CREST 3.0.2 runs GFN2-xTB through its legacy xtb driver, and this code runs
+it through the xtb engine of rgpot; both arms count energy and gradient
+calls.
+CREST takes no seed, so its dynamics are not paired with those of this code.
+Table~\msref{tab:crest} keeps (H\(_2\)O)\(_8\).
+The anneal octamer rows record no target, tolerance, budget, or stop.
+anneal's rows do not record the CREST target or budget.
+There is no paired test, and the Holm family for CREST is empty.
+The ammonia, carbon, and silicon arms are not rows of the table.
+Each is reported below at the stop recorded for that arm, with no paired test.
+A budget pair is kept only when the budget of this code is at least the
+median calls of the complete CREST runs.
+An aborted CREST run, which made no call, is dropped from its pair.
+\path{paper/jctc/scripts/crest_table.py} writes the table from the rows
+named below.
+
+\emph{Water octamer.}
+On (H\(_2\)O)\(_8\), seeds 2000--2011 are the anneal rows and seeds 17000--17011
+are the CREST rows.
+The anneal octamer rows record no target, tolerance, budget, or stop.
+The CREST driver stops at a budget of 151738 calls.
+The stored total\_calls is the counted calls, capped at that budget.
+Seeds 17000, 17002, and 17006 store 151538, 142740, and 139177.
+anneal's rows do not record the CREST target or budget.
+There is no paired test, and the Holm family for CREST is empty.
+The rows of \path{bench/h2o8-matched}, commit 4a5dd65dc791203ac350e2769739ddb2dab6f83a, record 0 of 12 seeds reaching
+the threshold during the hop phase.
+All 12 hits come in the charged answer polish, with margins
+\(1.1\times 10^{-9}\) to \(1.0\times 10^{-7}\) Eh below the threshold.
+The file \path{bench/octamer-matched/h2o8/REPORT.md} at 42e708289a718d3d916b46e5ae43f26cf0a677c1 is a different record:
+seeds 2008--2011 never started, and the 8 finished seeds sit at one best energy,
+\(-40.681336013361\) Eh, \(1.000\times 10^{-6}\) Eh below the threshold.
+The rows of this code are \path{bench/octamer-matched/h2o8/poi/results.csv}
+and the CREST rows are \path{bench/h2o8-crest-firsthit/rows.csv}.
+\path{bench/h2o8-poi-vs-crest/results.json} is not a paired test.
+
+\emph{Ammonia octamer.}
+The rows of this code are the 12 seeds of
+\path{bench/octamer-matched/nh3x8/results.csv}.
+anneal stops on the ammonia octamer at a fixed charge of 332675 calls,
+the longest of the six CREST runs, and hits 10 of 12 seeds.
+CREST hits 6 of 6 seeds.
+That charge is 331075 search calls and a 1600-call polish.
+Seeds 2000 and 2001 have no run.txt; their stop is the calls\_to\_hit of results.csv.
+On the run.txt files, seeds 2002--2011, the energy before the polish stays above the target.
+The six \texttt{v4} rows of \path{bench/nh3-octamer/results.csv} are CREST.
+CREST stops at the end of its run.
+Those runs are not a paired test.
+The anneal rows of that file are not this report.
+
+\emph{Carbon and silicon clusters.}
+The rows are in \path{bench/covalent-h2h/gfn2/}, at an electronic
+temperature of 3000~K.
+CREST runs \texttt{-{}-gfn2 -T 1 -{}-legacy -notopo -nocross -shake 0
+-tstep 2} from the start after one xtb optimization of it.
+This code runs the general configuration of
+\path{examples/h2h_covalent.rs} at \(10^{5}\) calls and stops at the
+reference.
+CREST stops at the end of its run.
+The arms do not share a stop, and there is no paired test.
+A hit is within \(10^{-3}\)~eV of the lowest minimum any run reached.
+On C\(_{10}\) the target is the lowest energy any run reached.
+On C\(_{10}\) both arms are the rows of \path{seeds.csv}, which name no
+revision.
+On Si\(_{10}\) the rows of this code are those of \path{rows.csv} at
+revision \texttt{f3d6a050}, run again beside the CREST runs, and the row
+that \path{false-hits.csv} names is a miss.
+The CREST rows are those of \path{seeds.csv} and of \path{rows.csv} at
+\texttt{e71e5de9}; on seed 2009 xtb's SCC did not converge on the start, so
+that CREST run made no call and is dropped.
+On C\(_{20}\) both arms are the rows of \path{rows.csv} at
+\texttt{5351f272}.
+
+\emph{Arms that the budget rule removes.}
+The directories are \path{bench/h2o-octamer/},
+\path{bench/nh3-tetramer/}, and \path{bench/nh3-octamer/}.
+The arms at 4000 and at 16000 calls in those directories are not the pairs
+the table keeps.
+Those arms are left out because the budget of this code is below the median
+calls of the complete CREST runs.
+(NH\(_3\))\(_4\) has no other comparison in the table.
+At the calls of each seed's CREST run, \path{bench/h2o-octamer/ladder.csv}
+records two seeds.
+The (H\(_2\)O)\(_{16}\) and (H\(_2\)O)\(_{20}\) records give no CREST call
+count, and the Si\(_{13}\) record has no valid reference.
+
 \section{Statistical methods}
 \label{sec:si-stats}
 Every test below is two-sided.
 \path{scripts/paired_stats.py} implements the paired tests, and the
 generators of the tables call it.
+
+\emph{Holm adjustment.}
+Hit-rate tests against one competitor are one family, and a test enters
+only when its two arms share one stopping rule \cite{holm1979}.
+For a family of \(m\) tests, order the Fisher \(p\) values so that
+\(p_{(1)}\le \cdots\le p_{(m)}\).
+The adjusted value at position \(i\) is
+\(\min\bigl(1,\max_{j\le i}(m-j+1)p_{(j)}\bigr)\).
+A one-member family leaves its \(p\) unchanged.
+A win is an adjusted value below 0.05.
+An unadjusted \(p\) from a test outside that family is not a win.
 
 \emph{Paired outcome table.}
 Two arms run on the same seeds from the same start give a pair of hit flags
@@ -537,6 +897,20 @@ The tables therefore report the hit counts, recorded caps, stop counts, and
 wall medians without a cross-arm Fisher test or interval
 \cite{fisherLogicInductiveInference1935}.
 
+\emph{Fisher exact test.}
+The CREST arms take no seed, so their hits are not paired with those of
+this code.
+With \(h_1\) hits in \(n_1\) runs and \(h_2\) in \(n_2\), the table is
+conditioned on \(h=h_1+h_2\), and the two-sided \(p\) sums the
+hypergeometric probabilities
+\(\binom{n_1}{k}\binom{n_2}{h-k}/\binom{n_1+n_2}{h}\) of every \(k\) whose
+probability is at most that of \(h_1\)
+\cite{fisherLogicInductiveInference1935}.
+Hit-rate tests against one competitor form one Holm family, and only a
+test whose two arms share one stopping rule enters that family.
+A one-member family leaves its \(p\) unchanged.
+A win is a Holm-adjusted value below 0.05.
+
 \emph{Medians and quantiles.}
 Medians, interquartile ranges, and the bootstrap quantiles below are type-7
 sample quantiles \cite{hyndmanSampleQuantiles1996}: for sorted values
@@ -560,7 +934,7 @@ does not answer it, and the reports below are left out for that reason.
 The published GOFEE curves count local optimizations on LJ\(_{75}\), and a
 local optimization is not one combined energy and gradient pass; a later GOFEE run puts a
 spectral-graph and Voronoi filter in front of the sampling step.
-\cite{slavenskyClassifier2024}
+\cite{christiansenAgox2022,slavenskyClassifier2024}
 The same group has used a deliberately incomplete machine-learned
 landscape to propose structures, a universal potential as a Gaussian-process
 prior, fractional existence variables, an on-the-fly potential in a
@@ -656,7 +1030,7 @@ Reference plates: \ref{fig:si-structures} and \ref{fig:si-water}.
 \begin{figure}
 \centering
 \includegraphics[width=\textwidth,height=0.6\textheight,keepaspectratio]{si_structures.pdf}
-\caption{Reference minima of the benchmark.}
+\caption{Reference minima of the benchmark, including Pt\(_{38}\) and Pt\(_{75}\).}
 \label{fig:si-structures}
 \end{figure}
 \begin{figure}

@@ -7,8 +7,8 @@ this code are revision eeec8e2c, an ancestor of develop. The second block is the
 2026-11-20 session at the submitted revision 61fa67cf on gold and Morse. Every row is
 copied unchanged from the record its PROVENANCE file names, and every GMIN row is the
 pinned tarball. The summary uses scripts/gmin_panel/run_panel.py to validate each row
-against its reference and arm-specific ceiling and to derive the paired outcome counts
-and descriptive evaluation and wall summaries. Cross-arm tests are not rendered because
+against its reference and arm-specific ceiling and to derive each arm's
+hit count and its own evaluation and wall summaries. Cross-arm tests are not rendered because
 the arms count different operations.
 
     python3 paper/jctc/scripts/gmin_table.py            # rewrite the block
@@ -135,25 +135,56 @@ def develop_summary() -> tuple[list[dict[str, str]], dict[str, dict[str, object]
 
 
 def heading(text: str) -> str:
-    return f"\\multicolumn{{12}}{{@{{}}l}}{{\\emph{{{text}}}}} \\\\"
+    return f"\\multicolumn{{9}}{{@{{}}l}}{{\\emph{{{text}}}}} \\\\"
 
 
-def printed_lines(lines: list[dict[str, str]], paired: dict[str, dict[str, object]]) -> list[list[str]]:
-    """Rows without cross-arm tests at unlike work budgets."""
-    return [cells[:-4] for cells in PANEL.paired_lines(lines, paired)]
+def arm_lines(lines: list[dict[str, str]], arm: str) -> list[list[str]]:
+    """One arm, so its count is not a cell of the other arm's column."""
+    out = []
+    for line in lines:
+        system = line["system"]
+        out.append(
+            [
+                PANEL.LABELS[system][1],
+                PANEL.show_budget(int(line["budget"]), True),
+                PANEL.arm_label(line, arm, True),
+                f"{line[f'{arm}_hits']}/{line[f'{arm}_n']}",
+                PANEL.show_calls(float(line[f"{arm}_evals_median"])),
+                PANEL.show_calls(float(line[f"{arm}_evals_iqr"])),
+                PANEL.show_s(float(line[f"{arm}_wall_median_s"])),
+                PANEL.show_s(float(line[f"{arm}_pot_median_s"])),
+                PANEL.show_s(float(line[f"{arm}_outside_median_s"])),
+            ]
+        )
+    return out
+
+
+def one_arm(title: str, count: str, lines: list[dict[str, str]], later: list[dict[str, str]], arm: str) -> str:
+    body = [heading("Template-free predecessor")]
+    body += [" & ".join(cells) + " \\\\" for cells in arm_lines(lines, arm)]
+    body += ["\\midrule", heading("Submitted revision")]
+    body += [" & ".join(cells) + " \\\\" for cells in arm_lines(later, arm)]
+    return "\n".join(
+        [
+            "\\begin{tabular}{@{}lrlrrrrrr@{}}",
+            "\\toprule",
+            f"\\multicolumn{{9}}{{@{{}}l}}{{\\emph{{{title}}}}} \\\\",
+            f"Cluster & Ceiling & Arm & Hits & {count} & IQR & Wall & In & Out \\\\",
+            "\\midrule",
+            *body,
+            "\\bottomrule",
+            "\\end{tabular}",
+        ]
+    )
 
 
 def table() -> str:
-    lines, paired = summary()
-    later, later_paired = develop_summary()
-    body = [heading("Template-free predecessor")]
-    body += [" & ".join(cells) + " \\\\" for cells in printed_lines(lines, paired)]
-    body += ["\\midrule", heading("Submitted revision")]
-    body += [" & ".join(cells) + " \\\\" for cells in printed_lines(later, later_paired)]
+    lines, _paired = summary()
+    later, _later_paired = develop_summary()
     return "\n".join(
         [
             "\\begin{table}",
-            "\\caption{Paired outcomes and reported work for this code against GMIN.",
+            "\\caption{Each arm at its own numeric ceiling for this code and GMIN.",
             "The Supporting Information gives the configurations, inputs, revisions, hosts, build",
             "recipe, and row provenance. Both arms start from the same geometry and run in alternating",
             "order on seeds 2000--2011.",
@@ -161,13 +192,11 @@ def table() -> str:
             "on Au\\(_{55}\\).",
             "Every printed Lennard-Jones row runs the Wales-group LJ\\(_{38}\\)",
             "introduction file with no symmetrization keyword.",
-            "Eval. is a combined energy-and-gradient pass for this code and every",
-            "\\texttt{POTENTIAL} entry for GMIN, including \\texttt{GRADT=false}; these counts are",
-            "different operations. The numeric ceiling is applied separately in each arm's unit",
-            "and is not an equal-work budget, so no cross-arm hit, work, or wall test is reported.",
-            "The column Only counts the seeds that arm alone hits, and Both and Neither the seeds",
-            "both arms and neither arm hit.",
-            "Eval. and IQR are the median and interquartile range of the arm's reported count to",
+            "Passes are combined energy-and-gradient evaluations of this code.",
+            "Entries are \\texttt{POTENTIAL} calls of GMIN, including \\texttt{GRADT=false}.",
+            "These counts are different operations. The numeric ceiling is applied separately in each arm's unit and is not an equal-work budget,",
+            "so no cross-arm hit, work, or wall test is reported.",
+            "The count and IQR are the median and interquartile range of that arm's count to",
             "the minimum, with a miss at its full budget.",
             "Wall, In and Out are the median seconds of the run, inside the",
             "potential and outside it.}",
@@ -175,15 +204,22 @@ def table() -> str:
             "\\centering",
             "\\scriptsize",
             "\\setlength{\\tabcolsep}{2pt}",
-            "\\resizebox{\\textwidth}{!}{%",
-            "\\begin{tabular}{@{}lrlrrrrrrrrr@{}}",
-            "\\toprule",
-            "Cluster & Ceiling & Arm & Hits & Only & Both & Neither & Eval. & IQR & Wall & In & Out \\\\",
-            "\\midrule",
-            *body,
-            "\\bottomrule",
-            "\\end{tabular}",
-            "}",
+            "\\setlength{\\arraystretch}{0.88}",
+            one_arm(
+                "This code, energy-and-gradient passes",
+                "Passes",
+                lines,
+                later,
+                "anneal",
+            ),
+            "\\vspace{0.6em}",
+            one_arm(
+                "GMIN, potential entries",
+                "Entries",
+                lines,
+                later,
+                "gmin",
+            ),
             "\\end{table}",
         ]
     )

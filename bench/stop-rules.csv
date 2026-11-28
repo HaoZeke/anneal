@@ -1,0 +1,77 @@
+comparison,arm,stop
+knockout,with,energy-gradient hit-or-budget
+knockout,without,energy-gradient hit-or-budget
+gmin-panel,anneal,energy-gradient hit-or-ceiling
+gmin-panel,gmin,potential-entry hit-or-ceiling
+ase-lj38,anneal,hit-or-budget
+ase-lj38,recommended,hit
+ase-lj38,bh,wall
+ase-lj38,mh,wall
+ase-lj55,anneal,hit
+ase-lj55,recommended,hit
+ase-lj55,bh,hit-or-wall
+ase-lj55,mh,wall
+ase-lj98,anneal,hit-or-budget
+ase-lj98,recommended,hit-or-budget
+ase-lj98,bh,budget
+ase-lj98,mh,wall
+ase-lj104,anneal,budget
+ase-lj104,recommended,hit-or-budget
+ase-lj104,bh,budget
+ase-lj104,mh,wall
+ase-lj150,anneal,budget
+ase-lj150,recommended,hit-or-budget
+ase-lj150,bh,budget
+ase-lj150,mh,wall
+ase-au55,anneal,budget
+ase-au55,recommended,budget
+ase-au55,bh,wall
+ase-au55,mh,wall
+ase-nonlj,for_cluster,not-one-stop
+ase-nonlj,recommended,not-one-stop
+ase-nonlj,bh,wall
+ase-nonlj,mh,wall
+agox-lj98,anneal,hit-or-budget
+agox-lj98,agox,budget
+agox-lj98,documented,budget
+gmin-wall-v4,anneal,hit-or-budget-wall
+gmin-wall-v4,gmin,hit-or-budget-wall
+gmin-wall-v5,anneal,hit-or-budget-wall
+gmin-wall-v5,gmin,hit-or-budget-wall
+gmin-wall-v6,anneal,hit-or-budget-wall
+gmin-wall-v6,gmin,hit-or-budget-wall
+gmin-wall-v7,anneal,hit-or-budget-wall
+gmin-wall-v7,gmin,hit-or-budget-wall
+crest-octamer,anneal,not-recorded
+crest-octamer,crest,driver-budget
+covalent,anneal,energy-gradient hit-or-budget
+covalent,gmin,potential-entry hit-or-ceiling
+covalent,ase,ase-budget
+covalent,crest,end-of-run
+covalent-h2h,first,energy-gradient hit-or-budget
+covalent-h2h,second,energy-gradient hit-or-budget
+sc-builds,anneal,hit
+sc-n12,old,hit
+sc-n12,new,hit
+template-era,c2de652d,energy-gradient hit-or-budget
+template-era,eeec8e2c,energy-gradient hit-or-budget
+paper-0120,before,energy-gradient hit-or-budget
+paper-0120,after,energy-gradient hit-or-budget
+paper-rerun,old,hit
+paper-rerun,new,hit
+template-free2-r7,base,energy-gradient hit-or-budget
+template-free2-r7,child,energy-gradient hit-or-budget
+perf-quench10,off,hit
+perf-quench10,on,hit
+no-motif-soap-gate,off,hit
+no-motif-soap-gate,on,hit
+openconf-h2h,branch,matched-call-count
+openconf-h2h,develop,matched-call-count
+openconf-h2h,openconf,matched-call-count
+b6-timing-gate,A,hit-or-budget
+b6-timing-gate,B,hit-or-budget
+branch-gate,branch,hit-or-budget
+branch-gate,develop,hit-or-budget
+bindings-parity-gate,A,hit-or-budget
+bindings-parity-gate,A',hit-or-budget
+bindings-parity-gate,B,hit-or-budget

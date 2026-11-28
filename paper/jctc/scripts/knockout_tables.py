@@ -304,29 +304,30 @@ def tip4p_summary() -> dict[int, dict]:
 
 def tip4p_table() -> str:
     summary = tip4p_summary()
+    g20 = summary[20]["table"]
     lines = [
         "\\begin{table}",
-        "\\caption{This code against GMIN on rigid TIP4P water clusters, paired by seed.",
+        "\\caption{This code and GMIN on rigid TIP4P water clusters, each at its own numeric ceiling.",
         "This code uses its recommended template-free rigid-water preset.",
         "Seeds 2000--2011, \\(2\\times 10^{6}\\) arm-specific evaluations, both arms from the same start on each",
         "seed, in alternating order.",
-        "GMIN uses its default Lennard-Jones container, which does not hold the",
-        "(H\\(_2\\)O)\\(_{20}\\) reference minimum.",
+        f"GMIN's hit count is {g20[0] + g20[2]} of {sum(g20)} on (H\\(_2\\)O)\\(_{{20}}\\).",
         "The budget of this code counts one call per combined energy and gradient pass, and GMIN's budget counts",
         "every \\texttt{POTENTIAL} entry, including \\texttt{GRADT=false}.",
         "The numeric ceiling is applied separately in each arm's unit and is not an equal-work budget;",
         "no cross-arm hit, work, or wall test is reported.",
-        "(H\\(_2\\)O)\\(_{25}\\) has no Cambridge Cluster Database reference and is not scored; its row gives",
-        "the lowest and the median best energy of each arm in kJ/mol. The Supporting Information gives the",
+        "(H\\(_2\\)O)\\(_{25}\\) has no Cambridge Cluster Database reference and is not scored.",
+        "Its rows give each arm's own lowest and median best energy in kJ/mol.",
+        "The Supporting Information gives the",
         "input, revision,",
         "host, driver, and row record.}",
         "\\label{tab:tip4p-gmin}",
         "\\centering",
         "\\footnotesize",
         "\\setlength{\\tabcolsep}{3pt}",
-        "\\begin{tabular}{@{}lrrrr@{}}",
+        "\\begin{tabular}{@{}llr@{}}",
         "\\toprule",
-        "Cluster & This work & GMIN & Only, this work & Only, GMIN \\\\",
+        "Cluster & Arm & Result \\\\",
         "\\midrule",
     ]
     for size, cell in summary.items():
@@ -334,14 +335,16 @@ def tip4p_table() -> str:
             continue
         both, only_a, only_g, _ = cell["table"]
         n = cell["n"]
-        lines.append(
-            f"(H\\(_2\\)O)\\(_{{{size}}}\\) & {both + only_a}/{n} & {both + only_g}/{n} & {only_a} & {only_g} \\\\")
+        lines.append(f"(H\\(_2\\)O)\\(_{{{size}}}\\) & this work & {both + only_a}/{n} \\\\")
+        lines.append(f" & GMIN & {both + only_g}/{n} \\\\")
     for size, cell in summary.items():
         if size in TIP4P_SIZES:
             continue
         lines.append(
-            f"(H\\(_2\\)O)\\(_{{{size}}}\\) & \\multicolumn{{4}}{{l}}{{this work {energy(cell['low'][0])}, median "
-            f"{energy(cell['best'][0])}; GMIN {energy(cell['low'][1])}, median {energy(cell['best'][1])}}} \\\\")
+            f"(H\\(_2\\)O)\\(_{{{size}}}\\) & this work & lowest {energy(cell['low'][0])}, "
+            f"median {energy(cell['best'][0])} \\\\")
+        lines.append(
+            f" & GMIN & lowest {energy(cell['low'][1])}, median {energy(cell['best'][1])} \\\\")
     lines += ["\\bottomrule", "\\end{tabular}", "\\end{table}"]
     return "\n".join(lines)
 

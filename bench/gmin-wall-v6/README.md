@@ -15,7 +15,7 @@ GMIN is Wales revision `aac1548a8aec13b53ad12a8d6904625081685d2e`, built without
 | LJ104 | anneal | 3/6 | 232.258 | 232.258 | 0.871 | 0.744 | 0.770 | 20.75 | 48.23 |
 | LJ104 | gmin | 2/6 | 202.241 | 202.241 | 0.871 | 0.744 | 0.770 |  |  |
 
-The harness stops at the first hit, so a hit's `wall_s` is the time to solution and a miss is censored at the budget wall. `tts_s` in the CSV is that value. Its type-7 median is therefore the median wall. What the wall median does not say is which arm reaches the target first on the same seed. A miss never reaches it. When both hit, the smaller time wins.
+A run stops at the first hit, so a hit's `wall_s` is the time to solution and a miss is censored at the budget wall. `tts_s` in the CSV is that value. Its type-7 median is therefore the median wall. What the wall median does not say is which arm reaches the target first on the same seed. A miss never reaches it. When both hit, the note records each arm's time.
 
 | Session | Size | Anneal first | GMIN first | Neither |
 | --- | --- | --- | --- | --- |
@@ -26,7 +26,7 @@ The harness stops at the first hit, so a hit's `wall_s` is the time to solution 
 | v6 | LJ98 | 4/6 | 0/6 | 2/6 |
 | v6 | LJ104 | 2/6 | 2/6 | 2/6 |
 
-At LJ98 anneal is first on every seed it hits, and GMIN hits none. At LJ104 each arm is first on two seeds: anneal on 2001 and 2002, GMIN on 2003 and on 2004, where both hit and GMIN's 71 s beats anneal's 150 s. Seeds 2000 and 2005 are misses for both. The same pairing holds in v4 and v5.
+At LJ98 anneal's hit count is the count in the table and GMIN's hit count is 0. At LJ104 each arm is first on two seeds: anneal on 2001 and 2002, GMIN on 2003 and on 2004, where both hit. On 2004 GMIN's time is 71 s and anneal's is 150 s. Seeds 2000 and 2005 are misses for both. The same pairing is in v4 and v5.
 
 GMIN's per-evaluation time, type 7 of `us_per_eval` on the six seeds, drifted up across the three sessions. That is the same binary. The wall ratio moves with it.
 
@@ -36,4 +36,4 @@ GMIN's per-evaluation time, type 7 of `us_per_eval` on the six seeds, drifted up
 | v5 | 42.18 | 47.45 |
 | v6 | 46.46 | 51.28 |
 
-Hit counts match v5. The LJ104 outside-potential median is 48.23 µs, from 53.86 µs in v5. The same-session ratio is 0.871, so LJ104 is still behind GMIN. Anneal's own median wall fell from 251.227 s in v5 to 232.258 s here. GMIN's median wall in this session was 202.241 s, against 186.964 s in v5 and 186.079 s in v4.
+Hit counts match v5. The LJ104 outside-potential median is 48.23 µs, from 53.86 µs in v5. The same-session ratio is 0.871. Both arms stop at the first hit, and a miss stops at the budget wall. Anneal's own median wall fell from 251.227 s in v5 to 232.258 s here. GMIN's median wall in this session was 202.241 s, against 186.964 s in v5 and 186.079 s in v4.
