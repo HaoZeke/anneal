@@ -12,12 +12,19 @@ evaluation, the cell is ``NA``. A scored miss is 151739.
 from __future__ import annotations
 
 import csv
+import importlib.util
 import re
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 LOGS = HERE / "logs"
+_TARGET_TOL = HERE.parents[1] / "scripts" / "target_tol.py"
+_spec = importlib.util.spec_from_file_location("target_tol", _TARGET_TOL)
+_target_tol = importlib.util.module_from_spec(_spec)
+assert _spec.loader is not None
+_spec.loader.exec_module(_target_tol)
+energy_hits = _target_tol.energy_hits
 REFERENCE_EH = -40.681336013150
 TOL_EH = 1e-6
 THRESHOLD_EH = REFERENCE_EH + TOL_EH
@@ -32,6 +39,7 @@ ANNEAL_LINE = re.compile(
     r"^seed (\d+) repeat (\d+) energy_calls (\d+) exit (\d+)$"
 )
 ORDER_TO_REPEAT = {"1": ("anneal", "1"), "2": ("crest", "1"), "3": ("crest", "2"), "4": ("anneal", "2")}
+USER_HOST = re.compile(r"[A-Za-z][\w.+-]*@[A-Za-z0-9][\w.-]*")
 
 
 def read_csv(path: Path) -> list[dict[str, str]]:
@@ -77,7 +85,7 @@ def first_hit_from_events(events: list[dict]) -> str:
         if not isinstance(energies, list) or len(energies) < count:
             return "NA"
         for index, energy in enumerate(energies[:count], start=1):
-            if isinstance(energy, (int, float)) and energy <= THRESHOLD_EH:
+            if isinstance(energy, (int, float)) and energy_hits(float(energy), REFERENCE_EH, TOL_EH):
                 return str(offset + index)
         offset += count
     if offset == 0:
@@ -166,10 +174,25 @@ def assert_rows() -> None:
             if row[field] != want[field]:
                 raise SystemExit(f"row {index} {field} csv {row[field]} log {want[field]}")
     assert_sources(rows)
+    assert_logs_have_no_user_host()
     print(f"log check ok {len(rows)} rows")
 
 
+def assert_logs_have_no_user_host() -> None:
+    for path in sorted(LOGS.rglob("*")):
+        if not path.is_file():
+            continue
+        if USER_HOST.search(path.read_text(errors="replace")):
+            raise SystemExit(f"user@host token in {path.relative_to(HERE)}")
+
+
 def self_check() -> None:
+    local = "usr"
+    probe = "compiled by '" + local + "@" + "host'"
+    if not USER_HOST.search(probe):
+        raise SystemExit("user-host detector")
+    if USER_HOST.search("compiled by 'HOST'"):
+        raise SystemExit("HOST is not a user-host token")
     hit = first_hit_from_events([{"kind": "opt", "n": 2, "energies": [-1.0, THRESHOLD_EH]}])
     if hit != "2":
         raise SystemExit(f"complete series {hit}")
