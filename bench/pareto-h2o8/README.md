@@ -64,12 +64,12 @@ The two tags are not added together.
 For `da5ae9b9-9259-4a28-95e3-53ff0ab39756`, anneal has n=12, wall_s_sum 15841.426931, wall_s_median 1317.0779865, cpu_s_sum 15839.816479, cpu_s_median 1316.914142, and CREST has n=12, wall_s_sum 12295.704538, wall_s_median 1069.591688, cpu_s_sum 12227.130000, cpu_s_median 1064.065000.
 For `vm0`, anneal has n=12, wall_s_sum 15639.847620, wall_s_median 1301.8362105, cpu_s_sum 15638.099226, cpu_s_median 1301.694488, and CREST has n=12, wall_s_sum 11695.050000, wall_s_median 945.870000, cpu_s_sum 11646.220000, cpu_s_median 939.580000.
 
-`total_calls` and `exit_code` for anneal seeds 2000-2005 are `energy_calls` and the process exit from each run's `run.txt`.
-Those files are in `logs/anneal/`.
+`total_calls` for anneal seeds 2000-2005 is `energy_calls` in each file under `logs/anneal/`.
+Those files have no exit field.
 `wall_s` in those files is the in-process search timer: it starts after the engine is loaded and stops when the search returns (`examples/gfn2_mol_h2h.rs`).
 `wall_s` in `rows-abba.csv` is the parent monotonic clock around the whole child process (`run.py` writes `time.txt`, and `abba.py` copies it).
 On these twelve runs the csv clock is longer by 0.019 s to 0.239 s. That gap is process start, engine load, and the short work after the search timer stops.
-`logs/anneal-abba.txt` is those two fields, one line per run.
+`logs/anneal-abba.txt` records `energy_calls` and `exit` for each of those runs, and its `exit` values are the table's `exit_code`.
 Those 12 runs spent 151738 calls and exited 0.
 Seeds 2006-2011 have no ABBA anneal call log in this tree, so those two cells are `NA`.
 Anneal `first_hit_call` is `calls_to_first_hit` in `rows-A.csv` or `rows-B.csv` for that seed, both repeats.
