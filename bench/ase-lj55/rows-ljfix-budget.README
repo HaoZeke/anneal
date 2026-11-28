@@ -1,0 +1,6 @@
+Copyright (c) anneal developers
+
+The shapes lines beside this note are the single-seed records for this
+system. The host identity field was replaced by opaque labels (host-1,
+host-2, and so on) assigned by first appearance, so rows from the same
+host stay grouped. The CPU model string is unchanged.
