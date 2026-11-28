@@ -258,20 +258,30 @@ def decimal_median(values: list[Decimal]) -> Decimal:
     return (ordered[n // 2 - 1] + ordered[n // 2]) / Decimal(2)
 
 
+def _clocks(rows: list[dict[str, str]]) -> dict:
+    walls = [Decimal(row["wall_s"]) for row in rows]
+    cpus = [Decimal(row["cpu_s"]) for row in rows]
+    return {
+        "n": len(rows),
+        "wall_s_sum": format(sum(walls), "f"),
+        "wall_s_median": format(decimal_median(walls), "f"),
+        "cpu_s_sum": format(sum(cpus), "f"),
+        "cpu_s_median": format(decimal_median(cpus), "f"),
+        "core": sorted({row["core"] for row in rows}),
+    }
+
+
 def wall_summary(rows: list[dict[str, str]]) -> dict:
+    """Report wall and cpu inside one host_tag. The two sessions stay separate."""
+    grouped: dict[str, dict[str, list[dict[str, str]]]] = {}
+    for row in rows:
+        grouped.setdefault(row["host_tag"], {}).setdefault(row["arm"], []).append(row)
     summary = {}
-    for arm in ("anneal", "crest"):
-        selected = [row for row in rows if row["arm"] == arm]
-        walls = [Decimal(row["wall_s"]) for row in selected]
-        cpus = [Decimal(row["cpu_s"]) for row in selected]
-        summary[arm] = {
-            "n": len(selected),
-            "wall_s_sum": format(sum(walls), "f"),
-            "wall_s_median": format(decimal_median(walls), "f"),
-            "cpu_s_sum": format(sum(cpus), "f"),
-            "cpu_s_median": format(decimal_median(cpus), "f"),
-            "host_id": sorted({row["host_id"] for row in selected}),
-            "core": sorted({row["core"] for row in selected}),
+    for host in sorted(grouped):
+        summary[host] = {
+            arm: _clocks(grouped[host][arm])
+            for arm in ("anneal", "crest")
+            if arm in grouped[host]
         }
     return summary
 

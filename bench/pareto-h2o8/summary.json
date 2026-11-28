@@ -178,31 +178,49 @@
     }
   },
   "abba_wall": {
-    "anneal": {
-      "n": 12,
-      "wall_s_sum": "15639.847620",
-      "wall_s_median": "1301.8362105",
-      "cpu_s_sum": "15638.099226",
-      "cpu_s_median": "1301.694488",
-      "host_id": [
-        "vm0"
-      ],
-      "core": [
-        "0"
-      ]
+    "da5ae9b9-9259-4a28-95e3-53ff0ab39756": {
+      "anneal": {
+        "n": 12,
+        "wall_s_sum": "15841.426931",
+        "wall_s_median": "1317.0779865",
+        "cpu_s_sum": "15839.816479",
+        "cpu_s_median": "1316.914142",
+        "core": [
+          "0"
+        ]
+      },
+      "crest": {
+        "n": 12,
+        "wall_s_sum": "12295.704538",
+        "wall_s_median": "1069.591688",
+        "cpu_s_sum": "12227.130000",
+        "cpu_s_median": "1064.065000",
+        "core": [
+          "0"
+        ]
+      }
     },
-    "crest": {
-      "n": 12,
-      "wall_s_sum": "11695.050000",
-      "wall_s_median": "945.870000",
-      "cpu_s_sum": "11646.220000",
-      "cpu_s_median": "939.580000",
-      "host_id": [
-        "vm0"
-      ],
-      "core": [
-        "0"
-      ]
+    "vm0": {
+      "anneal": {
+        "n": 12,
+        "wall_s_sum": "15639.847620",
+        "wall_s_median": "1301.8362105",
+        "cpu_s_sum": "15638.099226",
+        "cpu_s_median": "1301.694488",
+        "core": [
+          "0"
+        ]
+      },
+      "crest": {
+        "n": 12,
+        "wall_s_sum": "11695.050000",
+        "wall_s_median": "945.870000",
+        "cpu_s_sum": "11646.220000",
+        "cpu_s_median": "939.580000",
+        "core": [
+          "0"
+        ]
+      }
     }
   },
   "rows_b_vs_poi": {

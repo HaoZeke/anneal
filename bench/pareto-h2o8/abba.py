@@ -134,13 +134,20 @@ def crest_once(binary: Path, crest: Path, xtb: Path, xtb_lib: Path, crest_lib: P
     }
 
 
+# Recorded run origin, not a fresh label. Seeds 2000-2005 share the uuid4
+# written by r2 run.py:174-182. Seeds 2006-2011 share the vm0 label from
+# that session. The seed range only selects which recorded tag to copy.
 TAG_2000 = "da5ae9b9-9259-4a28-95e3-53ff0ab39756"
+TAG_2006 = "vm0"
 
 
 def host_tag(seed: int) -> str:
-    if seed >= 2006:
-        return "vm0"
-    return TAG_2000
+    if 2000 <= seed <= 2005:
+        return TAG_2000
+    if 2006 <= seed <= 2011:
+        assert TAG_2006 == "vm0"
+        return TAG_2006
+    raise SystemExit(f"seed {seed} is outside the recorded sessions")
 
 
 def write_table(rows: list[dict[str, str]], path: Path) -> None:
