@@ -1,0 +1,74 @@
+SEED 2000 start budget 151738
+SEED 2000 calls 151738 wall 1333.640020 best -40.681336013361 hit 1 ctoh 4419
+SEED 2001 start budget 151738
+SEED 2001 calls 151738 wall 1335.674138 best -40.681336013361 hit 1 ctoh 629
+SEED 2002 start budget 151738
+SEED 2002 calls 151738 wall 1307.009735 best -40.681336013361 hit 1 ctoh 4318
+SEED 2003 start budget 151738
+SEED 2003 calls 151738 wall 1304.755279 best -40.681336013361 hit 1 ctoh 9271
+SEED 2004 start budget 151738
+SEED 2004 calls 151738 wall 1301.331022 best -40.681336013361 hit 1 ctoh 3220
+SEED 2005 start budget 151738
+SEED 2005 calls 151738 wall 1299.374645 best -40.681336013361 hit 1 ctoh 5432
+EXIT:0
+ABBA seed 2000 order 1 anneal start
+ABBA seed 2000 order 1 anneal wall 1320.598399 cpu 1320.449114 best -40.681336013361
+ABBA seed 2000 order 2 crest start
+seed 2000 first_hit_call=151739 total_calls=151738 hit=0 best_Eh=-40.681245326212 wall_s=1081.932288 md_steps=42000 wrapper_md=42000 opt_cycles=109738 final_only_at=None exit=1
+ABBA seed 2000 order 2 crest wall 1081.932288 cpu 1075.800000 best -40.681245326212
+ABBA seed 2000 order 3 crest start
+seed 2000 first_hit_call=78948 total_calls=151738 hit=1 best_Eh=-40.681335993764 wall_s=1056.880546 md_steps=42000 wrapper_md=42000 opt_cycles=109738 final_only_at=None exit=1
+ABBA seed 2000 order 3 crest wall 1056.880546 cpu 1052.250000 best -40.681335993764
+ABBA seed 2000 order 4 anneal start
+ABBA seed 2000 order 4 anneal wall 1311.828403 cpu 1311.684656 best -40.681336013361
+ABBA seed 2001 order 1 anneal start
+ABBA seed 2001 order 1 anneal wall 1326.124896 cpu 1325.983456 best -40.681336013361
+ABBA seed 2001 order 2 crest start
+seed 2001 first_hit_call=68357 total_calls=146864 hit=1 best_Eh=-40.681335975777 wall_s=1046.851606 md_steps=42000 wrapper_md=42000 opt_cycles=104864 final_only_at=None exit=0
+ABBA seed 2001 order 2 crest wall 1046.851606 cpu 1042.130000 best -40.681335975777
+ABBA seed 2001 order 3 crest start
+seed 2001 first_hit_call=151739 total_calls=99267 hit=0 best_Eh=-40.681245600450 wall_s=685.323890 md_steps=30000 wrapper_md=30000 opt_cycles=69267 final_only_at=None exit=0
+ABBA seed 2001 order 3 crest wall 685.323890 cpu 682.470000 best -40.681245600450
+ABBA seed 2001 order 4 anneal start
+ABBA seed 2001 order 4 anneal wall 1316.689590 cpu 1316.566827 best -40.681336013361
+ABBA seed 2002 order 1 anneal start
+ABBA seed 2002 order 1 anneal wall 1317.466383 cpu 1317.261457 best -40.681336013361
+ABBA seed 2002 order 2 crest start
+seed 2002 first_hit_call=88928 total_calls=151738 hit=1 best_Eh=-40.681335793971 wall_s=1030.866989 md_steps=54000 wrapper_md=54000 opt_cycles=97738 final_only_at=None exit=1
+ABBA seed 2002 order 2 crest wall 1030.866989 cpu 1025.420000 best -40.681335793971
+ABBA seed 2002 order 3 crest start
+seed 2002 first_hit_call=151739 total_calls=151738 hit=0 best_Eh=-40.681245090038 wall_s=929.218475 md_steps=55000 wrapper_md=55725 opt_cycles=96013 final_only_at=None exit=1
+ABBA seed 2002 order 3 crest wall 929.218475 cpu 918.460000 best -40.681245090038
+ABBA seed 2002 order 4 anneal start
+ABBA seed 2002 order 4 anneal wall 1318.360042 cpu 1318.222545 best -40.681336013361
+ABBA seed 2003 order 1 anneal start
+ABBA seed 2003 order 1 anneal wall 1313.120696 cpu 1313.012804 best -40.681336013361
+ABBA seed 2003 order 2 crest start
+seed 2003 first_hit_call=151739 total_calls=151738 hit=0 best_Eh=-40.681245322720 wall_s=1089.882158 md_steps=53000 wrapper_md=53132 opt_cycles=98606 final_only_at=None exit=1
+ABBA seed 2003 order 2 crest wall 1089.882158 cpu 1082.340000 best -40.681245322720
+ABBA seed 2003 order 3 crest start
+seed 2003 first_hit_call=151739 total_calls=151738 hit=0 best_Eh=-40.681245313893 wall_s=1073.771153 md_steps=54000 wrapper_md=54000 opt_cycles=97738 final_only_at=None exit=1
+ABBA seed 2003 order 3 crest wall 1073.771153 cpu 1068.940000 best -40.681245313893
+ABBA seed 2003 order 4 anneal start
+ABBA seed 2003 order 4 anneal wall 1322.621983 cpu 1322.497454 best -40.681336013361
+ABBA seed 2004 order 1 anneal start
+ABBA seed 2004 order 1 anneal wall 1350.922784 cpu 1350.805787 best -40.681336013361
+ABBA seed 2004 order 2 crest start
+seed 2004 first_hit_call=151739 total_calls=151738 hit=0 best_Eh=-40.681245436107 wall_s=1073.825836 md_steps=40500 wrapper_md=40884 opt_cycles=110854 final_only_at=None exit=1
+ABBA seed 2004 order 2 crest wall 1073.825836 cpu 1067.250000 best -40.681245436107
+ABBA seed 2004 order 3 crest start
+seed 2004 first_hit_call=120583 total_calls=151738 hit=1 best_Eh=-40.681335119724 wall_s=1087.968221 md_steps=50000 wrapper_md=50000 opt_cycles=101738 final_only_at=None exit=1
+ABBA seed 2004 order 3 crest wall 1087.968221 cpu 1083.940000 best -40.681335119724
+ABBA seed 2004 order 4 anneal start
+ABBA seed 2004 order 4 anneal wall 1316.021761 cpu 1315.892424 best -40.681336013361
+ABBA seed 2005 order 1 anneal start
+ABBA seed 2005 order 1 anneal wall 1312.320394 cpu 1312.207708 best -40.681336013361
+ABBA seed 2005 order 2 crest start
+seed 2005 first_hit_call=137081 total_calls=151738 hit=1 best_Eh=-40.681335948383 wall_s=1069.480569 md_steps=38500 wrapper_md=38801 opt_cycles=112937 final_only_at=None exit=1
+ABBA seed 2005 order 2 crest wall 1069.480569 cpu 1062.660000 best -40.681335948383
+ABBA seed 2005 order 3 crest start
+seed 2005 first_hit_call=127083 total_calls=151738 hit=1 best_Eh=-40.681335316840 wall_s=1069.702807 md_steps=50000 wrapper_md=50000 opt_cycles=101738 final_only_at=None exit=1
+ABBA seed 2005 order 3 crest wall 1069.702807 cpu 1065.470000 best -40.681335316840
+ABBA seed 2005 order 4 anneal start
+ABBA seed 2005 order 4 anneal wall 1315.351600 cpu 1315.232247 best -40.681336013361
+EXIT:0

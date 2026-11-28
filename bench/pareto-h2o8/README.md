@@ -49,17 +49,46 @@ The host label in `rows-B.csv` column `host_id` is `vm0`.
 
 ## ABBA
 
-For each seed 2006-2011 the order is anneal, CREST, CREST, anneal.
-The 24 rows in `rows-abba.csv` ran serially on one VM on core 0.
-The host column is `vm0`.
-Anneal wall_s sum 15639.847620, median 1301.8362105.
-CREST wall_s sum 11695.050000, median 945.870000.
+`rows-abba.csv` covers seeds 2000-2011.
+Each seed is anneal, CREST, CREST, anneal, and each arm has two repeats.
+Seeds 2000-2005 keep the wall time, cpu time, and final energy from this kit.
+Seeds 2006-2011 keep those three fields from the rows already on this branch.
+Seeds 2000-2005 use `host_tag` `da5ae9b9-9259-4a28-95e3-53ff0ab39756`.
+Seeds 2006-2011 keep the branch label `vm0`.
+Those blocks are different VMs and different sessions, so wall times across the two blocks are not directly comparable.
+CREST `wall_s` for 2006-2011 is `/usr/bin/time` elapsed wall clock at 0.01 s resolution (`crest_run.py` reads `Elapsed (wall clock)`).
+CREST `wall_s` for 2000-2005 is a monotonic-clock reading.
+
+`total_calls` and `exit_code` for anneal seeds 2000-2005 are `energy_calls` and the process exit from each run's `run.txt`.
+Those files are in `logs/anneal/`.
+`logs/anneal-abba.txt` is those two fields, one line per run.
+Those 12 runs spent 151738 calls and exited 0.
+Seeds 2006-2011 have no ABBA anneal call log in this tree, so those two cells are `NA`.
+Anneal `first_hit_call` is `calls_to_first_hit` in `rows-A.csv` or `rows-B.csv` for that seed, both repeats.
+That column is the one from `f65da7d4`.
+It is not the `ctoh` field on the campaign `SEED` lines.
+
+CREST `total_calls` and `exit_code` for seeds 2000-2005 are the detail lines in `logs/campaign.txt`.
+Seed 2001 left before the budget: repeat 1 finished at 146864 calls with exit 0, and repeat 2 finished at 99267 calls with exit 0.
+Seeds 2006-2011 have no CREST log here, so `total_calls`, `first_hit_call`, and `exit_code` are `NA`.
+CREST `first_hit_call` is `NA` on every row, including 2000-2005.
+`logs/crest/*.txt` is the CREST stdout, and it does not list an energy for each xtb evaluation.
+The wrapper event log stores optimization-cycle energies and one MD-block minimum, not an energy for every MD step, so that file is not a call index either.
+The first evaluation at or below `-40.681336013150 + 1e-6` Eh is therefore not taken from those logs.
+A scored miss would be 151739. These logs cannot score it.
+
+A hit in this table is `best_Eh` at or below `-40.681336013150 + 1e-6` Eh.
+Across 12 seeds and both repeats, 24 rows per arm: anneal has 24 hits, 0 misses, and 0 early exits in the 12 logged runs.
+CREST has 10 hits and 14 misses.
+Early exits, meaning `exit_code` 0 and `total_calls` below 151738, are the two CREST seed 2001 rows above.
+The other CREST rows with a log reached 151738 calls.
 
 ## CREST geometry
 
 `crest_run.py` compares seed 17000's `total_calls` with `RECORDED_17000` 151538, the value in `bench/h2o8-poi-vs-crest/inputs.csv`.
 An optimization cycle at or below the threshold with no optimized geometry is not a hit. The event records `geometry_missing` when such a cycle was skipped.
-No committed row was scored by that function. `inputs.csv` records source commits `42e708289` and `7ad8eab67`. `rows-abba.csv` has no call column.
+No committed row was scored by that function. `inputs.csv` records source commits `42e708289` and `7ad8eab67`.
+The ABBA call columns are the ones in the ABBA section.
 
 ## Methods
 

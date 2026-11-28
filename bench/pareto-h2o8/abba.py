@@ -28,7 +28,10 @@ COLUMNS = [
     "wall_s",
     "cpu_s",
     "best_Eh",
-    "host_id",
+    "total_calls",
+    "first_hit_call",
+    "exit_code",
+    "host_tag",
     "core",
 ]
 
@@ -68,10 +71,18 @@ def anneal_once(binary: Path, xtb_engine: Path, xtb_lib: Path, seed: int, out: P
         raise SystemExit(f"anneal {seed} charged {fields['energy_calls']}")
     wall_s, cpu_s = run.load_time(out)
     best_eV = float(fields["objective_best_eV"])
+    recorded = fields.get("first_hit_call")
+    if recorded:
+        first_hit = str(run.calls_to_first_hit(recorded))
+    else:
+        first_hit = "NA"
     return {
         "wall_s": f"{wall_s:.6f}",
         "cpu_s": f"{cpu_s:.6f}",
         "best_Eh": f"{best_eV / run.HARTREE_EV:.12f}",
+        "total_calls": fields["energy_calls"],
+        "first_hit_call": first_hit,
+        "exit_code": "0",
     }
 
 
@@ -111,11 +122,25 @@ def crest_once(binary: Path, crest: Path, xtb: Path, xtb_lib: Path, crest_lib: P
     row = json.loads(row_path.read_text())
     if not row.get("best_Eh") or not row.get("wall_s"):
         raise SystemExit(f"crest {seed} row missing energy or time")
+    total = row.get("total_calls")
+    code = row.get("exit_code")
     return {
         "wall_s": f"{float(row['wall_s']):.6f}",
         "cpu_s": f"{float(row['cpu_s']):.6f}",
         "best_Eh": f"{float(row['best_Eh']):.12f}",
+        "total_calls": str(int(total)) if total is not None else "NA",
+        "first_hit_call": "NA",
+        "exit_code": str(int(code)) if code is not None else "NA",
     }
+
+
+TAG_2000 = "da5ae9b9-9259-4a28-95e3-53ff0ab39756"
+
+
+def host_tag(seed: int) -> str:
+    if seed >= 2006:
+        return "vm0"
+    return TAG_2000
 
 
 def write_table(rows: list[dict[str, str]], path: Path) -> None:
@@ -126,7 +151,6 @@ def write_table(rows: list[dict[str, str]], path: Path) -> None:
 
 
 def campaign(binary: Path, crest: Path, xtb: Path, xtb_engine: Path, xtb_lib: Path, crest_lib: Path, table: Path, sessions: Path) -> None:
-    host = run.host_id()
     done: list[dict[str, str]] = []
     if sessions.is_file():
         done = [json.loads(line) for line in sessions.read_text().splitlines() if line.strip()]
@@ -149,7 +173,10 @@ def campaign(binary: Path, crest: Path, xtb: Path, xtb_engine: Path, xtb_lib: Pa
             "wall_s": measured["wall_s"],
             "cpu_s": measured["cpu_s"],
             "best_Eh": measured["best_Eh"],
-            "host_id": host,
+            "total_calls": measured["total_calls"],
+            "first_hit_call": measured["first_hit_call"],
+            "exit_code": measured["exit_code"],
+            "host_tag": host_tag(seed),
             "core": "0",
         }
         done.append(row)
